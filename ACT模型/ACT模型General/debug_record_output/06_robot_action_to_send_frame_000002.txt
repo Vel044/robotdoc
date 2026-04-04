@@ -1,0 +1,10 @@
+=== 06_robot_action_to_send @ frame 2 ===
+type: <class 'dict'>
+
+dict content:
+  shoulder_pan.pos: float = -8.146505355834961
+  shoulder_lift.pos: float = -84.05831146240234
+  elbow_flex.pos: float = 64.12652587890625
+  wrist_flex.pos: float = 25.958829879760742
+  wrist_roll.pos: float = -1.5628361701965332
+  gripper.pos: float = 49.1089973449707

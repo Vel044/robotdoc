@@ -1,0 +1,337 @@
+<!DOCTYPE html><html><head>
+      <title>ACT模型原理</title>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      
+      <link rel="stylesheet" href="file:////Users/vel/.vscode/extensions/shd101wyy.markdown-preview-enhanced-0.8.20/crossnote/dependencies/katex/katex.min.css">
+      
+      
+      
+      
+      
+      <style>
+      code[class*=language-],pre[class*=language-]{color:#333;background:0 0;font-family:Consolas,"Liberation Mono",Menlo,Courier,monospace;text-align:left;white-space:pre;word-spacing:normal;word-break:normal;word-wrap:normal;line-height:1.4;-moz-tab-size:8;-o-tab-size:8;tab-size:8;-webkit-hyphens:none;-moz-hyphens:none;-ms-hyphens:none;hyphens:none}pre[class*=language-]{padding:.8em;overflow:auto;border-radius:3px;background:#f5f5f5}:not(pre)>code[class*=language-]{padding:.1em;border-radius:.3em;white-space:normal;background:#f5f5f5}.token.blockquote,.token.comment{color:#969896}.token.cdata{color:#183691}.token.doctype,.token.macro.property,.token.punctuation,.token.variable{color:#333}.token.builtin,.token.important,.token.keyword,.token.operator,.token.rule{color:#a71d5d}.token.attr-value,.token.regex,.token.string,.token.url{color:#183691}.token.atrule,.token.boolean,.token.code,.token.command,.token.constant,.token.entity,.token.number,.token.property,.token.symbol{color:#0086b3}.token.prolog,.token.selector,.token.tag{color:#63a35c}.token.attr-name,.token.class,.token.class-name,.token.function,.token.id,.token.namespace,.token.pseudo-class,.token.pseudo-element,.token.url-reference .token.variable{color:#795da3}.token.entity{cursor:help}.token.title,.token.title .token.punctuation{font-weight:700;color:#1d3e81}.token.list{color:#ed6a43}.token.inserted{background-color:#eaffea;color:#55a532}.token.deleted{background-color:#ffecec;color:#bd2c00}.token.bold{font-weight:700}.token.italic{font-style:italic}.language-json .token.property{color:#183691}.language-markup .token.tag .token.punctuation{color:#333}.language-css .token.function,code.language-css{color:#0086b3}.language-yaml .token.atrule{color:#63a35c}code.language-yaml{color:#183691}.language-ruby .token.function{color:#333}.language-markdown .token.url{color:#795da3}.language-makefile .token.symbol{color:#795da3}.language-makefile .token.variable{color:#183691}.language-makefile .token.builtin{color:#0086b3}.language-bash .token.keyword{color:#0086b3}pre[data-line]{position:relative;padding:1em 0 1em 3em}pre[data-line] .line-highlight-wrapper{position:absolute;top:0;left:0;background-color:transparent;display:block;width:100%}pre[data-line] .line-highlight{position:absolute;left:0;right:0;padding:inherit 0;margin-top:1em;background:hsla(24,20%,50%,.08);background:linear-gradient(to right,hsla(24,20%,50%,.1) 70%,hsla(24,20%,50%,0));pointer-events:none;line-height:inherit;white-space:pre}pre[data-line] .line-highlight:before,pre[data-line] .line-highlight[data-end]:after{content:attr(data-start);position:absolute;top:.4em;left:.6em;min-width:1em;padding:0 .5em;background-color:hsla(24,20%,50%,.4);color:#f4f1ef;font:bold 65%/1.5 sans-serif;text-align:center;vertical-align:.3em;border-radius:999px;text-shadow:none;box-shadow:0 1px #fff}pre[data-line] .line-highlight[data-end]:after{content:attr(data-end);top:auto;bottom:.4em}html body{font-family:'Helvetica Neue',Helvetica,'Segoe UI',Arial,freesans,sans-serif;font-size:16px;line-height:1.6;color:#333;background-color:#fff;overflow:initial;box-sizing:border-box;word-wrap:break-word}html body>:first-child{margin-top:0}html body h1,html body h2,html body h3,html body h4,html body h5,html body h6{line-height:1.2;margin-top:1em;margin-bottom:16px;color:#000}html body h1{font-size:2.25em;font-weight:300;padding-bottom:.3em}html body h2{font-size:1.75em;font-weight:400;padding-bottom:.3em}html body h3{font-size:1.5em;font-weight:500}html body h4{font-size:1.25em;font-weight:600}html body h5{font-size:1.1em;font-weight:600}html body h6{font-size:1em;font-weight:600}html body h1,html body h2,html body h3,html body h4,html body h5{font-weight:600}html body h5{font-size:1em}html body h6{color:#5c5c5c}html body strong{color:#000}html body del{color:#5c5c5c}html body a:not([href]){color:inherit;text-decoration:none}html body a{color:#08c;text-decoration:none}html body a:hover{color:#00a3f5;text-decoration:none}html body img{max-width:100%}html body>p{margin-top:0;margin-bottom:16px;word-wrap:break-word}html body>ol,html body>ul{margin-bottom:16px}html body ol,html body ul{padding-left:2em}html body ol.no-list,html body ul.no-list{padding:0;list-style-type:none}html body ol ol,html body ol ul,html body ul ol,html body ul ul{margin-top:0;margin-bottom:0}html body li{margin-bottom:0}html body li.task-list-item{list-style:none}html body li>p{margin-top:0;margin-bottom:0}html body .task-list-item-checkbox{margin:0 .2em .25em -1.8em;vertical-align:middle}html body .task-list-item-checkbox:hover{cursor:pointer}html body blockquote{margin:16px 0;font-size:inherit;padding:0 15px;color:#5c5c5c;background-color:#f0f0f0;border-left:4px solid #d6d6d6}html body blockquote>:first-child{margin-top:0}html body blockquote>:last-child{margin-bottom:0}html body hr{height:4px;margin:32px 0;background-color:#d6d6d6;border:0 none}html body table{margin:10px 0 15px 0;border-collapse:collapse;border-spacing:0;display:block;width:100%;overflow:auto;word-break:normal;word-break:keep-all}html body table th{font-weight:700;color:#000}html body table td,html body table th{border:1px solid #d6d6d6;padding:6px 13px}html body dl{padding:0}html body dl dt{padding:0;margin-top:16px;font-size:1em;font-style:italic;font-weight:700}html body dl dd{padding:0 16px;margin-bottom:16px}html body code{font-family:Menlo,Monaco,Consolas,'Courier New',monospace;font-size:.85em;color:#000;background-color:#f0f0f0;border-radius:3px;padding:.2em 0}html body code::after,html body code::before{letter-spacing:-.2em;content:'\00a0'}html body pre>code{padding:0;margin:0;word-break:normal;white-space:pre;background:0 0;border:0}html body .highlight{margin-bottom:16px}html body .highlight pre,html body pre{padding:1em;overflow:auto;line-height:1.45;border:#d6d6d6;border-radius:3px}html body .highlight pre{margin-bottom:0;word-break:normal}html body pre code,html body pre tt{display:inline;max-width:initial;padding:0;margin:0;overflow:initial;line-height:inherit;word-wrap:normal;background-color:transparent;border:0}html body pre code:after,html body pre code:before,html body pre tt:after,html body pre tt:before{content:normal}html body blockquote,html body dl,html body ol,html body p,html body pre,html body ul{margin-top:0;margin-bottom:16px}html body kbd{color:#000;border:1px solid #d6d6d6;border-bottom:2px solid #c7c7c7;padding:2px 4px;background-color:#f0f0f0;border-radius:3px}@media print{html body{background-color:#fff}html body h1,html body h2,html body h3,html body h4,html body h5,html body h6{color:#000;page-break-after:avoid}html body blockquote{color:#5c5c5c}html body pre{page-break-inside:avoid}html body table{display:table}html body img{display:block;max-width:100%;max-height:100%}html body code,html body pre{word-wrap:break-word;white-space:pre}}.markdown-preview{width:100%;height:100%;box-sizing:border-box}.markdown-preview ul{list-style:disc}.markdown-preview ul ul{list-style:circle}.markdown-preview ul ul ul{list-style:square}.markdown-preview ol{list-style:decimal}.markdown-preview ol ol,.markdown-preview ul ol{list-style-type:lower-roman}.markdown-preview ol ol ol,.markdown-preview ol ul ol,.markdown-preview ul ol ol,.markdown-preview ul ul ol{list-style-type:lower-alpha}.markdown-preview .newpage,.markdown-preview .pagebreak{page-break-before:always}.markdown-preview pre.line-numbers{position:relative;padding-left:3.8em;counter-reset:linenumber}.markdown-preview pre.line-numbers>code{position:relative}.markdown-preview pre.line-numbers .line-numbers-rows{position:absolute;pointer-events:none;top:1em;font-size:100%;left:0;width:3em;letter-spacing:-1px;border-right:1px solid #999;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none}.markdown-preview pre.line-numbers .line-numbers-rows>span{pointer-events:none;display:block;counter-increment:linenumber}.markdown-preview pre.line-numbers .line-numbers-rows>span:before{content:counter(linenumber);color:#999;display:block;padding-right:.8em;text-align:right}.markdown-preview .mathjax-exps .MathJax_Display{text-align:center!important}.markdown-preview:not([data-for=preview]) .code-chunk .code-chunk-btn-group{display:none}.markdown-preview:not([data-for=preview]) .code-chunk .status{display:none}.markdown-preview:not([data-for=preview]) .code-chunk .output-div{margin-bottom:16px}.markdown-preview .md-toc{padding:0}.markdown-preview .md-toc .md-toc-link-wrapper .md-toc-link{display:inline;padding:.25rem 0}.markdown-preview .md-toc .md-toc-link-wrapper .md-toc-link div,.markdown-preview .md-toc .md-toc-link-wrapper .md-toc-link p{display:inline}.markdown-preview .md-toc .md-toc-link-wrapper.highlighted .md-toc-link{font-weight:800}.scrollbar-style::-webkit-scrollbar{width:8px}.scrollbar-style::-webkit-scrollbar-track{border-radius:10px;background-color:transparent}.scrollbar-style::-webkit-scrollbar-thumb{border-radius:5px;background-color:rgba(150,150,150,.66);border:4px solid rgba(150,150,150,.66);background-clip:content-box}html body[for=html-export]:not([data-presentation-mode]){position:relative;width:100%;height:100%;top:0;left:0;margin:0;padding:0;overflow:auto}html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{position:relative;top:0;min-height:100vh}@media screen and (min-width:914px){html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{padding:2em calc(50% - 457px + 2em)}}@media screen and (max-width:914px){html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{padding:2em}}@media screen and (max-width:450px){html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{font-size:14px!important;padding:1em}}@media print{html body[for=html-export]:not([data-presentation-mode]) #sidebar-toc-btn{display:none}}html body[for=html-export]:not([data-presentation-mode]) #sidebar-toc-btn{position:fixed;bottom:8px;left:8px;font-size:28px;cursor:pointer;color:inherit;z-index:99;width:32px;text-align:center;opacity:.4}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] #sidebar-toc-btn{opacity:1}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc{position:fixed;top:0;left:0;width:300px;height:100%;padding:32px 0 48px 0;font-size:14px;box-shadow:0 0 4px rgba(150,150,150,.33);box-sizing:border-box;overflow:auto;background-color:inherit}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc::-webkit-scrollbar{width:8px}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc::-webkit-scrollbar-track{border-radius:10px;background-color:transparent}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc::-webkit-scrollbar-thumb{border-radius:5px;background-color:rgba(150,150,150,.66);border:4px solid rgba(150,150,150,.66);background-clip:content-box}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc a{text-decoration:none}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc{padding:0 16px}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper .md-toc-link{display:inline;padding:.25rem 0}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper .md-toc-link div,html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper .md-toc-link p{display:inline}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper.highlighted .md-toc-link{font-weight:800}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .markdown-preview{left:300px;width:calc(100% - 300px);padding:2em calc(50% - 457px - 300px / 2);margin:0;box-sizing:border-box}@media screen and (max-width:1274px){html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .markdown-preview{padding:2em}}@media screen and (max-width:450px){html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .markdown-preview{width:100%}}html body[for=html-export]:not([data-presentation-mode]):not([html-show-sidebar-toc]) .markdown-preview{left:50%;transform:translateX(-50%)}html body[for=html-export]:not([data-presentation-mode]):not([html-show-sidebar-toc]) .md-sidebar-toc{display:none}
+/* Please visit the URL below for more information: */
+/*   https://shd101wyy.github.io/markdown-preview-enhanced/#/customize-css */
+
+      </style>
+      <!-- The content below will be included at the end of the <head> element. --><script type="text/javascript">
+  document.addEventListener("DOMContentLoaded", function () {
+    // your code here
+  });
+</script></head><body for="html-export">
+    
+    
+      <div class="crossnote markdown-preview  ">
+      
+<h2 id="1-act-算法--模型逻辑">1. ACT ：算法 / 模型逻辑 </h2>
+<p>ACT模型 | 斯坦福ALOHA团队 | Action Chunking Transformer<br>
+致力于<strong>低价值</strong>硬件发挥出<strong>高精度</strong>操作的性能</p>
+<p>不管用什么模型都是经历下面的循环</p>
+<p>下面省略了一些细节代码，只保留核心部分</p>
+<pre data-role="codeBlock" data-info="Python" class="language-python Python"><code><span class="token decorator annotation punctuation">@safe_stop_image_writer</span>
+<span class="token keyword keyword-def">def</span> <span class="token function">record_loop</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">:</span>
+    <span class="token triple-quoted-string string">"""
+    核心控制循环：负责观测获取、动作推理、指令发送及数据保存。
+    该循环体现了：观测 -&gt; 推理 -&gt; 动作 -&gt; 执行 -&gt; 等待 的完整链路。
+    """</span>
+    <span class="token comment"># 检查数据集帧率与请求帧率是否匹配，确保控制频率一致性</span>
+    <span class="token keyword keyword-if">if</span> dataset <span class="token keyword keyword-is">is</span> <span class="token keyword keyword-not">not</span> <span class="token boolean">None</span> <span class="token keyword keyword-and">and</span> dataset<span class="token punctuation">.</span>fps <span class="token operator">!=</span> fps<span class="token punctuation">:</span>
+        <span class="token keyword keyword-raise">raise</span> ValueError<span class="token punctuation">(</span><span class="token string-interpolation"><span class="token string">f"The dataset fps should be equal to requested fps (</span><span class="token interpolation"><span class="token punctuation">{</span>dataset<span class="token punctuation">.</span>fps<span class="token punctuation">}</span></span><span class="token string"> != </span><span class="token interpolation"><span class="token punctuation">{</span>fps<span class="token punctuation">}</span></span><span class="token string">)."</span></span><span class="token punctuation">)</span>
+
+    <span class="token comment"># 如果提供了策略模型（如 ACT），在开始前重置其内部状态（如 Transformer 的缓存）</span>
+    <span class="token keyword keyword-if">if</span> policy <span class="token keyword keyword-is">is</span> <span class="token keyword keyword-not">not</span> <span class="token boolean">None</span><span class="token punctuation">:</span>
+        policy<span class="token punctuation">.</span>reset<span class="token punctuation">(</span><span class="token punctuation">)</span>
+
+    timestamp <span class="token operator">=</span> <span class="token number">0</span>
+    start_episode_t <span class="token operator">=</span> time<span class="token punctuation">.</span>perf_counter<span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token comment"># 记录回合开始的绝对时间</span>
+
+    <span class="token comment"># 主循环：在指定的回合时间内持续运行</span>
+    <span class="token keyword keyword-while">while</span> timestamp <span class="token operator">&lt;</span> control_time_s<span class="token punctuation">:</span>
+        start_loop_t <span class="token operator">=</span> time<span class="token punctuation">.</span>perf_counter<span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token comment"># 记录本帧循环的开始时间</span>
+
+        <span class="token comment"># 检查是否通过键盘等事件触发了提前退出</span>
+        <span class="token keyword keyword-if">if</span> events<span class="token punctuation">[</span><span class="token string">"exit_early"</span><span class="token punctuation">]</span><span class="token punctuation">:</span>
+            events<span class="token punctuation">[</span><span class="token string">"exit_early"</span><span class="token punctuation">]</span> <span class="token operator">=</span> <span class="token boolean">False</span>
+            <span class="token keyword keyword-break">break</span>
+
+        <span class="token comment"># --- ① 获取观测 (Observation) ---</span>
+        <span class="token comment"># 链路：机器人硬件 -&gt; 内核驱动缓冲区 -&gt; Python dict</span>
+        observation <span class="token operator">=</span> robot<span class="token punctuation">.</span>get_observation<span class="token punctuation">(</span><span class="token punctuation">)</span>
+
+        <span class="token comment"># 如果需要保存数据或执行策略，将原始观测转换为数据集定义的特征格式</span>
+        <span class="token keyword keyword-if">if</span> policy <span class="token keyword keyword-is">is</span> <span class="token keyword keyword-not">not</span> <span class="token boolean">None</span> <span class="token keyword keyword-or">or</span> dataset <span class="token keyword keyword-is">is</span> <span class="token keyword keyword-not">not</span> <span class="token boolean">None</span><span class="token punctuation">:</span>
+            observation_frame <span class="token operator">=</span> build_dataset_frame<span class="token punctuation">(</span>dataset<span class="token punctuation">.</span>features<span class="token punctuation">,</span> observation<span class="token punctuation">,</span> prefix<span class="token operator">=</span><span class="token string">"observation"</span><span class="token punctuation">)</span>
+
+        <span class="token comment"># --- ② 推理/获取动作 (Action Generation) ---</span>
+        <span class="token keyword keyword-if">if</span> policy <span class="token keyword keyword-is">is</span> <span class="token keyword keyword-not">not</span> <span class="token boolean">None</span><span class="token punctuation">:</span>
+            <span class="token comment"># 自主模式：调用神经网络模型（如 ACT）预测动作值</span>
+            action_values <span class="token operator">=</span> predict_action<span class="token punctuation">(</span>
+                observation_frame<span class="token punctuation">,</span>
+                policy<span class="token punctuation">,</span>
+                get_safe_torch_device<span class="token punctuation">(</span>policy<span class="token punctuation">.</span>config<span class="token punctuation">.</span>device<span class="token punctuation">)</span><span class="token punctuation">,</span>
+                policy<span class="token punctuation">.</span>config<span class="token punctuation">.</span>use_amp<span class="token punctuation">,</span>
+                task<span class="token operator">=</span>single_task<span class="token punctuation">,</span>
+                robot_type<span class="token operator">=</span>robot<span class="token punctuation">.</span>robot_type<span class="token punctuation">,</span>
+            <span class="token punctuation">)</span>
+            <span class="token comment"># 将张量结果映射回机器人的动作特征键值对</span>
+            action <span class="token operator">=</span> <span class="token punctuation">{</span>key<span class="token punctuation">:</span> action_values<span class="token punctuation">[</span>i<span class="token punctuation">]</span><span class="token punctuation">.</span>item<span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token keyword keyword-for">for</span> i<span class="token punctuation">,</span> key <span class="token keyword keyword-in">in</span> <span class="token builtin">enumerate</span><span class="token punctuation">(</span>robot<span class="token punctuation">.</span>action_features<span class="token punctuation">)</span><span class="token punctuation">}</span>
+   
+        <span class="token comment"># --- ③ 动作发送 (Send Action) ---</span>
+        <span class="token comment"># 链路：Python -&gt; os.write -&gt; TTY/ACM -&gt; USB Controller (DMA) -&gt; 机器人控制器</span>
+        <span class="token comment"># 注意：此处 send_action 在数据提交给内核/硬件队列后即返回，与物理传输并行</span>
+        sent_action <span class="token operator">=</span> robot<span class="token punctuation">.</span>send_action<span class="token punctuation">(</span>action<span class="token punctuation">)</span>
+
+        <span class="token comment"># --- 数据记录 (Logging) ---</span>
+        <span class="token keyword keyword-if">if</span> dataset <span class="token keyword keyword-is">is</span> <span class="token keyword keyword-not">not</span> <span class="token boolean">None</span><span class="token punctuation">:</span>
+            <span class="token comment"># 构建动作帧并将其与观测帧合并，存入数据集缓冲区</span>
+            action_frame <span class="token operator">=</span> build_dataset_frame<span class="token punctuation">(</span>dataset<span class="token punctuation">.</span>features<span class="token punctuation">,</span> sent_action<span class="token punctuation">,</span> prefix<span class="token operator">=</span><span class="token string">"action"</span><span class="token punctuation">)</span>
+            frame <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token operator">**</span>observation_frame<span class="token punctuation">,</span> <span class="token operator">**</span>action_frame<span class="token punctuation">}</span>
+            dataset<span class="token punctuation">.</span>add_frame<span class="token punctuation">(</span>frame<span class="token punctuation">,</span> task<span class="token operator">=</span>single_task<span class="token punctuation">)</span>
+        <span class="token comment"># --- ④ 频率对齐 (Busy Wait) ---</span>
+        <span class="token comment"># 计算本轮逻辑消耗的时间</span>
+        dt_s <span class="token operator">=</span> time<span class="token punctuation">.</span>perf_counter<span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token operator">-</span> start_loop_t
+        <span class="token comment"># 忙等：等待直到填满 1/fps 的时长，确保控制频率稳定，--dataset.fps int：Limit the frames per second. (default: 30)，默认 FPS 是 30。</span>
+        <span class="token comment"># 此时硬件正在通过 DMA 并行发送动作包</span>
+        busy_wait<span class="token punctuation">(</span><span class="token number">1</span> <span class="token operator">/</span> fps <span class="token operator">-</span> dt_s<span class="token punctuation">)</span>
+        <span class="token comment"># 更新回合已持续的时间</span>
+        timestamp <span class="token operator">=</span> time<span class="token punctuation">.</span>perf_counter<span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token operator">-</span> start_episode_t
+</code></pre><p>观测-&gt;推理-&gt;动作-&gt;执行-&gt;...的循环</p>
+<p><strong>FPS如果大的话有可能会达到USB发送-&gt;推理-&gt;发送的循环的极限</strong></p>
+<p>感觉可以从<strong>提升USB发送速度-&gt;提升FPS-&gt;提升模型速度</strong>来对整体进行优化</p>
+<pre data-role="codeBlock" data-info="python" class="language-python python"><code><span class="token keyword keyword-def">def</span> <span class="token function">predict_action</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">:</span>
+    <span class="token comment"># 浅拷贝观测数据，避免修改原始数据源</span>
+    observation <span class="token operator">=</span> copy<span class="token punctuation">(</span>observation<span class="token punctuation">)</span>
+    
+    <span class="token keyword keyword-with">with</span> <span class="token punctuation">(</span>
+        <span class="token comment"># 开启推理模式：禁用梯度计算，减少内存消耗并加速计算</span>
+        torch<span class="token punctuation">.</span>inference_mode<span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">,</span>
+        <span class="token comment"># 如果使用 CUDA 且开启了混合精度(AMP)，则启用自动混合精度上下文</span>
+        torch<span class="token punctuation">.</span>autocast<span class="token punctuation">(</span>device_type<span class="token operator">=</span>device<span class="token punctuation">.</span><span class="token builtin">type</span><span class="token punctuation">)</span> <span class="token keyword keyword-if">if</span> device<span class="token punctuation">.</span><span class="token builtin">type</span> <span class="token operator">==</span> <span class="token string">"cuda"</span> <span class="token keyword keyword-and">and</span> use_amp <span class="token keyword keyword-else">else</span> nullcontext<span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">,</span>
+    <span class="token punctuation">)</span><span class="token punctuation">:</span>
+        <span class="token comment"># 遍历所有观测特征（如图像、关节角度等），将其转换为 PyTorch 格式</span>
+        <span class="token keyword keyword-for">for</span> name <span class="token keyword keyword-in">in</span> observation<span class="token punctuation">:</span>
+            <span class="token comment"># 将 NumPy 数组转换为 PyTorch 张量</span>
+            observation<span class="token punctuation">[</span>name<span class="token punctuation">]</span> <span class="token operator">=</span> torch<span class="token punctuation">.</span>from_numpy<span class="token punctuation">(</span>observation<span class="token punctuation">[</span>name<span class="token punctuation">]</span><span class="token punctuation">)</span>
+            
+            <span class="token comment"># 针对图像数据的特殊预处理：</span>
+            <span class="token keyword keyword-if">if</span> <span class="token string">"image"</span> <span class="token keyword keyword-in">in</span> name<span class="token punctuation">:</span>
+                <span class="token comment"># 归一化：将像素值从 [0, 255] 映射到 [0, 1.0] 的 float32 类型</span>
+                observation<span class="token punctuation">[</span>name<span class="token punctuation">]</span> <span class="token operator">=</span> observation<span class="token punctuation">[</span>name<span class="token punctuation">]</span><span class="token punctuation">.</span><span class="token builtin">type</span><span class="token punctuation">(</span>torch<span class="token punctuation">.</span>float32<span class="token punctuation">)</span> <span class="token operator">/</span> <span class="token number">255</span>
+                <span class="token comment"># 维度转换：将 (H, W, C) 转换为 PyTorch 要求的 (C, H, W) 格式</span>
+                observation<span class="token punctuation">[</span>name<span class="token punctuation">]</span> <span class="token operator">=</span> observation<span class="token punctuation">[</span>name<span class="token punctuation">]</span><span class="token punctuation">.</span>permute<span class="token punctuation">(</span><span class="token number">2</span><span class="token punctuation">,</span> <span class="token number">0</span><span class="token punctuation">,</span> <span class="token number">1</span><span class="token punctuation">)</span><span class="token punctuation">.</span>contiguous<span class="token punctuation">(</span><span class="token punctuation">)</span>
+            
+            <span class="token comment"># 增加批次维度 (Batch Dimension)，将形状变为 (1, C, H, W)</span>
+            observation<span class="token punctuation">[</span>name<span class="token punctuation">]</span> <span class="token operator">=</span> observation<span class="token punctuation">[</span>name<span class="token punctuation">]</span><span class="token punctuation">.</span>unsqueeze<span class="token punctuation">(</span><span class="token number">0</span><span class="token punctuation">)</span>
+            <span class="token comment"># 将数据移动到计算设备（如 CPU、CUDA 或 MPS）</span>
+            observation<span class="token punctuation">[</span>name<span class="token punctuation">]</span> <span class="token operator">=</span> observation<span class="token punctuation">[</span>name<span class="token punctuation">]</span><span class="token punctuation">.</span>to<span class="token punctuation">(</span>device<span class="token punctuation">)</span>
+
+        <span class="token comment"># 注入任务描述和机器人类型信息（用于多任务策略）</span>
+        observation<span class="token punctuation">[</span><span class="token string">"task"</span><span class="token punctuation">]</span> <span class="token operator">=</span> task <span class="token keyword keyword-if">if</span> task <span class="token keyword keyword-else">else</span> <span class="token string">""</span>
+        observation<span class="token punctuation">[</span><span class="token string">"robot_type"</span><span class="token punctuation">]</span> <span class="token operator">=</span> robot_type <span class="token keyword keyword-if">if</span> robot_type <span class="token keyword keyword-else">else</span> <span class="token string">""</span>
+
+        <span class="token comment"># --- 核心推理阶段 ---</span>
+        <span class="token comment"># 调用策略模型的 select_action 方法，根据当前观测计算动作</span>
+        <span class="token comment"># 对于 ACT 模型，这会通过 Transformer 的编码器-解码器生成动作序列</span>
+        action <span class="token operator">=</span> policy<span class="token punctuation">.</span>select_action<span class="token punctuation">(</span>observation<span class="token punctuation">)</span>
+
+        <span class="token comment"># 移除推理结果中的批次维度</span>
+        action <span class="token operator">=</span> action<span class="token punctuation">.</span>squeeze<span class="token punctuation">(</span><span class="token number">0</span><span class="token punctuation">)</span>
+
+        <span class="token comment"># 将生成的动作移动回 CPU 内存，以便后续通过串口(os.write)发送给硬件</span>
+        action <span class="token operator">=</span> action<span class="token punctuation">.</span>to<span class="token punctuation">(</span><span class="token string">"cpu"</span><span class="token punctuation">)</span>
+
+    <span class="token keyword keyword-return">return</span> action
+
+</code></pre><p>模型在 <code>lerobot/src/lerobot/policies/act/configuration_act.py</code> 和 <code>lerobot/src/lerobot/policies/act/modeling_act.py</code></p>
+<p>参考论文《使用低成本硬件学习细粒度双手动操作》（<a href="https://huggingface.co/papers/2304.13705%EF%BC%89%E3%80%82">https://huggingface.co/papers/2304.13705）。</a></p>
+<p><img src="Picture/%E5%8A%A8%E4%BD%9C%E5%88%86%E5%9D%97ActionThunking.png" alt="动作分块"></p>
+<ol>
+<li>上半部分：Action Chunking（动作分块）</li>
+</ol>
+<ul>
+<li>一次预测，一段动作（t=0的时候预测0-4的动作，t=4的时候预测4-8的动作）</li>
+<li>固定间隔更新：机器人会依次执行这 4 个动作。直到 t=4 时，模型才会再次进行观测并预测下一个动作块。</li>
+<li>局限性：这种方式虽然减少了推理频率，但在两个动作块的交界处（例如 t=3 和 t=4 之间）可能会出现动作不连贯或抖动。</li>
+</ul>
+<ol start="2">
+<li>下半部分：Action Chunking + Temporal Ensemble（时序集成）</li>
+</ol>
+<p>是 ACT 实现高精度和平滑度的核心考虑。它不再是每隔几步更新一次，而是<strong>每一帧都更新，但利用重叠的预测</strong>，其实是<strong>用计算压力换动作平滑</strong>了。</p>
+<ul>
+<li>滑动窗口式的预测：
+<ul>
+<li>在 t=0 时，预测一组序列。</li>
+<li>在 t=1 时，再次观测并预测一组新的序列。注意图中 t=1 的序列相对于 t=0 向右滑动了一格。</li>
+</ul>
+</li>
+<li>指数加权平均（加权求和）
+<ul>
+<li>系统会给这些重叠的动作分配权重（如图中显示的 [0.5, 0.3, 0.2, 0.1]）。越早预测的动作权重越高，通过加权平均得到最终执行的动作。</li>
+</ul>
+</li>
+</ul>
+<p><img src="Picture/ACT%E6%9E%B6%E6%9E%84.png" alt="ACT架构"></p>
+<ol>
+<li>左侧：训练阶段的 CVAE 编码器 (Encoder)</li>
+</ol>
+<ul>
+<li>输入：包含当前时刻的机器人<strong>关节位置</strong>（joints）和完整的<strong>专家动作序列</strong>（action sequence）。</li>
+<li>输出：压缩成一个风格变量 z（style variable）。</li>
+<li>这个编码器<strong>仅在训练时使用</strong>，推理的时候Encoder会被删除</li>
+</ul>
+<ol start="2">
+<li>右侧：推理阶段的策略网络 (Decoder/Policy)</li>
+</ol>
+<ul>
+<li>输入：多视角图像、关节状态、风格变量 z。</li>
+<li>通过一个Transformer-Encoder和一个Decoder</li>
+<li>输出：一次性预测出一个动作分块（action sequence/chunk），未来几步的。</li>
+</ul>
+<p><img src="Picture/%E8%AE%AD%E7%BB%83%E5%92%8C%E6%8E%A8%E7%90%86.png" alt="训练和推理"></p>
+<h4 id="训练">训练 </h4>
+<ol>
+<li>训练集：图片+动作序列（本质是模仿学习）</li>
+<li>推理变量z：将动作序列和关节数据映射到隐藏维度（512维）。经过带有 4 个自注意力块的 Transformer 编码器，推导出 z 的均值和标准差，并通过重参数化技巧采样出 z。</li>
+<li>预测动作序列：图像通过 ResNet18 提取特征并平坦化（flatten）。视觉特征、关节数据和 z 一起进入策略的 Transformer 编码器。Transformer 解码器（带有 7 个交叉注意力块）输出预测的动作序列。</li>
+</ol>
+<h4 id="推理">推理 </h4>
+<ul>
+<li>与训练时的“预测”部分几乎一致，唯一区别是 z 直接设为 0。</li>
+<li>模型根据当前的实时观测（图像和关节），一次性预测未来的一组动作序列。</li>
+</ul>
+<h4 id="这是其中一个模型也可以换成diffusionpi0等模型">这是其中一个模型，也可以换成Diffusion/Pi0等模型。 </h4>
+<h3 id="内核编译安装">内核编译安装 </h3>
+<p>现在是可以原生编译安装了</p>
+<p><img src="Picture/%E5%86%85%E6%A0%B8%E7%BC%96%E8%AF%91%E5%AE%89%E8%A3%85.png" alt="内核编译安装"></p>
+<h2 id="2-act-模型推理原理详解">2. ACT 模型推理原理详解 </h2>
+<h3 id="21-输入环境观测数据observation">2.1. 输入：环境观测数据（Observation） </h3>
+<h4 id="图像输入这当前模型中就是两个摄像头的图像输入">图像输入：这当前模型中就是两个摄像头的图像输入 </h4>
+<h4 id="关节状态输入当前模型中就是机械臂的关节角度和速度">关节状态输入：当前模型中就是机械臂的关节角度和速度 </h4>
+<h4 id="风格变量-z在推理时act-不再使用训练时的-cvae-编码器为了保持确定性它直接给解码器喂入一个全为-0-的向量即先验分布的均值">风格变量 z：在推理时，ACT 不再使用训练时的 CVAE 编码器。为了保持确定性，它直接给解码器喂入一个全为 0 的向量（即先验分布的均值） </h4>
+<h3 id="22-模型处理-模型处理从输入到输出的过程在这里">2.2. 模型处理 （模型处理从输入到输出的过程在这里） </h3>
+<h3 id="23-动作输出action-output">2.3. 动作输出（Action Output） </h3>
+<p>模型输出一个长度为 k（通常为 100）的动作序列。这个序列包含了接下来 k 个时间步的关节目标位置 。</p>
+<h3 id="24-时间集成temporal-ensembling">2.4. 时间集成（Temporal Ensembling） </h3>
+<p>就和之前的示意图一样，有一个滑动窗口的重叠覆盖和加权平均的过程，目的是为了动作平滑。</p>
+<h2 id="3-对其推理时间进行详细解析">3. 对其推理时间进行详细解析 </h2>
+<p>这边用的推理参数是每次推理 <strong>100</strong> 个动作，推理一次要使用<strong>1.6s</strong>，执行的<strong>FPS大约为20</strong>，所以推理一次执行<strong>5s</strong></p>
+<pre data-role="codeBlock" data-info="bash" class="language-bash bash"><code>FPS: <span class="token number">0.59</span> <span class="token operator">|</span> Obs: <span class="token number">17</span>.13ms <span class="token operator">|</span> Infer: <span class="token number">1678</span>.52ms <span class="token operator">|</span> Act: <span class="token number">1</span>.27ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.04ms
+FPS: <span class="token number">17.04</span> <span class="token operator">|</span> Obs: <span class="token number">5</span>.57ms <span class="token operator">|</span> Infer: <span class="token number">49</span>.94ms <span class="token operator">|</span> Act: <span class="token number">2</span>.88ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.11ms
+FPS: <span class="token number">18.75</span> <span class="token operator">|</span> Obs: <span class="token number">5</span>.31ms <span class="token operator">|</span> Infer: <span class="token number">46</span>.50ms <span class="token operator">|</span> Act: <span class="token number">1</span>.51ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.02ms
+FPS: <span class="token number">18.67</span> <span class="token operator">|</span> Obs: <span class="token number">5</span>.59ms <span class="token operator">|</span> Infer: <span class="token number">44</span>.82ms <span class="token operator">|</span> Act: <span class="token number">2</span>.23ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.43ms
+FPS: <span class="token number">19.90</span> <span class="token operator">|</span> Obs: <span class="token number">6</span>.21ms <span class="token operator">|</span> Infer: <span class="token number">41</span>.77ms <span class="token operator">|</span> Act: <span class="token number">1</span>.97ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.22ms
+FPS: <span class="token number">19.23</span> <span class="token operator">|</span> Obs: <span class="token number">6</span>.21ms <span class="token operator">|</span> Infer: <span class="token number">43</span>.23ms <span class="token operator">|</span> Act: <span class="token number">2</span>.54ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.01ms
+FPS: <span class="token number">2.82</span> <span class="token operator">|</span> Obs: <span class="token number">6</span>.51ms <span class="token operator">|</span> Infer: <span class="token number">344</span>.63ms <span class="token operator">|</span> Act: <span class="token number">2</span>.43ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.01ms
+FPS: <span class="token number">19.74</span> <span class="token operator">|</span> Obs: <span class="token number">6</span>.18ms <span class="token operator">|</span> Infer: <span class="token number">41</span>.71ms <span class="token operator">|</span> Act: <span class="token number">2</span>.10ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.62ms
+FPS: <span class="token number">18.77</span> <span class="token operator">|</span> Obs: <span class="token number">6</span>.09ms <span class="token operator">|</span> Infer: <span class="token number">44</span>.71ms <span class="token operator">|</span> Act: <span class="token number">2</span>.45ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.01ms
+FPS: <span class="token number">19.31</span> <span class="token operator">|</span> Obs: <span class="token number">5</span>.65ms <span class="token operator">|</span> Infer: <span class="token number">43</span>.72ms <span class="token operator">|</span> Act: <span class="token number">2</span>.41ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.01ms
+FPS: <span class="token number">20.90</span> <span class="token operator">|</span> Obs: <span class="token number">4</span>.63ms <span class="token operator">|</span> Infer: <span class="token number">40</span>.70ms <span class="token operator">|</span> Act: <span class="token number">2</span>.13ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.01ms
+FPS: <span class="token number">9.39</span> <span class="token operator">|</span> Obs: <span class="token number">6</span>.02ms <span class="token operator">|</span> Infer: <span class="token number">98</span>.50ms <span class="token operator">|</span> Act: <span class="token number">1</span>.95ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.01ms
+FPS: <span class="token number">20.95</span> <span class="token operator">|</span> Obs: <span class="token number">4</span>.70ms <span class="token operator">|</span> Infer: <span class="token number">40</span>.59ms <span class="token operator">|</span> Act: <span class="token number">1</span>.54ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.86ms
+FPS: <span class="token number">19.84</span> <span class="token operator">|</span> Obs: <span class="token number">4</span>.80ms <span class="token operator">|</span> Infer: <span class="token number">43</span>.67ms <span class="token operator">|</span> Act: <span class="token number">1</span>.68ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.22ms
+FPS: <span class="token number">18.96</span> <span class="token operator">|</span> Obs: <span class="token number">5</span>.01ms <span class="token operator">|</span> Infer: <span class="token number">44</span>.95ms <span class="token operator">|</span> Act: <span class="token number">2</span>.75ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.01ms
+FPS: <span class="token number">19.99</span> <span class="token operator">|</span> Obs: <span class="token number">5</span>.22ms <span class="token operator">|</span> Infer: <span class="token number">43</span>.46ms <span class="token operator">|</span> Act: <span class="token number">1</span>.22ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.11ms
+FPS: <span class="token number">9.07</span> <span class="token operator">|</span> Obs: <span class="token number">5</span>.72ms <span class="token operator">|</span> Infer: <span class="token number">102</span>.71ms <span class="token operator">|</span> Act: <span class="token number">1</span>.81ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.01ms
+FPS: <span class="token number">20.91</span> <span class="token operator">|</span> Obs: <span class="token number">5</span>.94ms <span class="token operator">|</span> Infer: <span class="token number">39</span>.41ms <span class="token operator">|</span> Act: <span class="token number">1</span>.91ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.55ms
+FPS: <span class="token number">19.99</span> <span class="token operator">|</span> Obs: <span class="token number">5</span>.32ms <span class="token operator">|</span> Infer: <span class="token number">42</span>.01ms <span class="token operator">|</span> Act: <span class="token number">2</span>.52ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.16ms
+FPS: <span class="token number">19.84</span> <span class="token operator">|</span> Obs: <span class="token number">6</span>.20ms <span class="token operator">|</span> Infer: <span class="token number">41</span>.96ms <span class="token operator">|</span> Act: <span class="token number">2</span>.23ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.01ms
+FPS: <span class="token number">20.33</span> <span class="token operator">|</span> Obs: <span class="token number">5</span>.00ms <span class="token operator">|</span> Infer: <span class="token number">42</span>.18ms <span class="token operator">|</span> Act: <span class="token number">1</span>.92ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.01ms
+FPS: <span class="token number">8.68</span> <span class="token operator">|</span> Obs: <span class="token number">3</span>.51ms <span class="token operator">|</span> Infer: <span class="token number">108</span>.95ms <span class="token operator">|</span> Act: <span class="token number">2</span>.72ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.01ms
+FPS: <span class="token number">19.95</span> <span class="token operator">|</span> Obs: <span class="token number">5</span>.39ms <span class="token operator">|</span> Infer: <span class="token number">42</span>.72ms <span class="token operator">|</span> Act: <span class="token number">1</span>.51ms <span class="token operator">|</span> Wait: <span class="token number">0</span>.49ms
+</code></pre><p>执行的帧率在20左右，所以5s进行一次大infer，轻帧有一个很大的infer时间，因为哪怕不推理，他还是要把一大堆数据做处理，</p>
+<h2 id="4-具体怎么预测100帧动作">4. 具体怎么预测100帧动作 </h2>
+<pre data-role="codeBlock" data-info="py" class="language-python py"><code><span class="token keyword keyword-def">def</span> <span class="token function">predict_action_chunk</span><span class="token punctuation">(</span>self<span class="token punctuation">,</span> batch<span class="token punctuation">:</span> <span class="token builtin">dict</span><span class="token punctuation">[</span><span class="token builtin">str</span><span class="token punctuation">,</span> Tensor<span class="token punctuation">]</span><span class="token punctuation">)</span> <span class="token operator">-</span><span class="token operator">&gt;</span> Tensor<span class="token punctuation">:</span>
+    <span class="token triple-quoted-string string">"""预测一个完整的动作块 (Action Chunk)。"""</span>
+
+    <span class="token comment"># 1. 标准化输入 (归一化到 Gaussian 分布)</span>
+    batch <span class="token operator">=</span> self<span class="token punctuation">.</span>normalize_inputs<span class="token punctuation">(</span>batch<span class="token punctuation">)</span>
+    <span class="token comment"># ... (处理图像键值)</span>
+
+    <span class="token comment"># 2. 模型前向传播 (Heavy Lifting)</span>
+    <span class="token comment"># 这里的 self.model 就是下面的 ACT 类,会创建一个ACT实例</span>
+    actions <span class="token operator">=</span> self<span class="token punctuation">.</span>model<span class="token punctuation">(</span>batch<span class="token punctuation">)</span><span class="token punctuation">[</span><span class="token number">0</span><span class="token punctuation">]</span> 
+
+    <span class="token comment"># 3. 反标准化输出 (恢复到机器人的物理单位，如弧度)</span>
+    actions <span class="token operator">=</span> self<span class="token punctuation">.</span>unnormalize_outputs<span class="token punctuation">(</span><span class="token punctuation">{</span>ACTION<span class="token punctuation">:</span> actions<span class="token punctuation">}</span><span class="token punctuation">)</span><span class="token punctuation">[</span>ACTION<span class="token punctuation">]</span>
+    <span class="token keyword keyword-return">return</span> actions
+
+</code></pre><p>ACT 的架构在深度学习中属于 <strong>Encoder-Decoder（编码器-解码器）</strong> 架构。它的核心任务是实现一个映射函数 ：</p>
+<p>Action一百个点=F(Images,JointState,Latent 潜变量 z)</p>
+<p>z在训练时，它捕捉动作的随机性（比如抓杯子时手抖动的幅度）。<br>
+在推理时（正如你之前看到的 latent_sample = torch.zeros），它通常被置为0。这意味着要求 F 输出<strong>最标准、最确定</strong>的动作。</p>
+<p>模型在训练：[VAE Encoder] + [Transformer Encoder] + [Transformer Decoder]<br>
+模型在推理：[Transformer Encoder] + [Transformer Decoder]</p>
+<h3 id="act-推理模型结构">ACT 推理模型结构 </h3>
+<h3 id="第一阶段数据向量化与序列构建-tokenization">第一阶段：数据向量化与序列构建 (Tokenization) </h3>
+<h3 id="第二阶段编码器-encoder--自注意力机制-self-attention">第二阶段：编码器 (Encoder) —— 自注意力机制 (Self-Attention) </h3>
+<p>Encoder 的作用是计算特征之间的<strong>相关性矩阵</strong>，并进行加权聚合。</p>
+<p><strong>Encoder 输出</strong>：一个形状为 [N,512] 的矩阵（我们记为 <strong>Memory</strong>）。它包含了经过全局推理后的环境理解。</p>
+<h3 id="第三阶段解码器-decoder--交叉注意力机制-cross-attention">第三阶段：解码器 (Decoder) —— 交叉注意力机制 (Cross-Attention) </h3>
+<p>这是 ACT 实现“一次预测 100 帧”的核心。Decoder 的结构与 Encoder 略有不同。</p>
+<ol>
+<li><strong>输入是什么？ (Learned Queries)</strong></li>
+</ol>
+<ul>
+<li>输入是一个<strong>固定参数矩阵</strong>，代码中叫 <code>decoder_pos_embed</code>，形状为[100,512] 。</li>
+<li>这 100 个向量在推理开始时是<strong>初始化状态</strong>，它们不包含任何具体的图像信息，只包含“我代表第几个时间步”的位置信息。我们称之为 <strong>Object Queries</strong>。</li>
+</ul>
+<ol start="2">
+<li><strong>并行计算</strong>：</li>
+</ol>
+<ul>
+<li>注意，这 100 个 Query 是作为一个矩阵 [100,512] 一起参与矩阵乘法的。</li>
+<li>因此，第 0 帧到第 99 帧的特征提取是<strong>同时</strong>完成的，不存在先后依赖。</li>
+</ul>
+<ol start="3">
+<li><strong>Decoder 输出</strong>：</li>
+</ol>
+<ul>
+<li>经过多层 Cross-Attention 后，那 100 个原本只有位置信息的向量，吸纳了图像和状态信息，变成了 100 个<strong>包含了动作意图的高维特征向量</strong>。</li>
+</ul>
+<h3 id="第四阶段预测头-prediction-head--线性映射">第四阶段：预测头 (Prediction Head) —— 线性映射 </h3>
+<p>这是最后一步，将高维特征映射回物理空间。</p>
+<ul>
+<li>
+<p><strong>输入</strong>：Decoder 输出的矩阵，形状[100,512] 。</p>
+</li>
+<li>
+<p><strong>运算</strong>：一个简单的全连接层（MLP）。</p>
+</li>
+<li>
+<p>公式：Y=XWT+b</p>
+</li>
+<li>
+<p>其中 W 的形状是 [14,512]（（假设机械臂有 14 个自由度）。</p>
+</li>
+<li>
+<p><strong>输出</strong>：形状[100,14] 。</p>
+</li>
+<li>
+<p>这就是 100 帧的关节角度数据。</p>
+</li>
+</ul>
+<p>这就是为什么它能一次性算出 100 帧：因为在数学上，这就是一个<strong>批量的矩阵乘法操作</strong>，100 个时间步在矩阵运算中是并行的维度。</p>
+<p>模型参数：vision_backbone: str = "resnet18"：视觉皮层用 <code>ResNet18</code>，是一种经典的CNN网络<br>
+输入：一张 480 x 640 的 RGB 图片（几十万个像素点）。<br>
+处理：通过 18 层卷积运算，提取出边缘、纹理、形状等信息。<br>
+输出：一个 15 x 20 x 512 的特征图（Feature Map）。<br>
+后续：这个特征图会被展平，变成 300 个长度为 512 的 Token，喂给 Transformer</p>
+<p>n_encoder_layers: int = 4：Encoder 有 <code>4</code> 层。<br>
+n_decoder_layers: int = 1：Decoder 有 <code>1</code> 层。</p>
+<p>n_heads: int = 8：多头注意力有 <code>8</code> 个头。Transformer 内部的 512 维总线被拆分成了 8 组，每组 64 维。</p>
+<p>dropout: float = 0.1：丢弃率为 <code>10%</code>。<br>
+optimizer_lr: float = 1e-5：学习率（步长）。</p>
+<p>encoder的矩阵运算是4层是串行，但是矩阵运算torchcpu自动会并行</p>
+
+      </div>
+      
+      
+    
+    
+    
+    
+    
+    
+  
+    </body></html>

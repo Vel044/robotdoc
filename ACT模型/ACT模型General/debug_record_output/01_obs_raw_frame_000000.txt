@@ -1,0 +1,14 @@
+=== 01_obs_raw @ frame 0 ===
+type: <class 'dict'>
+
+dict content:
+  shoulder_pan.pos: float = -7.957462412907958
+  shoulder_lift.pos: float = -45.28462192013593
+  elbow_flex.pos: float = 98.72611464968153
+  wrist_flex.pos: float = 14.57597173144876
+  wrist_roll.pos: float = -3.931623931623932
+  gripper.pos: float = 55.22482583913869
+  handeye: ndarray shape=(360, 640, 3) dtype=uint8
+    values (first 10): [8, 4, 31, 8, 4, 29, 8, 4, 27, 9] ...
+  fixed: ndarray shape=(360, 640, 3) dtype=uint8
+    values (first 10): [69, 87, 97, 74, 92, 104, 79, 97, 111, 80] ...

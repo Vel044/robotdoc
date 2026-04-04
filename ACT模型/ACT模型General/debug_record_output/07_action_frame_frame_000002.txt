@@ -1,0 +1,6 @@
+=== 07_action_frame @ frame 2 ===
+type: <class 'dict'>
+
+dict content:
+  action: ndarray shape=(6,) dtype=float32
+    values: [-8.146505355834961, -84.05831146240234, 64.12652587890625, 25.958829879760742, -1.5628361701965332, 49.1089973449707]

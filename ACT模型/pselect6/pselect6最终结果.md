@@ -1,0 +1,354 @@
+```bash
+# 只看 pselect6 的日志
+sudo cat /sys/kernel/debug/tracing/trace | grep pselect6
+
+# 只看 futex 的日志
+sudo cat /sys/kernel/debug/tracing/trace | grep futex
+```
+
+```bash
+python-37210   [002] .....  3603.578759: do_select: pselect6: total=500 ns, sleep=0 ns, context=500 ns, ret=1, end_time=3603.568352321 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.578767: do_select: pselect6: total=259 ns, sleep=0 ns, context=259 ns, ret=1, end_time=3603.568361062 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.578783: do_select: pselect6: total=593 ns, sleep=0 ns, context=593 ns, ret=1, end_time=3603.568376007 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.578797: do_select: pselect6: total=277 ns, sleep=0 ns, context=277 ns, ret=1, end_time=3603.568390173 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.578811: do_select: pselect6: total=296 ns, sleep=0 ns, context=296 ns, ret=1, end_time=3603.568404192 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.578828: do_select: pselect6: total=2149 ns, sleep=0 ns, context=2149 ns, ret=1, end_time=3603.568421285 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.628701: do_select: pselect6: total=83464 ns, sleep=77574 ns, context=5890 ns, ret=1, end_time=3603.618293643 s
+python-37210   [002] .....  3603.629095: do_select: pselect6: total=52426 ns, sleep=49871 ns, context=2555 ns, ret=1, end_time=3603.618687940 s
+python-37210   [002] .....  3603.629167: do_select: pselect6: total=1648 ns, sleep=0 ns, context=1648 ns, ret=0, end_time=3603.618760495 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629184: do_select: pselect6: total=463 ns, sleep=0 ns, context=463 ns, ret=0, end_time=3603.618777940 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629202: do_select: pselect6: total=463 ns, sleep=0 ns, context=463 ns, ret=0, end_time=3603.618795736 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629211: do_select: pselect6: total=388 ns, sleep=0 ns, context=388 ns, ret=0, end_time=3603.618804921 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629219: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.618812773 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629255: do_select: pselect6: total=519 ns, sleep=0 ns, context=519 ns, ret=0, end_time=3603.618849255 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629264: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.618857681 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629271: do_select: pselect6: total=351 ns, sleep=0 ns, context=351 ns, ret=0, end_time=3603.618864384 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629277: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.618870477 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629313: do_select: pselect6: total=1018 ns, sleep=0 ns, context=1018 ns, ret=0, end_time=3603.618906273 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629330: do_select: pselect6: total=537 ns, sleep=0 ns, context=537 ns, ret=0, end_time=3603.618923625 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629341: do_select: pselect6: total=371 ns, sleep=0 ns, context=371 ns, ret=0, end_time=3603.618934496 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629349: do_select: pselect6: total=371 ns, sleep=0 ns, context=371 ns, ret=0, end_time=3603.618942459 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629356: do_select: pselect6: total=351 ns, sleep=0 ns, context=351 ns, ret=0, end_time=3603.618950199 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629365: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.618958903 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629374: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.618967459 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629382: do_select: pselect6: total=370 ns, sleep=0 ns, context=370 ns, ret=0, end_time=3603.618975477 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629389: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.618983107 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629397: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.618990848 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629405: do_select: pselect6: total=370 ns, sleep=0 ns, context=370 ns, ret=0, end_time=3603.618998570 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629412: do_select: pselect6: total=351 ns, sleep=0 ns, context=351 ns, ret=0, end_time=3603.619006088 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629420: do_select: pselect6: total=370 ns, sleep=0 ns, context=370 ns, ret=0, end_time=3603.619013533 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629435: do_select: pselect6: total=426 ns, sleep=0 ns, context=426 ns, ret=0, end_time=3603.619029126 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629444: do_select: pselect6: total=370 ns, sleep=0 ns, context=370 ns, ret=0, end_time=3603.619038070 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629453: do_select: pselect6: total=371 ns, sleep=0 ns, context=371 ns, ret=0, end_time=3603.619046663 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629461: do_select: pselect6: total=351 ns, sleep=0 ns, context=351 ns, ret=0, end_time=3603.619054440 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629468: do_select: pselect6: total=351 ns, sleep=0 ns, context=351 ns, ret=0, end_time=3603.619061940 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629476: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619070107 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629485: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619078552 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629492: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619086218 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629500: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619093663 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629507: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619101218 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629515: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619108700 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629523: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619116441 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629530: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619124052 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629538: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619131663 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629545: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619139274 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629553: do_select: pselect6: total=444 ns, sleep=0 ns, context=444 ns, ret=0, end_time=3603.619146996 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629562: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619155515 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629569: do_select: pselect6: total=351 ns, sleep=0 ns, context=351 ns, ret=0, end_time=3603.619163181 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629577: do_select: pselect6: total=370 ns, sleep=0 ns, context=370 ns, ret=0, end_time=3603.619170737 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629585: do_select: pselect6: total=463 ns, sleep=0 ns, context=463 ns, ret=0, end_time=3603.619178811 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629593: do_select: pselect6: total=519 ns, sleep=0 ns, context=519 ns, ret=0, end_time=3603.619186904 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629601: do_select: pselect6: total=370 ns, sleep=0 ns, context=370 ns, ret=0, end_time=3603.619194681 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629608: do_select: pselect6: total=333 ns, sleep=0 ns, context=333 ns, ret=0, end_time=3603.619202200 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629616: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619209848 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629624: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619217441 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629631: do_select: pselect6: total=351 ns, sleep=0 ns, context=351 ns, ret=0, end_time=3603.619225033 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629639: do_select: pselect6: total=370 ns, sleep=0 ns, context=370 ns, ret=0, end_time=3603.619232663 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629647: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619240645 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629656: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619249348 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629664: do_select: pselect6: total=371 ns, sleep=0 ns, context=371 ns, ret=0, end_time=3603.619257978 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629672: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619266182 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629711: do_select: pselect6: total=1852 ns, sleep=0 ns, context=1852 ns, ret=0, end_time=3603.619304756 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629722: do_select: pselect6: total=593 ns, sleep=0 ns, context=593 ns, ret=0, end_time=3603.619316145 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629732: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619325330 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629739: do_select: pselect6: total=370 ns, sleep=0 ns, context=370 ns, ret=0, end_time=3603.619333200 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629747: do_select: pselect6: total=351 ns, sleep=0 ns, context=351 ns, ret=0, end_time=3603.619340385 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629758: do_select: pselect6: total=1037 ns, sleep=0 ns, context=1037 ns, ret=0, end_time=3603.619351441 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629767: do_select: pselect6: total=334 ns, sleep=0 ns, context=334 ns, ret=0, end_time=3603.619360534 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629778: do_select: pselect6: total=685 ns, sleep=0 ns, context=685 ns, ret=0, end_time=3603.619371811 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629788: do_select: pselect6: total=648 ns, sleep=0 ns, context=648 ns, ret=0, end_time=3603.619381293 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629799: do_select: pselect6: total=703 ns, sleep=0 ns, context=703 ns, ret=0, end_time=3603.619392552 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629814: do_select: pselect6: total=1093 ns, sleep=0 ns, context=1093 ns, ret=0, end_time=3603.619407182 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629828: do_select: pselect6: total=815 ns, sleep=0 ns, context=815 ns, ret=0, end_time=3603.619421034 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629837: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619430275 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629845: do_select: pselect6: total=611 ns, sleep=0 ns, context=611 ns, ret=0, end_time=3603.619438386 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629854: do_select: pselect6: total=704 ns, sleep=0 ns, context=704 ns, ret=0, end_time=3603.619447571 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629863: do_select: pselect6: total=500 ns, sleep=0 ns, context=500 ns, ret=0, end_time=3603.619456256 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629877: do_select: pselect6: total=889 ns, sleep=0 ns, context=889 ns, ret=0, end_time=3603.619470330 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629922: do_select: pselect6: total=871 ns, sleep=0 ns, context=871 ns, ret=0, end_time=3603.619515923 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629930: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619523867 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629944: do_select: pselect6: total=426 ns, sleep=0 ns, context=426 ns, ret=0, end_time=3603.619537367 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629952: do_select: pselect6: total=371 ns, sleep=0 ns, context=371 ns, ret=0, end_time=3603.619545849 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629960: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619553682 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629968: do_select: pselect6: total=351 ns, sleep=0 ns, context=351 ns, ret=0, end_time=3603.619561478 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629975: do_select: pselect6: total=482 ns, sleep=0 ns, context=482 ns, ret=0, end_time=3603.619569312 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629984: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619578127 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.629993: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619586756 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.630001: do_select: pselect6: total=481 ns, sleep=0 ns, context=481 ns, ret=0, end_time=3603.619594645 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.630008: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619602275 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.630022: do_select: pselect6: total=407 ns, sleep=0 ns, context=407 ns, ret=0, end_time=3603.619615349 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.630030: do_select: pselect6: total=334 ns, sleep=0 ns, context=334 ns, ret=0, end_time=3603.619623627 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.630037: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.619631182 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.630046: do_select: pselect6: total=333 ns, sleep=0 ns, context=333 ns, ret=0, end_time=3603.619639756 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.630476: do_select: pselect6: total=4296 ns, sleep=0 ns, context=4296 ns, ret=1, end_time=3603.620069424 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.630504: do_select: pselect6: total=723 ns, sleep=0 ns, context=723 ns, ret=1, end_time=3603.620098017 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.630525: do_select: pselect6: total=389 ns, sleep=0 ns, context=389 ns, ret=1, end_time=3603.620118980 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.634452: do_select: pselect6: total=6037 ns, sleep=0 ns, context=6037 ns, ret=1, end_time=3603.624045450 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.634590: do_select: pselect6: total=1704 ns, sleep=0 ns, context=1704 ns, ret=1, end_time=3603.624183562 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.635311: do_select: pselect6: total=2093 ns, sleep=0 ns, context=2093 ns, ret=1, end_time=3603.624904434 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.635349: do_select: pselect6: total=1037 ns, sleep=0 ns, context=1037 ns, ret=1, end_time=3603.624942878 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.635444: do_select: pselect6: total=852 ns, sleep=0 ns, context=852 ns, ret=1, end_time=3603.625037341 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.638770: do_select: pselect6: total=1963 ns, sleep=0 ns, context=1963 ns, ret=1, end_time=3603.628363274 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.646571: do_select: pselect6: total=6260 ns, sleep=0 ns, context=6260 ns, ret=1, end_time=3603.636164197 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.646637: do_select: pselect6: total=611 ns, sleep=0 ns, context=611 ns, ret=1, end_time=3603.636230641 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.646650: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=1, end_time=3603.636243215 s, fd=3, file=ttyACM0
+python-38074   [002] .....  3603.658765: do_select: pselect6: total=20737004 ns, sleep=20730578 ns, context=6426 ns, ret=1, end_time=3603.648356406 s, fd=9, file=video2
+python-37210   [002] .....  3603.683723: do_select: pselect6: total=74574 ns, sleep=70314 ns, context=4260 ns, ret=1, end_time=3603.673314622 s
+python-37210   [002] .....  3603.685326: do_select: pselect6: total=3241 ns, sleep=0 ns, context=3241 ns, ret=1, end_time=3603.674919570 s
+python-37210   [002] .....  3603.685371: do_select: pselect6: total=907 ns, sleep=0 ns, context=907 ns, ret=1, end_time=3603.674963736 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.685397: do_select: pselect6: total=722 ns, sleep=0 ns, context=722 ns, ret=1, end_time=3603.674990403 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.685414: do_select: pselect6: total=351 ns, sleep=0 ns, context=351 ns, ret=1, end_time=3603.675007625 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.685423: do_select: pselect6: total=297 ns, sleep=0 ns, context=297 ns, ret=1, end_time=3603.675017237 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.685436: do_select: pselect6: total=389 ns, sleep=0 ns, context=389 ns, ret=1, end_time=3603.675029514 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.685444: do_select: pselect6: total=277 ns, sleep=0 ns, context=277 ns, ret=1, end_time=3603.675037440 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.685455: do_select: pselect6: total=314 ns, sleep=0 ns, context=314 ns, ret=1, end_time=3603.675048477 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.685463: do_select: pselect6: total=296 ns, sleep=0 ns, context=296 ns, ret=1, end_time=3603.675056496 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.685473: do_select: pselect6: total=315 ns, sleep=0 ns, context=315 ns, ret=1, end_time=3603.675067255 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.685481: do_select: pselect6: total=278 ns, sleep=0 ns, context=278 ns, ret=1, end_time=3603.675075218 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.685492: do_select: pselect6: total=297 ns, sleep=0 ns, context=297 ns, ret=1, end_time=3603.675086126 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.685500: do_select: pselect6: total=277 ns, sleep=0 ns, context=277 ns, ret=1, end_time=3603.675093866 s, fd=3, file=ttyACM0
+python-38074   [002] .....  3603.694980: do_select: pselect6: total=30092708 ns, sleep=30085485 ns, context=7223 ns, ret=1, end_time=3603.684571496 s, fd=9, file=video2
+python-38074   [002] .....  3603.726773: do_select: pselect6: total=27787388 ns, sleep=27780759 ns, context=6629 ns, ret=1, end_time=3603.716365207 s, fd=9, file=video2
+python-37210   [002] .....  3603.737055: do_select: pselect6: total=112630 ns, sleep=108315 ns, context=4315 ns, ret=1, end_time=3603.726646672 s
+python-37210   [002] .....  3603.737672: do_select: pselect6: total=8833 ns, sleep=0 ns, context=8833 ns, ret=1, end_time=3603.727264618 s
+python-37210   [002] .....  3603.737834: do_select: pselect6: total=1963 ns, sleep=0 ns, context=1963 ns, ret=0, end_time=3603.727426748 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.737857: do_select: pselect6: total=722 ns, sleep=0 ns, context=722 ns, ret=0, end_time=3603.727450933 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.737864: do_select: pselect6: total=370 ns, sleep=0 ns, context=370 ns, ret=0, end_time=3603.727458248 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.737871: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.727464878 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.737883: do_select: pselect6: total=963 ns, sleep=0 ns, context=963 ns, ret=0, end_time=3603.727477211 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738028: do_select: pselect6: total=2723 ns, sleep=0 ns, context=2723 ns, ret=0, end_time=3603.727622156 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738038: do_select: pselect6: total=370 ns, sleep=0 ns, context=370 ns, ret=0, end_time=3603.727631896 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738045: do_select: pselect6: total=463 ns, sleep=0 ns, context=463 ns, ret=0, end_time=3603.727638489 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738051: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.727644804 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738057: do_select: pselect6: total=351 ns, sleep=0 ns, context=351 ns, ret=0, end_time=3603.727651359 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738066: do_select: pselect6: total=482 ns, sleep=0 ns, context=482 ns, ret=0, end_time=3603.727659582 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738074: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.727668082 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738085: do_select: pselect6: total=556 ns, sleep=0 ns, context=556 ns, ret=0, end_time=3603.727679008 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738096: do_select: pselect6: total=351 ns, sleep=0 ns, context=351 ns, ret=0, end_time=3603.727690359 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738104: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.727698415 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738113: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.727706915 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738121: do_select: pselect6: total=351 ns, sleep=0 ns, context=351 ns, ret=0, end_time=3603.727714748 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738275: do_select: pselect6: total=4352 ns, sleep=0 ns, context=4352 ns, ret=0, end_time=3603.727867841 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738286: do_select: pselect6: total=519 ns, sleep=0 ns, context=519 ns, ret=0, end_time=3603.727880434 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738294: do_select: pselect6: total=556 ns, sleep=0 ns, context=556 ns, ret=0, end_time=3603.727888323 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738344: do_select: pselect6: total=1037 ns, sleep=0 ns, context=1037 ns, ret=0, end_time=3603.727937212 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738352: do_select: pselect6: total=1296 ns, sleep=0 ns, context=1296 ns, ret=0, end_time=3603.727946341 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738483: do_select: pselect6: total=722 ns, sleep=0 ns, context=722 ns, ret=0, end_time=3603.728077397 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738493: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.728087434 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738502: do_select: pselect6: total=426 ns, sleep=0 ns, context=426 ns, ret=0, end_time=3603.728095601 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738641: do_select: pselect6: total=1056 ns, sleep=0 ns, context=1056 ns, ret=1, end_time=3603.728235398 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738844: do_select: pselect6: total=1000 ns, sleep=0 ns, context=1000 ns, ret=1, end_time=3603.728438028 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.738871: do_select: pselect6: total=389 ns, sleep=0 ns, context=389 ns, ret=1, end_time=3603.728464565 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.739731: do_select: pselect6: total=1685 ns, sleep=0 ns, context=1685 ns, ret=1, end_time=3603.729324511 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.739753: do_select: pselect6: total=370 ns, sleep=0 ns, context=370 ns, ret=1, end_time=3603.729346918 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.739762: do_select: pselect6: total=277 ns, sleep=0 ns, context=277 ns, ret=1, end_time=3603.729356381 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.739775: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=1, end_time=3603.729368807 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.739783: do_select: pselect6: total=314 ns, sleep=0 ns, context=314 ns, ret=1, end_time=3603.729376992 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.739794: do_select: pselect6: total=296 ns, sleep=0 ns, context=296 ns, ret=1, end_time=3603.729387844 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.739802: do_select: pselect6: total=278 ns, sleep=0 ns, context=278 ns, ret=1, end_time=3603.729396030 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.739813: do_select: pselect6: total=296 ns, sleep=0 ns, context=296 ns, ret=1, end_time=3603.729406807 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.739821: do_select: pselect6: total=277 ns, sleep=0 ns, context=277 ns, ret=1, end_time=3603.729414455 s, fd=3, file=ttyACM0
+python-38073   [003] .....  3603.742606: do_select: pselect6: total=26500720 ns, sleep=26493590 ns, context=7130 ns, ret=1, end_time=3603.732198091 s, fd=8, file=video0
+python-38074   [002] .....  3603.762889: do_select: pselect6: total=26327830 ns, sleep=26314238 ns, context=13592 ns, ret=1, end_time=3603.752480149 s, fd=9, file=video2
+python-38073   [003] .....  3603.774565: do_select: pselect6: total=26718609 ns, sleep=26711905 ns, context=6704 ns, ret=1, end_time=3603.764155969 s, fd=8, file=video0
+python-37210   [002] .....  3603.791910: do_select: pselect6: total=1257873 ns, sleep=1249966 ns, context=7907 ns, ret=1, end_time=3603.781501374 s
+python-37210   [002] .....  3603.792576: do_select: pselect6: total=102667 ns, sleep=94722 ns, context=7945 ns, ret=1, end_time=3603.782167745 s
+python-37210   [002] .....  3603.792698: do_select: pselect6: total=5611 ns, sleep=0 ns, context=5611 ns, ret=0, end_time=3603.782290801 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.792737: do_select: pselect6: total=852 ns, sleep=0 ns, context=852 ns, ret=0, end_time=3603.782330505 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.792755: do_select: pselect6: total=1259 ns, sleep=0 ns, context=1259 ns, ret=0, end_time=3603.782349412 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.792766: do_select: pselect6: total=371 ns, sleep=0 ns, context=371 ns, ret=0, end_time=3603.782359709 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.792775: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.782369412 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.792784: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.782378283 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.792792: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.782386264 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.792801: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.782394801 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.792809: do_select: pselect6: total=370 ns, sleep=0 ns, context=370 ns, ret=0, end_time=3603.782403116 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.792822: do_select: pselect6: total=648 ns, sleep=0 ns, context=648 ns, ret=0, end_time=3603.782416301 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.792836: do_select: pselect6: total=1093 ns, sleep=0 ns, context=1093 ns, ret=0, end_time=3603.782429635 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.793025: do_select: pselect6: total=3167 ns, sleep=0 ns, context=3167 ns, ret=0, end_time=3603.782618635 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.793040: do_select: pselect6: total=963 ns, sleep=0 ns, context=963 ns, ret=0, end_time=3603.782633857 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.793048: do_select: pselect6: total=370 ns, sleep=0 ns, context=370 ns, ret=0, end_time=3603.782641968 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.793057: do_select: pselect6: total=648 ns, sleep=0 ns, context=648 ns, ret=0, end_time=3603.782651413 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.793065: do_select: pselect6: total=796 ns, sleep=0 ns, context=796 ns, ret=0, end_time=3603.782659042 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.793075: do_select: pselect6: total=1018 ns, sleep=0 ns, context=1018 ns, ret=0, end_time=3603.782668783 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.793082: do_select: pselect6: total=445 ns, sleep=0 ns, context=445 ns, ret=0, end_time=3603.782676080 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.793090: do_select: pselect6: total=870 ns, sleep=0 ns, context=870 ns, ret=0, end_time=3603.782683709 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.793100: do_select: pselect6: total=481 ns, sleep=0 ns, context=481 ns, ret=0, end_time=3603.782693820 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.793108: do_select: pselect6: total=371 ns, sleep=0 ns, context=371 ns, ret=0, end_time=3603.782702228 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.793116: do_select: pselect6: total=649 ns, sleep=0 ns, context=649 ns, ret=0, end_time=3603.782709580 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.793124: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.782717580 s, fd=3, file=ttyACM0
+python-38074   [002] .....  3603.794597: do_select: pselect6: total=23220898 ns, sleep=23214064 ns, context=6834 ns, ret=1, end_time=3603.784188916 s, fd=9, file=video2
+python-37210   [002] .....  3603.797258: do_select: pselect6: total=3537 ns, sleep=0 ns, context=3537 ns, ret=1, end_time=3603.786851495 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.797331: do_select: pselect6: total=611 ns, sleep=0 ns, context=611 ns, ret=1, end_time=3603.786924551 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.797363: do_select: pselect6: total=667 ns, sleep=0 ns, context=667 ns, ret=1, end_time=3603.786956755 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.797375: do_select: pselect6: total=297 ns, sleep=0 ns, context=297 ns, ret=1, end_time=3603.786969218 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.797391: do_select: pselect6: total=314 ns, sleep=0 ns, context=314 ns, ret=1, end_time=3603.786985347 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.797402: do_select: pselect6: total=278 ns, sleep=0 ns, context=278 ns, ret=1, end_time=3603.786996533 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.797419: do_select: pselect6: total=296 ns, sleep=0 ns, context=296 ns, ret=1, end_time=3603.787013273 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.797431: do_select: pselect6: total=297 ns, sleep=0 ns, context=297 ns, ret=1, end_time=3603.787024996 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.797638: do_select: pselect6: total=2352 ns, sleep=0 ns, context=2352 ns, ret=1, end_time=3603.787231422 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.797676: do_select: pselect6: total=648 ns, sleep=0 ns, context=648 ns, ret=1, end_time=3603.787270292 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.797699: do_select: pselect6: total=907 ns, sleep=0 ns, context=907 ns, ret=1, end_time=3603.787292755 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.797716: do_select: pselect6: total=741 ns, sleep=0 ns, context=741 ns, ret=1, end_time=3603.787310052 s, fd=3, file=ttyACM0
+python-38073   [003] .....  3603.812591: do_select: pselect6: total=32788972 ns, sleep=32774769 ns, context=14203 ns, ret=1, end_time=3603.802181507 s, fd=8, file=video0
+python-38074   [002] .....  3603.826823: do_select: pselect6: total=25453791 ns, sleep=25446402 ns, context=7389 ns, ret=1, end_time=3603.816415813 s, fd=9, file=video2
+python-37210   [002] .....  3603.841868: do_select: pselect6: total=122815 ns, sleep=117555 ns, context=5260 ns, ret=1, end_time=3603.831460750 s
+python-37210   [002] .....  3603.843959: do_select: pselect6: total=142167 ns, sleep=135760 ns, context=6407 ns, ret=1, end_time=3603.833551458 s
+python-37210   [002] .....  3603.844205: do_select: pselect6: total=4223 ns, sleep=0 ns, context=4223 ns, ret=0, end_time=3603.833796459 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.844266: do_select: pselect6: total=1908 ns, sleep=0 ns, context=1908 ns, ret=0, end_time=3603.833858700 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.844287: do_select: pselect6: total=703 ns, sleep=0 ns, context=703 ns, ret=0, end_time=3603.833880403 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.844294: do_select: pselect6: total=370 ns, sleep=0 ns, context=370 ns, ret=0, end_time=3603.833888051 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.844302: do_select: pselect6: total=389 ns, sleep=0 ns, context=389 ns, ret=0, end_time=3603.833896459 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.844446: do_select: pselect6: total=1278 ns, sleep=0 ns, context=1278 ns, ret=0, end_time=3603.834039737 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.844460: do_select: pselect6: total=426 ns, sleep=0 ns, context=426 ns, ret=0, end_time=3603.834054607 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.844468: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.834061793 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.844474: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=0, end_time=3603.834068015 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.845135: do_select: pselect6: total=3370 ns, sleep=0 ns, context=3370 ns, ret=1, end_time=3603.834729016 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.845372: do_select: pselect6: total=1759 ns, sleep=0 ns, context=1759 ns, ret=1, end_time=3603.834964942 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.845521: do_select: pselect6: total=1685 ns, sleep=0 ns, context=1685 ns, ret=1, end_time=3603.835114091 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.845551: do_select: pselect6: total=593 ns, sleep=0 ns, context=593 ns, ret=1, end_time=3603.835144906 s, fd=3, file=ttyACM0
+python-38073   [003] .....  3603.845698: do_select: pselect6: total=23997011 ns, sleep=23988751 ns, context=8260 ns, ret=1, end_time=3603.835290499 s, fd=8, file=video0
+python-37210   [002] .....  3603.845921: do_select: pselect6: total=3297 ns, sleep=0 ns, context=3297 ns, ret=1, end_time=3603.835513944 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.846308: do_select: pselect6: total=1963 ns, sleep=0 ns, context=1963 ns, ret=1, end_time=3603.835901648 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.846332: do_select: pselect6: total=407 ns, sleep=0 ns, context=407 ns, ret=1, end_time=3603.835926574 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.846357: do_select: pselect6: total=722 ns, sleep=0 ns, context=722 ns, ret=1, end_time=3603.835951352 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.846382: do_select: pselect6: total=463 ns, sleep=0 ns, context=463 ns, ret=1, end_time=3603.835975870 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.846393: do_select: pselect6: total=296 ns, sleep=0 ns, context=296 ns, ret=1, end_time=3603.835987074 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.846405: do_select: pselect6: total=296 ns, sleep=0 ns, context=296 ns, ret=1, end_time=3603.835999148 s, fd=3, file=ttyACM0
+python-37210   [002] .....  3603.846451: do_select: pselect6: total=815 ns, sleep=0 ns, context=815 ns, ret=1, end_time=3603.836044908 s, fd=3, file=ttyACM0
+python-38074   [002] .....  3603.862821: do_select: pselect6: total=28367316 ns, sleep=28360630 ns, context=6686 ns, ret=1, end_time=3603.852413459 s, fd=9, file=video2
+python-38073   [003] .....  3603.878573: do_select: pselect6: total=25201661 ns, sleep=25195254 ns, context=6407 ns, ret=1, end_time=3603.868163749 s, fd=8, file=video0
+python-38073   [003] .....  3603.914212: do_select: pselect6: total=26367848 ns, sleep=26361237 ns, context=6611 ns, ret=1, end_time=3603.903804875 s, fd=8, file=video0
+python-38073   [003] .....  3603.950546: do_select: pselect6: total=28779317 ns, sleep=28762928 ns, context=16389 ns, ret=1, end_time=3603.940130466 s, fd=8, file=video0
+python-38073   [003] .....  3603.982342: do_select: pselect6: total=28845964 ns, sleep=28831705 ns, context=14259 ns, ret=1, end_time=3603.971934936 s, fd=8, file=video0
+python-38073   [002] .....  3604.415626: do_select: pselect6: total=21686209 ns, sleep=21679154 ns, context=7055 ns, ret=1, end_time=3604.405219076 s, fd=8, file=video0
+python-38073   [003] .....  3604.450682: do_select: pselect6: total=11444337 ns, sleep=11429615 ns, context=14722 ns, ret=1, end_time=3604.440272109 s, fd=8, file=video0
+python-38073   [003] .....  3604.482761: do_select: pselect6: total=18200869 ns, sleep=18193388 ns, context=7481 ns, ret=1, end_time=3604.472355321 s, fd=8, file=video0
+python-38074   [002] .....  3604.702613: do_select: pselect6: total=26846183 ns, sleep=26839924 ns, context=6259 ns, ret=1, end_time=3604.692206296 s, fd=9, file=video2
+vncserver-x11-c-793     [002] .....  3604.714612: do_select: pselect6: total=1975054012 ns, sleep=1975042826 ns, context=11186 ns, ret=0, end_time=3604.704206172 s
+python-38073   [002] .....  3604.718767: do_select: pselect6: total=18689834 ns, sleep=18682667 ns, context=7167 ns, ret=1, end_time=3604.708361217 s, fd=8, file=video0
+python-38074   [002] .....  3604.738740: do_select: pselect6: total=32531287 ns, sleep=32519342 ns, context=11945 ns, ret=1, end_time=3604.728333886 s, fd=9, file=video2
+python-38073   [002] .....  3604.750680: do_select: pselect6: total=26200348 ns, sleep=26193719 ns, context=6629 ns, ret=1, end_time=3604.740273447 s, fd=8, file=video0
+python-37210   [001] .....  3604.759348: do_select: pselect6: total=141574 ns, sleep=135186 ns, context=6388 ns, ret=1, end_time=3604.748943316 s
+python-37210   [001] .....  3604.759981: do_select: pselect6: total=3629 ns, sleep=0 ns, context=3629 ns, ret=1, end_time=3604.749576095 s
+python-37210   [001] .....  3604.760238: do_select: pselect6: total=2259 ns, sleep=0 ns, context=2259 ns, ret=0, end_time=3604.749832855 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3604.762297: do_select: pselect6: total=4260 ns, sleep=0 ns, context=4260 ns, ret=1, end_time=3604.751891267 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3604.763129: do_select: pselect6: total=2963 ns, sleep=0 ns, context=2963 ns, ret=1, end_time=3604.752724398 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3604.764111: do_select: pselect6: total=3315 ns, sleep=0 ns, context=3315 ns, ret=1, end_time=3604.753706344 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3604.764151: do_select: pselect6: total=667 ns, sleep=0 ns, context=667 ns, ret=1, end_time=3604.753747289 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3604.764196: do_select: pselect6: total=1074 ns, sleep=0 ns, context=1074 ns, ret=1, end_time=3604.753791437 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3604.764565: do_select: pselect6: total=2629 ns, sleep=0 ns, context=2629 ns, ret=1, end_time=3604.754160104 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3604.765854: do_select: pselect6: total=2111 ns, sleep=0 ns, context=2111 ns, ret=1, end_time=3604.755448903 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3604.767873: do_select: pselect6: total=4130 ns, sleep=0 ns, context=4130 ns, ret=1, end_time=3604.757468148 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3604.767940: do_select: pselect6: total=1074 ns, sleep=0 ns, context=1074 ns, ret=1, end_time=3604.757535556 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3604.767956: do_select: pselect6: total=388 ns, sleep=0 ns, context=388 ns, ret=1, end_time=3604.757552370 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3604.767974: do_select: pselect6: total=519 ns, sleep=0 ns, context=519 ns, ret=1, end_time=3604.757569945 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3604.767983: do_select: pselect6: total=297 ns, sleep=0 ns, context=297 ns, ret=1, end_time=3604.757578593 s, fd=3, file=ttyACM0
+python-38074   [002] .....  3604.774638: do_select: pselect6: total=32808066 ns, sleep=32799602 ns, context=8464 ns, ret=1, end_time=3604.764231310 s, fd=9, file=video2
+python-38073   [002] .....  3604.786933: do_select: pselect6: total=19183723 ns, sleep=19176297 ns, context=7426 ns, ret=1, end_time=3604.776527149 s, fd=8, file=video0
+python-38074   [002] .....  3604.806284: do_select: pselect6: total=28265686 ns, sleep=28258982 ns, context=6704 ns, ret=1, end_time=3604.795878262 s, fd=9, file=video2
+python-38073   [002] .....  3604.818653: do_select: pselect6: total=26669517 ns, sleep=26662238 ns, context=7279 ns, ret=1, end_time=3604.808247620 s, fd=8, file=video0
+python-38074   [002] .....  3604.840039: do_select: pselect6: total=31565933 ns, sleep=31552582 ns, context=13351 ns, ret=1, end_time=3604.829628940 s, fd=9, file=video2
+python-38073   [003] .....  3604.854649: do_select: pselect6: total=30406005 ns, sleep=30398523 ns, context=7482 ns, ret=1, end_time=3604.844243488 s, fd=8, file=video0
+python-38074   [002] .....  3604.870898: do_select: pselect6: total=20257429 ns, sleep=20250299 ns, context=7130 ns, ret=1, end_time=3604.860492927 s, fd=9, file=video2
+python-37210   [001] .....  3604.880739: do_select: pselect6: total=8395146 ns, sleep=8383221 ns, context=11925 ns, ret=1, end_time=3604.870333928 s
+python-38073   [003] .....  3604.886613: do_select: pselect6: total=21394672 ns, sleep=21387839 ns, context=6833 ns, ret=1, end_time=3604.876208181 s, fd=8, file=video0
+python-37210   [001] .....  3604.902229: do_select: pselect6: total=7000 ns, sleep=0 ns, context=7000 ns, ret=1, end_time=3604.891823453 s
+python-37210   [001] .....  3604.902468: do_select: pselect6: total=2371 ns, sleep=0 ns, context=2371 ns, ret=1, end_time=3604.892063231 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3604.903084: do_select: pselect6: total=5241 ns, sleep=0 ns, context=5241 ns, ret=1, end_time=3604.892678732 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3604.903162: do_select: pselect6: total=1611 ns, sleep=0 ns, context=1611 ns, ret=1, end_time=3604.892757973 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3604.903234: do_select: pselect6: total=1315 ns, sleep=0 ns, context=1315 ns, ret=1, end_time=3604.892829881 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3604.903250: do_select: pselect6: total=315 ns, sleep=0 ns, context=315 ns, ret=1, end_time=3604.892845918 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3604.903259: do_select: pselect6: total=278 ns, sleep=0 ns, context=278 ns, ret=1, end_time=3604.892854788 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3604.903285: do_select: pselect6: total=519 ns, sleep=0 ns, context=519 ns, ret=1, end_time=3604.892880881 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3604.903297: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=1, end_time=3604.892893010 s, fd=3, file=ttyACM0
+python-38074   [002] .....  3604.906902: do_select: pselect6: total=12217839 ns, sleep=12210858 ns, context=6981 ns, ret=1, end_time=3604.896496758 s, fd=9, file=video2
+python-37210   [001] .....  3604.910523: do_select: pselect6: total=2963 ns, sleep=0 ns, context=2963 ns, ret=1, end_time=3604.900118321 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3604.910543: do_select: pselect6: total=314 ns, sleep=0 ns, context=314 ns, ret=1, end_time=3604.900139302 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3604.910558: do_select: pselect6: total=297 ns, sleep=0 ns, context=297 ns, ret=1, end_time=3604.900154340 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3604.910568: do_select: pselect6: total=389 ns, sleep=0 ns, context=389 ns, ret=1, end_time=3604.900164210 s, fd=3, file=ttyACM0
+python-38073   [003] .....  3604.924223: do_select: pselect6: total=20374374 ns, sleep=20366967 ns, context=7407 ns, ret=1, end_time=3604.913816978 s, fd=8, file=video0
+python-38074   [000] .....  3604.938661: do_select: pselect6: total=19097372 ns, sleep=19086946 ns, context=10426 ns, ret=1, end_time=3604.928253933 s, fd=9, file=video2
+python-38073   [000] .....  3604.954652: do_select: pselect6: total=11454708 ns, sleep=11448893 ns, context=5815 ns, ret=1, end_time=3604.944247409 s, fd=8, file=video0
+python-38074   [000] .....  3604.971174: do_select: pselect6: total=30021468 ns, sleep=30014171 ns, context=7297 ns, ret=1, end_time=3604.960768257 s, fd=9, file=video2
+python-38073   [000] .....  3604.988394: do_select: pselect6: total=31161507 ns, sleep=31152636 ns, context=8871 ns, ret=1, end_time=3604.977988902 s, fd=8, file=video0
+vncserver-x11-c-793     [002] .....  3604.998354: do_select: pselect6: total=278305721 ns, sleep=278292462 ns, context=13259 ns, ret=0, end_time=3604.987947959 s
+python-38074   [000] .....  3605.006723: do_select: pselect6: total=33222881 ns, sleep=33214418 ns, context=8463 ns, ret=1, end_time=3604.996318809 s, fd=9, file=video2
+vncserver-x11-c-793     [002] .....  3605.010447: do_select: pselect6: total=12078487 ns, sleep=12070858 ns, context=7629 ns, ret=0, end_time=3605.000041798 s
+python-38073   [000] .....  3605.022694: do_select: pselect6: total=31831693 ns, sleep=31824860 ns, context=6833 ns, ret=1, end_time=3605.012288248 s, fd=8, file=video0
+python-37210   [001] .....  3605.025459: do_select: pselect6: total=12562877 ns, sleep=12553395 ns, context=9482 ns, ret=1, end_time=3605.015053309 s
+python-37210   [001] .....  3605.029680: do_select: pselect6: total=2138449 ns, sleep=2132134 ns, context=6315 ns, ret=1, end_time=3605.019275799 s
+python-37210   [001] .....  3605.031971: do_select: pselect6: total=4537 ns, sleep=0 ns, context=4537 ns, ret=1, end_time=3605.021566248 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3605.032006: do_select: pselect6: total=963 ns, sleep=0 ns, context=963 ns, ret=1, end_time=3605.021602674 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3605.032031: do_select: pselect6: total=407 ns, sleep=0 ns, context=407 ns, ret=1, end_time=3605.021627600 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3605.032042: do_select: pselect6: total=296 ns, sleep=0 ns, context=296 ns, ret=1, end_time=3605.021638322 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3605.032056: do_select: pselect6: total=481 ns, sleep=0 ns, context=481 ns, ret=1, end_time=3605.021652489 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3605.032065: do_select: pselect6: total=277 ns, sleep=0 ns, context=277 ns, ret=1, end_time=3605.021661248 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3605.032076: do_select: pselect6: total=296 ns, sleep=0 ns, context=296 ns, ret=1, end_time=3605.021672989 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3605.032086: do_select: pselect6: total=297 ns, sleep=0 ns, context=297 ns, ret=1, end_time=3605.021682508 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3605.032101: do_select: pselect6: total=463 ns, sleep=0 ns, context=463 ns, ret=1, end_time=3605.021696730 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3605.032110: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=1, end_time=3605.021706545 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3605.032123: do_select: pselect6: total=574 ns, sleep=0 ns, context=574 ns, ret=1, end_time=3605.021719415 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3605.032132: do_select: pselect6: total=278 ns, sleep=0 ns, context=278 ns, ret=1, end_time=3605.021728193 s, fd=3, file=ttyACM0
+python-38074   [003] .....  3605.038662: do_select: pselect6: total=29620393 ns, sleep=29614671 ns, context=5722 ns, ret=1, end_time=3605.028257373 s, fd=9, file=video2
+python-38073   [003] .....  3605.056017: do_select: pselect6: total=19349169 ns, sleep=19342557 ns, context=6612 ns, ret=1, end_time=3605.045612167 s, fd=8, file=video0
+python-38074   [003] .....  3605.076645: do_select: pselect6: total=34045364 ns, sleep=34034197 ns, context=11167 ns, ret=1, end_time=3605.066239226 s, fd=9, file=video2
+python-38073   [003] .....  3605.095467: do_select: pselect6: total=37124185 ns, sleep=37117352 ns, context=6833 ns, ret=1, end_time=3605.085062060 s, fd=8, file=video0
+python-37210   [001] .....  3605.103370: do_select: pselect6: total=2206412 ns, sleep=2183856 ns, context=22556 ns, ret=1, end_time=3605.092965391 s
+python-37210   [001] .....  3605.105668: do_select: pselect6: total=286389 ns, sleep=277723 ns, context=8666 ns, ret=1, end_time=3605.095263247 s
+python-38074   [003] .....  3605.106741: do_select: pselect6: total=19782836 ns, sleep=19775613 ns, context=7223 ns, ret=1, end_time=3605.096336083 s, fd=9, file=video2
+python-37210   [001] .....  3605.108035: do_select: pselect6: total=3333 ns, sleep=0 ns, context=3333 ns, ret=1, end_time=3605.097630919 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3605.109205: do_select: pselect6: total=3704 ns, sleep=0 ns, context=3704 ns, ret=1, end_time=3605.098800810 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3605.109272: do_select: pselect6: total=1703 ns, sleep=0 ns, context=1703 ns, ret=1, end_time=3605.098868032 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3605.109299: do_select: pselect6: total=592 ns, sleep=0 ns, context=592 ns, ret=1, end_time=3605.098895273 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3605.109314: do_select: pselect6: total=352 ns, sleep=0 ns, context=352 ns, ret=1, end_time=3605.098910329 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3605.109364: do_select: pselect6: total=852 ns, sleep=0 ns, context=852 ns, ret=1, end_time=3605.098960496 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3605.109409: do_select: pselect6: total=944 ns, sleep=0 ns, context=944 ns, ret=1, end_time=3605.099005292 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3605.112193: do_select: pselect6: total=3611 ns, sleep=0 ns, context=3611 ns, ret=1, end_time=3605.101789112 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3605.112221: do_select: pselect6: total=407 ns, sleep=0 ns, context=407 ns, ret=1, end_time=3605.101817779 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3605.112230: do_select: pselect6: total=296 ns, sleep=0 ns, context=296 ns, ret=1, end_time=3605.101827094 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3605.112242: do_select: pselect6: total=315 ns, sleep=0 ns, context=315 ns, ret=1, end_time=3605.101838927 s, fd=3, file=ttyACM0
+python-37210   [001] .....  3605.112251: do_select: pselect6: total=278 ns, sleep=0 ns, context=278 ns, ret=1, end_time=3605.101847446 s, fd=3, file=ttyACM0
+python-38073   [003] .....  3605.129404: do_select: pselect6: total=27152721 ns, sleep=27144591 ns, context=8130 ns, ret=1, end_time=3605.118998758 s, fd=8, file=video0
+    thd-519     [001] .....  3605.142842: do_select: pselect6: total=5003987234 ns, sleep=5003983049 ns, context=4185 ns, ret=0, end_time=3605.132434322 s, fd=3, file=UNIX-STREAM
+python-38074   [003] .....  3605.146458: do_select: pselect6: total=25712866 ns, sleep=25706274 ns, context=6592 ns, ret=1, end_time=3605.136053570 s, fd=9, file=video2
+python-38073   [003] .....  3605.160192: do_select: pselect6: total=28537446 ns, sleep=28530316 ns, context=7130 ns, ret=1, end_time=3605.149787671 s, fd=8, file=video0
+python-38074   [003] .....  3605.183105: do_select: pselect6: total=34441106 ns, sleep=34431735 ns, context=9371 ns, ret=1, end_time=3605.172699439 s, fd=9, file=video2
+python-38073   [003] .....  3605.194363: do_select: pselect6: total=32063564 ns, sleep=32056509 ns, context=7055 ns, ret=1, end_time=3605.183956925 s, fd=8, file=video0
+python-38074   [003] .....  3605.206799: do_select: pselect6: total=9126462 ns, sleep=9118666 ns, context=7796 ns, ret=1, end_time=3605.196394190 s, fd=9, file=video2
+python-37210   [003] .....  3605.217677: do_select: pselect6: total=4498324 ns, sleep=4489657 ns, context=8667 ns, ret=1, end_time=3605.207273268 s
+python-37210   [003] .....  3605.220359: do_select: pselect6: total=3481 ns, sleep=0 ns, context=3481 ns, ret=1, end_time=3605.209954606 s
+python-37210   [003] .....  3605.220417: do_select: pselect6: total=870 ns, sleep=0 ns, context=870 ns, ret=1, end_time=3605.210012995 s, fd=3, file=ttyACM0
+python-37210   [003] .....  3605.220444: do_select: pselect6: total=500 ns, sleep=0 ns, context=500 ns, ret=1, end_time=3605.210041014 s, fd=3, file=ttyACM0
+python-37210   [003] .....  3605.220466: do_select: pselect6: total=408 ns, sleep=0 ns, context=408 ns, ret=1, end_time=3605.210062718 s, fd=3, file=ttyACM0
+python-37210   [003] .....  3605.220476: do_select: pselect6: total=278 ns, sleep=0 ns, context=278 ns, ret=1, end_time=3605.210072477 s, fd=3, file=ttyACM0
+python-37210   [003] .....  3605.220489: do_select: pselect6: total=297 ns, sleep=0 ns, context=297 ns, ret=1, end_time=3605.210085681 s, fd=3, file=ttyACM0
+python-37210   [003] .....  3605.220497: do_select: pselect6: total=259 ns, sleep=0 ns, context=259 ns, ret=1, end_time=3605.210094347 s, fd=3, file=ttyACM0
+python-37210   [003] .....  3605.220509: do_select: pselect6: total=296 ns, sleep=0 ns, context=296 ns, ret=1, end_time=3605.210105829 s, fd=3, file=ttyACM0
+python-37210   [003] .....  3605.220519: do_select: pselect6: total=370 ns, sleep=0 ns, context=370 ns, ret=1, end_time=3605.210115403 s, fd=3, file=ttyACM0
+python-37210   [003] .....  3605.220531: do_select: pselect6: total=297 ns, sleep=0 ns, context=297 ns, ret=1, end_time=3605.210127922 s, fd=3, file=ttyACM0
+python-37210   [003] .....  3605.220541: do_select: pselect6: total=519 ns, sleep=0 ns, context=519 ns, ret=1, end_time=3605.210137607 s, fd=3, file=ttyACM0
+python-37210   [003] .....  3605.220552: do_select: pselect6: total=296 ns, sleep=0 ns, context=296 ns, ret=1, end_time=3605.210148699 s, fd=3, file=ttyACM0
+python-37210   [003] .....  3605.220561: do_select: pselect6: total=333 ns, sleep=0 ns, context=333 ns, ret=1, end_time=3605.210158329 s, fd=3, file=ttyACM0
+python-38073   [000] .....  3605.223855: do_select: pselect6: total=24717568 ns, sleep=24708642 ns, context=8926 ns, ret=1, end_time=3605.213449965 s, fd=8, file=video0
+python-38074   [003] .....  3605.247854: do_select: pselect6: total=38657114 ns, sleep=38649929 ns, context=7185 ns, ret=1, end_time=3605.237449643 s, fd=9, file=video2
+```

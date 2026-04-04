@@ -1,0 +1,12 @@
+=== 08_complete_frame @ frame 2 ===
+type: <class 'dict'>
+
+dict content:
+  observation.state: ndarray shape=(6,) dtype=float32
+    values: [-9.277594566345215, -82.41291046142578, 61.419471740722656, 29.15194320678711, -1.6361416578292847, 48.13172912597656]
+  observation.images.handeye: ndarray shape=(360, 640, 3) dtype=uint8
+    values (first 10): [183, 157, 158, 183, 157, 158, 183, 157, 158, 183] ...
+  observation.images.fixed: ndarray shape=(360, 640, 3) dtype=uint8
+    values (first 10): [87, 103, 118, 85, 101, 117, 85, 100, 119, 87] ...
+  action: ndarray shape=(6,) dtype=float32
+    values: [-8.146505355834961, -84.05831146240234, 64.12652587890625, 25.958829879760742, -1.5628361701965332, 49.1089973449707]

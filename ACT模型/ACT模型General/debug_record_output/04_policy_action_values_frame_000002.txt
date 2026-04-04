@@ -1,0 +1,4 @@
+=== 04_policy_action_values @ frame 2 ===
+type: <class 'torch.Tensor'>
+
+torch.Tensor shape=torch.Size([6]) dtype=torch.float32

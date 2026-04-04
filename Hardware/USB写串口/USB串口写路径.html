@@ -1,0 +1,487 @@
+<!DOCTYPE html><html><head>
+      <title>USB串口写路径</title>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      
+      <link rel="stylesheet" href="file:////Users/vel/.vscode/extensions/shd101wyy.markdown-preview-enhanced-0.8.20/crossnote/dependencies/katex/katex.min.css">
+      
+      
+      
+      
+      
+      <style>
+      code[class*=language-],pre[class*=language-]{color:#333;background:0 0;font-family:Consolas,"Liberation Mono",Menlo,Courier,monospace;text-align:left;white-space:pre;word-spacing:normal;word-break:normal;word-wrap:normal;line-height:1.4;-moz-tab-size:8;-o-tab-size:8;tab-size:8;-webkit-hyphens:none;-moz-hyphens:none;-ms-hyphens:none;hyphens:none}pre[class*=language-]{padding:.8em;overflow:auto;border-radius:3px;background:#f5f5f5}:not(pre)>code[class*=language-]{padding:.1em;border-radius:.3em;white-space:normal;background:#f5f5f5}.token.blockquote,.token.comment{color:#969896}.token.cdata{color:#183691}.token.doctype,.token.macro.property,.token.punctuation,.token.variable{color:#333}.token.builtin,.token.important,.token.keyword,.token.operator,.token.rule{color:#a71d5d}.token.attr-value,.token.regex,.token.string,.token.url{color:#183691}.token.atrule,.token.boolean,.token.code,.token.command,.token.constant,.token.entity,.token.number,.token.property,.token.symbol{color:#0086b3}.token.prolog,.token.selector,.token.tag{color:#63a35c}.token.attr-name,.token.class,.token.class-name,.token.function,.token.id,.token.namespace,.token.pseudo-class,.token.pseudo-element,.token.url-reference .token.variable{color:#795da3}.token.entity{cursor:help}.token.title,.token.title .token.punctuation{font-weight:700;color:#1d3e81}.token.list{color:#ed6a43}.token.inserted{background-color:#eaffea;color:#55a532}.token.deleted{background-color:#ffecec;color:#bd2c00}.token.bold{font-weight:700}.token.italic{font-style:italic}.language-json .token.property{color:#183691}.language-markup .token.tag .token.punctuation{color:#333}.language-css .token.function,code.language-css{color:#0086b3}.language-yaml .token.atrule{color:#63a35c}code.language-yaml{color:#183691}.language-ruby .token.function{color:#333}.language-markdown .token.url{color:#795da3}.language-makefile .token.symbol{color:#795da3}.language-makefile .token.variable{color:#183691}.language-makefile .token.builtin{color:#0086b3}.language-bash .token.keyword{color:#0086b3}pre[data-line]{position:relative;padding:1em 0 1em 3em}pre[data-line] .line-highlight-wrapper{position:absolute;top:0;left:0;background-color:transparent;display:block;width:100%}pre[data-line] .line-highlight{position:absolute;left:0;right:0;padding:inherit 0;margin-top:1em;background:hsla(24,20%,50%,.08);background:linear-gradient(to right,hsla(24,20%,50%,.1) 70%,hsla(24,20%,50%,0));pointer-events:none;line-height:inherit;white-space:pre}pre[data-line] .line-highlight:before,pre[data-line] .line-highlight[data-end]:after{content:attr(data-start);position:absolute;top:.4em;left:.6em;min-width:1em;padding:0 .5em;background-color:hsla(24,20%,50%,.4);color:#f4f1ef;font:bold 65%/1.5 sans-serif;text-align:center;vertical-align:.3em;border-radius:999px;text-shadow:none;box-shadow:0 1px #fff}pre[data-line] .line-highlight[data-end]:after{content:attr(data-end);top:auto;bottom:.4em}html body{font-family:'Helvetica Neue',Helvetica,'Segoe UI',Arial,freesans,sans-serif;font-size:16px;line-height:1.6;color:#333;background-color:#fff;overflow:initial;box-sizing:border-box;word-wrap:break-word}html body>:first-child{margin-top:0}html body h1,html body h2,html body h3,html body h4,html body h5,html body h6{line-height:1.2;margin-top:1em;margin-bottom:16px;color:#000}html body h1{font-size:2.25em;font-weight:300;padding-bottom:.3em}html body h2{font-size:1.75em;font-weight:400;padding-bottom:.3em}html body h3{font-size:1.5em;font-weight:500}html body h4{font-size:1.25em;font-weight:600}html body h5{font-size:1.1em;font-weight:600}html body h6{font-size:1em;font-weight:600}html body h1,html body h2,html body h3,html body h4,html body h5{font-weight:600}html body h5{font-size:1em}html body h6{color:#5c5c5c}html body strong{color:#000}html body del{color:#5c5c5c}html body a:not([href]){color:inherit;text-decoration:none}html body a{color:#08c;text-decoration:none}html body a:hover{color:#00a3f5;text-decoration:none}html body img{max-width:100%}html body>p{margin-top:0;margin-bottom:16px;word-wrap:break-word}html body>ol,html body>ul{margin-bottom:16px}html body ol,html body ul{padding-left:2em}html body ol.no-list,html body ul.no-list{padding:0;list-style-type:none}html body ol ol,html body ol ul,html body ul ol,html body ul ul{margin-top:0;margin-bottom:0}html body li{margin-bottom:0}html body li.task-list-item{list-style:none}html body li>p{margin-top:0;margin-bottom:0}html body .task-list-item-checkbox{margin:0 .2em .25em -1.8em;vertical-align:middle}html body .task-list-item-checkbox:hover{cursor:pointer}html body blockquote{margin:16px 0;font-size:inherit;padding:0 15px;color:#5c5c5c;background-color:#f0f0f0;border-left:4px solid #d6d6d6}html body blockquote>:first-child{margin-top:0}html body blockquote>:last-child{margin-bottom:0}html body hr{height:4px;margin:32px 0;background-color:#d6d6d6;border:0 none}html body table{margin:10px 0 15px 0;border-collapse:collapse;border-spacing:0;display:block;width:100%;overflow:auto;word-break:normal;word-break:keep-all}html body table th{font-weight:700;color:#000}html body table td,html body table th{border:1px solid #d6d6d6;padding:6px 13px}html body dl{padding:0}html body dl dt{padding:0;margin-top:16px;font-size:1em;font-style:italic;font-weight:700}html body dl dd{padding:0 16px;margin-bottom:16px}html body code{font-family:Menlo,Monaco,Consolas,'Courier New',monospace;font-size:.85em;color:#000;background-color:#f0f0f0;border-radius:3px;padding:.2em 0}html body code::after,html body code::before{letter-spacing:-.2em;content:'\00a0'}html body pre>code{padding:0;margin:0;word-break:normal;white-space:pre;background:0 0;border:0}html body .highlight{margin-bottom:16px}html body .highlight pre,html body pre{padding:1em;overflow:auto;line-height:1.45;border:#d6d6d6;border-radius:3px}html body .highlight pre{margin-bottom:0;word-break:normal}html body pre code,html body pre tt{display:inline;max-width:initial;padding:0;margin:0;overflow:initial;line-height:inherit;word-wrap:normal;background-color:transparent;border:0}html body pre code:after,html body pre code:before,html body pre tt:after,html body pre tt:before{content:normal}html body blockquote,html body dl,html body ol,html body p,html body pre,html body ul{margin-top:0;margin-bottom:16px}html body kbd{color:#000;border:1px solid #d6d6d6;border-bottom:2px solid #c7c7c7;padding:2px 4px;background-color:#f0f0f0;border-radius:3px}@media print{html body{background-color:#fff}html body h1,html body h2,html body h3,html body h4,html body h5,html body h6{color:#000;page-break-after:avoid}html body blockquote{color:#5c5c5c}html body pre{page-break-inside:avoid}html body table{display:table}html body img{display:block;max-width:100%;max-height:100%}html body code,html body pre{word-wrap:break-word;white-space:pre}}.markdown-preview{width:100%;height:100%;box-sizing:border-box}.markdown-preview ul{list-style:disc}.markdown-preview ul ul{list-style:circle}.markdown-preview ul ul ul{list-style:square}.markdown-preview ol{list-style:decimal}.markdown-preview ol ol,.markdown-preview ul ol{list-style-type:lower-roman}.markdown-preview ol ol ol,.markdown-preview ol ul ol,.markdown-preview ul ol ol,.markdown-preview ul ul ol{list-style-type:lower-alpha}.markdown-preview .newpage,.markdown-preview .pagebreak{page-break-before:always}.markdown-preview pre.line-numbers{position:relative;padding-left:3.8em;counter-reset:linenumber}.markdown-preview pre.line-numbers>code{position:relative}.markdown-preview pre.line-numbers .line-numbers-rows{position:absolute;pointer-events:none;top:1em;font-size:100%;left:0;width:3em;letter-spacing:-1px;border-right:1px solid #999;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none}.markdown-preview pre.line-numbers .line-numbers-rows>span{pointer-events:none;display:block;counter-increment:linenumber}.markdown-preview pre.line-numbers .line-numbers-rows>span:before{content:counter(linenumber);color:#999;display:block;padding-right:.8em;text-align:right}.markdown-preview .mathjax-exps .MathJax_Display{text-align:center!important}.markdown-preview:not([data-for=preview]) .code-chunk .code-chunk-btn-group{display:none}.markdown-preview:not([data-for=preview]) .code-chunk .status{display:none}.markdown-preview:not([data-for=preview]) .code-chunk .output-div{margin-bottom:16px}.markdown-preview .md-toc{padding:0}.markdown-preview .md-toc .md-toc-link-wrapper .md-toc-link{display:inline;padding:.25rem 0}.markdown-preview .md-toc .md-toc-link-wrapper .md-toc-link div,.markdown-preview .md-toc .md-toc-link-wrapper .md-toc-link p{display:inline}.markdown-preview .md-toc .md-toc-link-wrapper.highlighted .md-toc-link{font-weight:800}.scrollbar-style::-webkit-scrollbar{width:8px}.scrollbar-style::-webkit-scrollbar-track{border-radius:10px;background-color:transparent}.scrollbar-style::-webkit-scrollbar-thumb{border-radius:5px;background-color:rgba(150,150,150,.66);border:4px solid rgba(150,150,150,.66);background-clip:content-box}html body[for=html-export]:not([data-presentation-mode]){position:relative;width:100%;height:100%;top:0;left:0;margin:0;padding:0;overflow:auto}html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{position:relative;top:0;min-height:100vh}@media screen and (min-width:914px){html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{padding:2em calc(50% - 457px + 2em)}}@media screen and (max-width:914px){html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{padding:2em}}@media screen and (max-width:450px){html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{font-size:14px!important;padding:1em}}@media print{html body[for=html-export]:not([data-presentation-mode]) #sidebar-toc-btn{display:none}}html body[for=html-export]:not([data-presentation-mode]) #sidebar-toc-btn{position:fixed;bottom:8px;left:8px;font-size:28px;cursor:pointer;color:inherit;z-index:99;width:32px;text-align:center;opacity:.4}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] #sidebar-toc-btn{opacity:1}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc{position:fixed;top:0;left:0;width:300px;height:100%;padding:32px 0 48px 0;font-size:14px;box-shadow:0 0 4px rgba(150,150,150,.33);box-sizing:border-box;overflow:auto;background-color:inherit}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc::-webkit-scrollbar{width:8px}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc::-webkit-scrollbar-track{border-radius:10px;background-color:transparent}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc::-webkit-scrollbar-thumb{border-radius:5px;background-color:rgba(150,150,150,.66);border:4px solid rgba(150,150,150,.66);background-clip:content-box}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc a{text-decoration:none}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc{padding:0 16px}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper .md-toc-link{display:inline;padding:.25rem 0}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper .md-toc-link div,html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper .md-toc-link p{display:inline}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper.highlighted .md-toc-link{font-weight:800}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .markdown-preview{left:300px;width:calc(100% - 300px);padding:2em calc(50% - 457px - 300px / 2);margin:0;box-sizing:border-box}@media screen and (max-width:1274px){html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .markdown-preview{padding:2em}}@media screen and (max-width:450px){html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .markdown-preview{width:100%}}html body[for=html-export]:not([data-presentation-mode]):not([html-show-sidebar-toc]) .markdown-preview{left:50%;transform:translateX(-50%)}html body[for=html-export]:not([data-presentation-mode]):not([html-show-sidebar-toc]) .md-sidebar-toc{display:none}
+/* Please visit the URL below for more information: */
+/*   https://shd101wyy.github.io/markdown-preview-enhanced/#/customize-css */
+
+      </style>
+      <!-- The content below will be included at the end of the <head> element. --><script type="text/javascript">
+  document.addEventListener("DOMContentLoaded", function () {
+    // your code here
+  });
+</script></head><body for="html-export">
+    
+    
+      <div class="crossnote markdown-preview  ">
+      
+<h2 id="总览架构"><strong>总览架构</strong> </h2>
+<pre data-role="codeBlock" data-info="" class="language-text"><code>┌─────────────────────────────────────────────────────────────┐
+│  1. Python 层（用户态）                                       │
+│     ├─ 1.1 ACT 模型                                          │
+│     ├─ 1.2 PySerial / 用户驱动库                             │
+│     └─ 1.3 CPython API（os.write）                           │
+└───────────────┬──────────────────────────────────────────────┘
+                │ 调用：PyOS_Write → _Py_write → write()
+                ▼
+┌─────────────────────────────────────────────────────────────┐
+│  2. C 库（glibc 层，用户态）                                 │
+│     └─ glibc write() → 执行 syscall 指令                    │
+└───────────────┬──────────────────────────────────────────────┘
+                │ CPU 切换到内核态
+                ▼
+┌─────────────────────────────────────────────────────────────┐
+│  3. Linux 内核（开始）                                       │
+│                                                             │
+│  3.1 系统调用入口层                                          │
+│      └─ sys_write → ksys_write                              │
+│                                                             │
+│  3.2 VFS/FS 写入子系统                                       │
+│      └─ vfs_write → new_sync_write → write_iter             │
+│                                                             │
+│  3.3 TTY 子系统（串口抽象）                                  │
+│      ├─ tty_write                                           │
+│      ├─ iterate_tty_write                                   │
+│      └─ line discipline（n_tty_write） 行规程             │
+│                                                             │
+│  3.4 ACM 子系统（USB CDC-ACM 驱动）                         │
+│      ├─ acm_tty_write                                       │
+│      ├─ acm_start_wb                                        │
+│      └─ usb_submit_urb                                      │
+│                                                             │
+│  3.5 USB Core（驱动框架层）                                 │
+│      ├─ usb_hcd_submit_urb                                  │
+│      └─ 调用 HCD→urb_enqueue()                              │
+│                                                             │
+│  3.6 Host Controller Driver（xHCI/DWC3）                     │
+│      ├─ xhci_urb_enqueue                                    │
+│      ├─ xhci_queue_bulk_tx（构造 TRB）                       │
+│      ├─ giveback_first_trb                                  │
+│      └─ xhci_ring_ep_doorbell → writel(DB_VALUE, addr)      │
+│                                                             │
+└───────────────┬──────────────────────────────────────────────┘
+                │ Doorbell 写寄存器 → HCD 硬件开始 DMA
+                ▼
+┌─────────────────────────────────────────────────────────────┐
+│  4. USB 控制器（硬件）                                       │
+│     ├─ DMA 读取 TRB Ring                                     │
+│     ├─ DMA 读取数据缓冲区 transfer_buffer                    │
+│     └─ 发送 USB Bulk OUT 包                                  │
+└───────────────┬──────────────────────────────────────────────┘
+                ▼
+┌─────────────────────────────────────────────────────────────┐
+│  5. MCU / 机器人控制器                                       │
+│     ├─ USB Bulk OUT 解包                                     │
+│     ├─ 解析动作命令                                          │
+│     └─ 控制舵机、电机                                         │
+└──────────────────────────────────────────────────────────────┘
+</code></pre><hr>
+<h1 id="1-python-层用户态"><strong>1. Python 层（用户态）</strong> </h1>
+<h3 id="11-act--feetech飞特舵机库--pyserial--pyososwrite">1.1 ACT → Feetech飞特舵机库 → PySerial → PyOS(os.write()) </h3>
+<pre data-role="codeBlock" data-info="" class="language-text"><code>action → serial.write(bytes)
+</code></pre><h3 id="12-cpython-调用链">1.2 CPython 调用链 </h3>
+<table>
+<thead>
+<tr>
+<th>函数</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>_Py_write()</code></td>
+<td>CPython 封装写接口，处理 EINTR/信号</td>
+</tr>
+<tr>
+<td><code>_Py_write_impl()</code></td>
+<td>真正调用 glibc 的 write()</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h1 id="2-glibc-层"><strong>2. glibc 层</strong> </h1>
+<h3 id="调用链">调用链 </h3>
+<pre data-role="codeBlock" data-info="" class="language-text"><code>glibc write(fd, buf, count)
+    ↓
+syscall(SYS_write)
+</code></pre><p>这边如果要看具体系统调用具体要<strong>先编译在反汇编</strong>，而且X86的ARM还不一样，我还没研究明白。</p>
+<p>如果是ARM的话，<strong>从EL0到EL1</strong>需要切换特权级，就是在这边实现的。所以下面也就进入内核态了。</p>
+<p>所以这边的作用是：</p>
+<ul>
+<li>构造<strong>系统调用</strong>参数</li>
+<li>执行 syscall 汇编指令</li>
+<li>切换到内核态</li>
+</ul>
+<hr>
+<h1 id="3-linux-内核层"><strong>3. Linux 内核层</strong> </h1>
+<h2 id="31-fs系统调用入口"><strong>3.1 FS系统调用入口</strong> </h2>
+<h3 id="调用链-1">调用链 </h3>
+<pre data-role="codeBlock" data-info="css" class="language-css css"><code>sys_<span class="token function">write</span><span class="token punctuation">(</span><span class="token punctuation">)</span>         // 系统调用入口
+    ↓
+ksys_<span class="token function">write</span><span class="token punctuation">(</span><span class="token punctuation">)</span>        // <span class="token function">write</span><span class="token punctuation">(</span><span class="token punctuation">)</span> 系统调用的内核实现
+</code></pre><h3 id="ksys_write作用">ksys_write()作用 </h3>
+<ul>
+<li>根据 fd <strong>找到 struct file（文件对象）</strong></li>
+<li>设置正确的文件偏移（pos/ppos）</li>
+<li>调用 vfs_write() 完成真正写入</li>
+</ul>
+<hr>
+<h2 id="32-fsvfs-写子系统"><strong>3.2 FS/VFS 写子系统</strong> </h2>
+<h3 id="调用链-2">调用链 </h3>
+<pre data-role="codeBlock" data-info="(" class="language-( ("><code>vfs_write()     // VFS(虚拟文件系统)层的通用写接口
+    ↓
+new_sync_write()    //同步写入包装层，目的是同步接口，解决write的同步性
+    ↓
+file-&gt;f_op-&gt;write_iter()
+</code></pre><h3 id="vfs_write作用">vfs_write()作用 </h3>
+<ul>
+<li>权限与可写性验证</li>
+<li>用户空间指针有效性检查</li>
+<li>文件边界与追加模式处理</li>
+<li>写事务开始与结束（文件系统可能使用）</li>
+<li>分发到具体文件系统/设备的 write/write_iter 实现</li>
+</ul>
+<p><img src="Picture/Linux%20VFS.png" alt="Linux VFS"></p>
+<h3 id="new_sync_write作用">new_sync_write()作用 </h3>
+<p>同步写入包装层，目的是<strong>同步接口，解决write的同步性</strong>。</p>
+<p>所有常规文件、socket、pipe、设备等写入最终都会走到new_sync_write。</p>
+<p>调用文件的 write_iter 回调<code>file-&gt;f_op-&gt;write_iter()</code></p>
+<p><strong>write_iter</strong> 是文件系统 / 驱动在 file_operations 中提供的回调函数指针，在fs.h中定义，各种文件类型自己实现。</p>
+<table>
+<thead>
+<tr>
+<th>文件类型</th>
+<th>write_iter 实现在哪里？</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>普通文件（ext4）</strong></td>
+<td>fs/ext4/file.c → <code>ext4_file_write_iter()</code></td>
+</tr>
+<tr>
+<td><strong>XFS 文件系统</strong></td>
+<td>fs/xfs/xfs_file.c → <code>xfs_file_write_iter()</code></td>
+</tr>
+<tr>
+<td><strong>Btrfs 文件系统</strong></td>
+<td>fs/btrfs/file.c → <code>btrfs_file_write_iter()</code></td>
+</tr>
+<tr>
+<td><strong>管道 pipe</strong></td>
+<td>pipe 走的是 <code>pipe_write()</code>（不使用 write_iter）</td>
+</tr>
+<tr>
+<td><strong>socket（TCP/UDP）</strong></td>
+<td>net/socket.c → <code>sock_write_iter()</code></td>
+</tr>
+<tr>
+<td><strong>字符设备（设备驱动）</strong></td>
+<td>驱动自己实现其 write()，通常不使用 write_iter</td>
+</tr>
+<tr>
+<td><strong>终端 tty</strong></td>
+<td>drivers/tty/tty_io.c → <code>tty_write()</code></td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="33-driverstty-子系统"><strong>3.3 drivers/tty 子系统</strong> </h2>
+<p>在 Linux 或 UNIX 中，TTY（Teletypewriter）是一个抽象设备。有时它指的是一个物理输入设备，例如串口，有时它指的是一个允许用户和系统交互的虚拟 TTY 设备，例如图形终端。</p>
+<p>TTY 是 Linux 内核中对“文本交互式设备”的统一抽象层，用于处理输入输出、行编辑、控制字符、信号、会话与终端行为。</p>
+<p>在 Linux 中：<code>/dev/ttyS0, /dev/ttyUSB0, /dev/ttyAMA0, /dev/ttyACM0</code><br>
+都属于 TTY（Teletypewriter） 框架下的串口驱动（serial driver）。</p>
+<p><img src="Picture/Linux-TTY.png" alt="Linux-TTY"><br>
+这里就是要写到串口硬件</p>
+<h3 id="调用链-3">调用链 </h3>
+<pre data-role="codeBlock" data-info="css" class="language-css css"><code>tty_<span class="token function">write</span><span class="token punctuation">(</span><span class="token punctuation">)</span> // 啥也没干直接调用file_tty_write
+    ↓
+file_tty_<span class="token function">write</span><span class="token punctuation">(</span><span class="token punctuation">)</span>    // 检查 TTY 结构体是否损坏或非法<span class="token punctuation">,</span>可写性检查<span class="token punctuation">,</span>获取行规程对象<span class="token punctuation">,</span>调用iterate_tty_write
+    ↓
+iterate_tty_<span class="token function">write</span><span class="token punctuation">(</span><span class="token punctuation">)</span> // 将 <span class="token function">write</span><span class="token punctuation">(</span><span class="token punctuation">)</span> 的数据拆成合理块大小，避免 DOS 式长数据写入
+                    // 是对低层驱动的一种保护（降低锁竞争、避免巨量拷贝）
+    ↓
+ld-&gt;ops-&gt;<span class="token function">write</span><span class="token punctuation">(</span>tty<span class="token punctuation">,</span> file<span class="token punctuation">,</span> tty-&gt;write_buf<span class="token punctuation">,</span> size<span class="token punctuation">)</span><span class="token punctuation">;</span>   
+       （默认是 n_tty_write）
+    ↓
+n_tty_<span class="token function">write</span><span class="token punctuation">(</span><span class="token punctuation">)</span>       //是Line discipline层，n_tty_write在drivers/tty/n_tty.c
+
+</code></pre><h3 id="作用">作用 </h3>
+<ul>
+<li><strong>分块写</strong>，提高驱动效率，满足硬件要求，默认 chunk = 2KB（NTTY 所能稳定处理的大小）</li>
+<li><strong>行规程</strong>（<strong>Line Discipline，LDISC</strong>） 处理（如果开启 OPOST）</li>
+<li>最终调用低层串口（比如ACM/UART......）驱动的 write</li>
+</ul>
+<p>行规程是 Linux TTY 子系统中独有的的一个“协议处理层”，位于<strong>用户进程</strong>与<strong>底层串口驱动</strong>之间，用来处理人类交互式终端的输入输出行为。</p>
+<p>行规程让 TTY 具备这些传统终端行为，负责解释用户输入、处理终端行为并管理缓冲区。</p>
+<table>
+<thead>
+<tr>
+<th>功能</th>
+<th>描述</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>回显 echo</strong></td>
+<td>你输入一个字符，需要回显到屏幕</td>
+</tr>
+<tr>
+<td><strong>Ctrl-C 发送 SIGINT</strong></td>
+<td>解释控制字符，不是普通字节</td>
+</tr>
+<tr>
+<td><strong>Ctrl-Z 暂停任务</strong></td>
+<td>解释并发信号</td>
+</tr>
+<tr>
+<td><strong>规范模式（canonical）</strong></td>
+<td>只有按 Enter 才把一行送出</td>
+</tr>
+<tr>
+<td><strong>行编辑功能</strong></td>
+<td>Backspace 删除，Ctrl-U 删除整行</td>
+</tr>
+<tr>
+<td><strong>处理 NL/CR</strong></td>
+<td>'\r' / '\n' 的转换规则</td>
+</tr>
+<tr>
+<td><strong>输入缓冲管理</strong></td>
+<td>input buffer, echo buffer 等</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="34-acm-子系统cdc-acm-驱动driversusbclasscdc-acm"><strong>3.4 ACM 子系统（CDC-ACM 驱动）drivers/usb/class/cdc-acm</strong> </h2>
+<p>CDC-ACM层：</p>
+<ul>
+<li>构建 TTY 设备：/dev/ttyACM0</li>
+<li>实现 TTY 的写接口（最核心）</li>
+<li>自动电源管理 / autosuspend</li>
+<li>管理 USB Bulk 传输（IN/OUT）</li>
+</ul>
+<h3 id="调用链-4">调用链 </h3>
+<pre data-role="codeBlock" data-info="css" class="language-css css"><code>acm_tty_<span class="token function">write</span><span class="token punctuation">(</span><span class="token punctuation">)</span> // 实现 TTY 的写接口（最核心）
+    ↓
+acm_start_<span class="token function">wb</span><span class="token punctuation">(</span><span class="token punctuation">)</span>  // 提交写 URB 到 USB 栈。这一步会让 USB 控制器（如 xHCI）开始 DMA 传输
+    ↓
+usb_submit_<span class="token function">urb</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+</code></pre><h3 id="作用-1">作用 </h3>
+<ul>
+<li>分配 acm_wb 缓冲区</li>
+<li>准备 <strong>URB</strong> （USB Request Block）,一次 USB 发送动作完全被描述为一份 URB。</li>
+<li>提交到 USB Core</li>
+</ul>
+<p>URB 是 USB Core 能够管理<strong>并发和队列</strong>的基础</p>
+<pre data-role="codeBlock" data-info="c" class="language-c c"><code><span class="token keyword keyword-struct">struct</span> <span class="token class-name">urb</span> <span class="token punctuation">{</span>
+    <span class="token keyword keyword-struct">struct</span> <span class="token class-name">usb_device</span> <span class="token operator">*</span>dev<span class="token punctuation">;</span>         <span class="token comment">// 目标 USB 设备</span>
+    <span class="token keyword keyword-unsigned">unsigned</span> <span class="token keyword keyword-int">int</span> pipe<span class="token punctuation">;</span>              <span class="token comment">// 管道 + 方向 + 端点号</span>
+    <span class="token keyword keyword-void">void</span> <span class="token operator">*</span>transfer_buffer<span class="token punctuation">;</span>          <span class="token comment">// 数据 buffer（Out: 数据要发出去）</span>
+    <span class="token class-name">dma_addr_t</span> transfer_dma<span class="token punctuation">;</span>        <span class="token comment">// DMA 地址</span>
+    <span class="token keyword keyword-int">int</span> transfer_buffer_length<span class="token punctuation">;</span>     <span class="token comment">// 要发送的字节数</span>
+    <span class="token keyword keyword-int">int</span> actual_length<span class="token punctuation">;</span>              <span class="token comment">// 实际发送/接收的字节数（由硬件填写）</span>
+    <span class="token keyword keyword-unsigned">unsigned</span> <span class="token keyword keyword-int">int</span> transfer_flags<span class="token punctuation">;</span>    <span class="token comment">// 零包？短包？是否使用 DMA 映射？</span>
+    <span class="token keyword keyword-void">void</span> <span class="token punctuation">(</span><span class="token operator">*</span>complete<span class="token punctuation">)</span><span class="token punctuation">(</span><span class="token keyword keyword-struct">struct</span> <span class="token class-name">urb</span> <span class="token operator">*</span><span class="token punctuation">)</span><span class="token punctuation">;</span> <span class="token comment">// 完成回调函数</span>
+<span class="token punctuation">}</span><span class="token punctuation">;</span>
+</code></pre><hr>
+<h2 id="35-usb-core-子系统"><strong>3.5 USB Core 子系统</strong> </h2>
+<h3 id="调用链-5">调用链 </h3>
+<pre data-role="codeBlock" data-info="" class="language-text"><code>usb_submit_urb()
+    ↓
+usb_hcd_submit_urb()
+    ↓
+hcd-&gt;driver-&gt;urb_enqueue(hcd, urb, mem_flags)        ← 这里进入具体 HCD（如 xHCI）
+unmap_urb_for_dma(hcd, urb)
+</code></pre><h3 id="usb_submit_urb-做的事">usb_submit_urb 做的事 </h3>
+<ol>
+<li>各种合法性检查（设备/endpoint/flags/packet 长度等）</li>
+<li>规范化参数（方向、interval、transfer_flags）</li>
+<li>初始化 urb 状态字段</li>
+<li>处理 Isochronous 特殊逻辑</li>
+<li>处理 SG 逻辑</li>
+<li>调用 usb_hcd_submit_urb（底层）</li>
+</ol>
+<h3 id="usb_hcd_submit_urb作用">usb_hcd_submit_urb()作用 </h3>
+<ul>
+<li>校验 URB（USB Request Block）,一次 USB 发送动作完全被描述为一份 URB。</li>
+<li>执行 <strong>DMA 映射</strong>（map_urb_for_dma）</li>
+<li>调用 HCD 驱动的 urb_enqueue（如 DWC2/<strong>XHCI</strong>/EHCI）</li>
+</ul>
+<hr>
+<h2 id="36-host-controller-driver如-xhci--dwc3"><strong>3.6 Host Controller Driver（如 xHCI / DWC3）</strong> </h2>
+<p><strong>xHCI</strong>（<strong>eXtensible Host Controller Interface</strong>）是 USB 3.x/USB 2.0/USB 1.1 的统一主机控制器规范，是现代 Linux（包括树莓派、PC）使用的 USB 控制器硬件抽象层。</p>
+<p>内核中负责处理 USB 传输（<strong>URB → TRB → DMA</strong>）的就是 xHCI 驱动</p>
+<h3 id="调用链核心">调用链（核心） </h3>
+<p>linux/drivers/usb/host/xhci.c</p>
+<pre data-role="codeBlock" data-info="css" class="language-css css"><code>xhci_urb_<span class="token function">enqueue</span><span class="token punctuation">(</span><span class="token punctuation">)</span> // 功能：将一个 URB 放入 xHCI（USB3 控制器）的传输队列。根据端点类型选择不同的 queue_xxx_<span class="token function">tx</span><span class="token punctuation">(</span><span class="token punctuation">)</span> 函数，并为本次 URB 分配对应的传输描述（TD，多个 TRB）。
+                    //根据端点类型选择 TX 函数
+这里正式进入 xHCI 的 TRB 构造逻辑：
+Control → xhci_queue_ctrl_<span class="token function">tx</span><span class="token punctuation">(</span><span class="token punctuation">)</span>			控制传输
+Bulk   → xhci_queue_bulk_<span class="token function">tx</span><span class="token punctuation">(</span><span class="token punctuation">)</span>			批量传输，写字符控制肯定是走的这个
+Intr   → xhci_queue_intr_<span class="token function">tx</span><span class="token punctuation">(</span><span class="token punctuation">)</span>			中断传输
+Isoc   → xhci_queue_isoc_tx_<span class="token function">prepare</span><span class="token punctuation">(</span><span class="token punctuation">)</span>	等时传输
+    ↓
+    ↓   下面的在 linux/drivers/usb/host/xhci-ring.c
+xhci_queue_bulk_<span class="token function">tx</span><span class="token punctuation">(</span><span class="token punctuation">)</span>    //为一个 Bulk URB 构造 xHCI 所需的一系列 NORMAL TRB，把它们排入对应的 Transfer Ring，并在最后交给硬件。这是 USB3 Bulk 传输（比如写串口数据）的核心数据路径。
+    ↓
+queue_<span class="token function">trb</span><span class="token punctuation">(</span><span class="token punctuation">)</span>             // queue_<span class="token function">trb</span><span class="token punctuation">(</span><span class="token punctuation">)</span> 只是“写 DMA 描述符”。
+    ↓
+giveback_first_<span class="token function">trb</span><span class="token punctuation">(</span><span class="token punctuation">)</span>    // 也是在xhci_queue_bulk_tx被调用的，在queue_trb结束之后
+    ↓
+xhci_ring_ep_<span class="token function">doorbell</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+    ↓
+<span class="token function">writel</span><span class="token punctuation">(</span>DB_VALUE<span class="token punctuation">,</span> db_addr<span class="token punctuation">)</span>   ← 启动硬件 DMA
+</code></pre><h3 id="xhci_queue_bulk_tx-作用">xhci_queue_bulk_tx 作用 </h3>
+<ul>
+<li>找到该 URB 对应的 Transfer Ring，并决定需要多少个 TRB</li>
+<li>将整个缓冲区切分为若干 TRB 并入队列</li>
+<li>调用 queue_trb() 把 TRB 写入 ring</li>
+</ul>
+<p><strong>TRB（Transfer</strong> Request Block）是 xHCI <strong>硬件 DMA 引擎</strong>能识别的“硬件级指令单元<br>
+ACM 驱动会整合数据或按需要把 chunk <strong>拼接</strong>发送。<br>
+TRB 是固定大小（<strong>16 字节</strong>）的 DMA 描述符，是 xHCI 控制器理解的最小单位。<br>
+TRB 有严格的<strong>64KB 边界限制</strong>，一个 TRB 描述的 buffer 不允许跨越 64KB 物理地址边界。</p>
+<h3 id="queue_trb-作用">queue_trb 作用 </h3>
+<p>把一个 TRB 硬件指令写入 xHCI 的 DMA Ring，并保证硬件在读取前所有字段已经按正确顺序写好。<br>
+写四块<code>cpu_to_le32</code>4 × 32-bit，加起来正好16字节，</p>
+<ol>
+<li>先写 field0/1/2</li>
+<li>然后 memory barrier</li>
+<li>最后写 field3</li>
+</ol>
+<pre data-role="codeBlock" data-info="css" class="language-css css"><code>TRB <span class="token punctuation">(</span><span class="token number">16</span> bytes total<span class="token punctuation">)</span>
++<span class="token variable">-----------------------</span>+
+| field[<span class="token number">0</span>] | <span class="token number">4</span> bytes    |  ← buffer addr low
++<span class="token variable">-----------------------</span>+
+| field[<span class="token number">1</span>] | <span class="token number">4</span> bytes    |  ← buffer addr high
++<span class="token variable">-----------------------</span>+
+| field[<span class="token number">2</span>] | <span class="token number">4</span> bytes    |  ← length <span class="token operator">+</span> TD size
++<span class="token variable">-----------------------</span>+
+| field[<span class="token number">3</span>] | <span class="token number">4</span> bytes    |  ← control bits <span class="token punctuation">(</span>TYPE/CYCLE/CHAIN/IOC<span class="token punctuation">)</span>
++<span class="token variable">-----------------------</span>+
+</code></pre><h3 id="giveback_first_trb-作用">giveback_first_trb 作用 </h3>
+<ul>
+<li>wmb() 保证所有 TRB 字段已经写入内存（DMA 区域）</li>
+<li>设置 TRB 的 CYCLE bit（C=1 表示 TRB 有效）</li>
+<li>调用 xhci_ring_ep_doorbell(xhci, slot_id, ep_index, stream_id)</li>
+</ul>
+<h3 id="xhci_ring_ep_doorbell-作用">xhci_ring_ep_doorbell 作用 </h3>
+<p>先写完TRB ring，再写 doorbell 寄存器，触发 xHCI 控制器开始读取 TRB ring。</p>
+<ul>
+<li>真正写 doorbell MMIO 寄存器，触发 xHCI 控制器开始读取 TRB ring。</li>
+<li>加入读写屏障，确保在非一致性系统上（例如 RPi 4/5 的 PCIe）DMA 和寄存器写入顺序正确。</li>
+</ul>
+<pre data-role="codeBlock" data-info="c" class="language-c c"><code><span class="token function">trace_xhci_ring_ep_doorbell</span><span class="token punctuation">(</span>slot_id<span class="token punctuation">,</span> <span class="token function">DB_VALUE</span><span class="token punctuation">(</span>ep_index<span class="token punctuation">,</span> stream_id<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+<span class="token function">readl</span><span class="token punctuation">(</span>db_addr<span class="token punctuation">)</span><span class="token punctuation">;</span>
+<span class="token function">writel</span><span class="token punctuation">(</span><span class="token function">DB_VALUE</span><span class="token punctuation">(</span>ep_index<span class="token punctuation">,</span> stream_id<span class="token punctuation">)</span><span class="token punctuation">,</span> db_addr<span class="token punctuation">)</span><span class="token punctuation">;</span>		<span class="token comment">// 这是 write() 写串口数据时，USB3 控制器真正的Start DMA Transfer，向内存映射的寄存器写一个 32-bit 值</span>
+<span class="token function">readl</span><span class="token punctuation">(</span>db_addr<span class="token punctuation">)</span><span class="token punctuation">;</span> <span class="token comment">// 再读一次确保写入完成（flush）</span>
+</code></pre><p>writel() 写 doorbell 寄存器，触发 xHCI 控制器开始读取 TRB ring。</p>
+<h2>后面CPU执行一道写指令，硬件控制器自动完成，写完之后在回到CPU，CPU再执行下一条指令，这样CPU和硬件控制器就同步了。</h2>
+<h1 id="4-usb-控制器硬件dwc3xhci"><strong>4. USB 控制器（硬件：DWC3/xHCI）</strong> </h1>
+<h3 id="行为">行为 </h3>
+<ul>
+<li>DMA 读取 TRB</li>
+<li>DMA 获取数据缓冲区</li>
+<li>发送 USB 包</li>
+<li>产生 Event TRB 返回给 CPU</li>
+</ul>
+<p><img src="Picture/linux_usb_subsystem.gif" alt="Linux USB 软件栈"></p>
+<p>USB Client Driver（USB 设备类驱动），也称 USB Function Driver，即和<strong>设备功能</strong>相关的驱动。包括：</p>
+<table>
+<thead>
+<tr>
+<th>设备</th>
+<th>Linux 驱动</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>USB CDC-ACM 串口</td>
+<td>cdc_acm.ko</td>
+</tr>
+<tr>
+<td>USB 储存</td>
+<td>usb-storage</td>
+</tr>
+<tr>
+<td>USB 摄像头</td>
+<td>uvcvideo</td>
+</tr>
+<tr>
+<td>蓝牙 dongle</td>
+<td>btusb</td>
+</tr>
+<tr>
+<td>键盘鼠标</td>
+<td>usbhid</td>
+</tr>
+</tbody>
+</table>
+<p>USB Host Controller Driver（HCD），是<strong>软件对硬件的封装</strong>，对应不同控制器：</p>
+<table>
+<thead>
+<tr>
+<th>控制器</th>
+<th>驱动</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>EHCI</td>
+<td>ehci-hcd</td>
+</tr>
+<tr>
+<td>OHCI</td>
+<td>ohci-hcd</td>
+</tr>
+<tr>
+<td>xHCI</td>
+<td>xhci-hcd</td>
+</tr>
+<tr>
+<td>DWC2</td>
+<td>dwc2</td>
+</tr>
+<tr>
+<td>DWC3</td>
+<td>dwc3</td>
+</tr>
+</tbody>
+</table>
+<p><strong>khubd</strong>（USB Hub 管理<strong>线程</strong>）内核线程，用于：<br>
+hotplug 事件<br>
+USB 插拔检测<br>
+重置端口<br>
+枚举设备<br>
+分配地址</p>
+<p><img src="Picture/usb_architecture.gif" alt="计算机主板上的硬件 USB 架构"></p>
+<h2>CPU-&gt; 北桥-&gt;南桥（PCI/USB Host Controller）-&gt; USB 设备</h2>
+<h1 id="5-mcu-设备侧"><strong>5. MCU 设备侧</strong> </h1>
+<h3 id="行为-1">行为 </h3>
+<ul>
+<li>USB Bulk OUT 解包</li>
+<li>解析舵机数据协议</li>
+<li>执行动作</li>
+</ul>
+
+      </div>
+      
+      
+    
+    
+    
+    
+    
+    
+  
+    </body></html>

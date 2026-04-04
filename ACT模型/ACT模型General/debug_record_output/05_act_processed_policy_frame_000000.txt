@@ -1,0 +1,10 @@
+=== 05_act_processed_policy @ frame 0 ===
+type: <class 'dict'>
+
+dict content:
+  shoulder_pan.pos: float = -7.20216178894043
+  shoulder_lift.pos: float = -47.46265411376953
+  elbow_flex.pos: float = 43.47043991088867
+  wrist_flex.pos: float = 24.396121978759766
+  wrist_roll.pos: float = -7.26908540725708
+  gripper.pos: float = 46.07160949707031
