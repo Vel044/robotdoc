@@ -1,5 +1,11 @@
 # PyTorch CPU 推理线程池管理详解（Native 后端）
 
+> ⚠️ **注意**：此文档描述的是 **Native 后端**（c10::ThreadPool），你的环境（lerobot）实际使用的是 **OpenMP 后端**。
+>
+> 你的环境对应的文档：[PyTorch_OpenMP_调用链详解.md](PyTorch_OpenMP_调用链详解.md)
+>
+> ---
+>
 > 基于 ARM64 树莓派5 CPU + PyTorch Native 后端，分析从矩阵运算到 glibc futex 的完整链路
 >
 > 源码路径：`/Users/vel/Work/RobotOS/Lerobot/`

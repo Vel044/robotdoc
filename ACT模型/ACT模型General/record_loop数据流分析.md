@@ -17,6 +17,18 @@
 7. [数据集特征与 episode_buffer](#7-数据集特征与-episode_buffer)
 8. [关键函数索引](#8-关键函数索引)
 9. [时间瓶颈分析](#9-时间瓶颈分析)
+10. [处理器流水线详解 (obs 和 action 内部处理)](#10-处理器流水线详解-obs-和-action-内部处理)
+    - [10.1 核心类型定义](#101-核心类型定义)
+    - [10.2 处理器流水线架构](#102-处理器流水线架构)
+    - [10.3 三大默认处理器](#103-三大默认处理器)
+    - [10.4 数据格式转换器](#104-数据格式转换器)
+    - [10.5 IdentityProcessorStep](#105-identityprocessorstep)
+    - [10.6 obs 在 record_loop 中的完整处理流程](#106-obs-在-record_loop-中的完整处理流程)
+    - [10.7 action 在 record_loop 中的完整处理流程](#107-action-在-record_loop-中的完整处理流程)
+    - [10.8 处理器流水线的可扩展性](#108-处理器流水线的可扩展性)
+    - [10.9 数据类型转换总览](#109-数据类型转换总览)
+    - [10.10 关键发现](#1010-关键发现)
+11. [数据结构验证总结](#11-数据结构验证总结)
 
 ---
 
@@ -962,7 +974,435 @@ episode_buffer = {
 
 ---
 
-## 10. 数据结构验证总结
+## 10. 处理器流水线详解 (obs 和 action 内部处理)
+
+### 10.1 核心类型定义
+
+**定义位置**: `processor/core.py`
+
+```python
+# RobotObservation: 原始观测字典 (机器人 → 程序)
+RobotObservation: TypeAlias = dict[str, Any]
+# 示例: {"shoulder_pan.pos": 0.0, "handeye": ndarray, ...}
+
+# RobotAction: 机器人动作字典 (程序 → 机器人)
+RobotAction: TypeAlias = dict[str, Any]
+# 示例: {"shoulder_pan.pos": 15.5, ...}
+
+# PolicyAction: 策略输出张量 (模型推理结果)
+PolicyAction: TypeAlias = torch.Tensor
+# 示例: torch.Tensor([15.5, -30.2, ...])
+
+# EnvTransition: 统一过渡数据结构 (处理器内部使用)
+EnvTransition = TypedDict("EnvTransition", {
+    "observation": dict[str, Any] | None,      # 观测
+    "action": PolicyAction | RobotAction | None,# 动作
+    "reward": float | torch.Tensor | None,     # 奖励
+    "done": bool | torch.Tensor | None,         # 完成标志
+    "truncated": bool | torch.Tensor | None,   # 截断标志
+    "info": dict[str, Any] | None,             # 附加信息
+    "complementary_data": dict[str, Any] | None,# 补充数据
+})
+```
+
+### 10.2 处理器流水线架构
+
+**定义位置**: `processor/pipeline.py`
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     DataProcessorPipeline 架构                                │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    输入数据 (TInput)
+         │
+         ▼
+    ┌─────────────┐
+    │ to_transition │  ← 将输入转换为 EnvTransition 格式
+    └─────────────┘
+         │
+         ▼
+    ┌─────────────────────────────────────────────────────────────┐
+    │  for step in steps:                                          │
+    │      transition = step(transition)  ← 依次执行每个处理步骤      │
+    └─────────────────────────────────────────────────────────────┘
+         │
+         ▼
+    ┌─────────────┐
+    │ to_output    │  ← 将 EnvTransition 转换回输出格式
+    └─────────────┘
+         │
+         ▼
+    输出数据 (TOutput)
+```
+
+**三种处理器流水线类型**:
+
+| 处理器 | 输入类型 | 输出类型 | 用途 |
+|--------|---------|---------|------|
+| `RobotProcessorPipeline[tuple[RobotAction, RobotObservation], RobotAction]` | (action, obs) 元组 | RobotAction | teleop/robot action 处理 |
+| `RobotProcessorPipeline[RobotObservation, RobotObservation]` | RobotObservation | RobotObservation | obs 处理 |
+| `PolicyProcessorPipeline[dict[str, Any], dict[str, Any]]` | dict | dict | policy 预处理/后处理 |
+
+### 10.3 三大默认处理器
+
+**定义位置**: `processor/factory.py:27-62`
+
+```python
+def make_default_processors():
+    # 1. teleop 动作处理器
+    teleop_action_processor = RobotProcessorPipeline(
+        steps=[IdentityProcessorStep()],  # 默认无操作
+        to_transition=robot_action_observation_to_transition,  # tuple → EnvTransition
+        to_output=transition_to_robot_action,                  # EnvTransition → RobotAction
+    )
+
+    # 2. robot 动作处理器
+    robot_action_processor = RobotProcessorPipeline(
+        steps=[IdentityProcessorStep()],  # 默认无操作
+        to_transition=robot_action_observation_to_transition,
+        to_output=transition_to_robot_action,
+    )
+
+    # 3. robot 观测处理器
+    robot_observation_processor = RobotProcessorPipeline(
+        steps=[IdentityProcessorStep()],  # 默认无操作
+        to_transition=observation_to_transition,  # RobotObservation → EnvTransition
+        to_output=transition_to_observation,      # EnvTransition → RobotObservation
+    )
+
+    return (teleop_action_processor, robot_action_processor, robot_observation_processor)
+```
+
+**关键结论**: 默认配置下，所有处理器都是 `IdentityProcessorStep`，即不做任何处理！
+
+### 10.4 数据格式转换器
+
+**定义位置**: `processor/converters.py`
+
+#### to_transition 转换器 (输入 → EnvTransition)
+
+```python
+# robot_action_observation_to_transition: tuple → EnvTransition
+# 用于 teleop_action_processor 和 robot_action_processor
+def robot_action_observation_to_transition(action_observation: tuple[RobotAction, RobotObservation]) -> EnvTransition:
+    action, observation = action_observation
+    return {
+        "observation": observation,  # 保持 dict 格式
+        "action": action,            # 保持 dict 格式
+        "reward": 0.0,
+        "done": False,
+        "truncated": False,
+        "info": {},
+        "complementary_data": {},
+    }
+
+# observation_to_transition: RobotObservation → EnvTransition
+# 用于 robot_observation_processor
+def observation_to_transition(observation: RobotObservation) -> EnvTransition:
+    return {
+        "observation": observation,
+        "action": None,
+        ...
+    }
+```
+
+#### to_output 转换器 (EnvTransition → 输出格式)
+
+```python
+# transition_to_robot_action: EnvTransition → RobotAction
+# 实际上就是从 transition 中提取 action 字段
+def transition_to_robot_action(transition: EnvTransition) -> RobotAction:
+    return transition.get(TransitionKey.ACTION)  # 返回原始 dict
+
+# transition_to_observation: EnvTransition → RobotObservation
+def transition_to_observation(transition: EnvTransition) -> RobotObservation:
+    return transition.get(TransitionKey.OBSERVATION)
+```
+
+### 10.5 IdentityProcessorStep (默认无操作步骤)
+
+**定义位置**: `processor/pipeline.py:1702-1716`
+
+```python
+class IdentityProcessorStep(ProcessorStep):
+    """一个不做任何处理的处理器步骤，返回输入不变。"""
+
+    def __call__(self, transition: EnvTransition) -> EnvTransition:
+        return transition  # 原样返回，不修改任何数据
+
+    def transform_features(self, features) -> features:
+        return features  # 特征描述也不变
+```
+
+### 10.6 obs 在 record_loop 中的完整处理流程
+
+**对应源码**: `record.py:339-358`
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  robot.get_observation()  ────────────────────────────────────────────────  │
+│  定义: so101_follower.py:249-270                                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  obs: RobotObservation (dict[str, Any])                                    │
+│  {                                                                           │
+│    "shoulder_pan.pos": float,     # 6个关节位置                              │
+│    "shoulder_lift.pos": float,                                              │
+│    "elbow_flex.pos": float,                                                │
+│    "wrist_flex.pos": float,                                                │
+│    "wrist_roll.pos": float,                                                │
+│    "gripper.pos": float,          # 夹爪 0-100                               │
+│    "handeye": np.ndarray,         # 相机图像 HWC, uint8                     │
+│    "fixed": np.ndarray,                                                       │
+│  }                                                                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+         │
+         ▼  robot_observation_processor(obs)
+         │
+         │  ┌─────────────────────────────────────────────────────────────┐
+         │  │ to_transition = observation_to_transition                   │
+         │  │ 输入: RobotObservation dict                                  │
+         │  │ 输出: EnvTransition {"observation": {...}, "action": None}  │
+         │  └─────────────────────────────────────────────────────────────┘
+         │         │
+         │         ▼
+         │  ┌─────────────────────────────────────────────────────────────┐
+         │  │ steps[0] = IdentityProcessorStep()                           │
+         │  │ transition = IdentityProcessorStep(transition)              │
+         │  │ 返回: EnvTransition (完全相同，因为什么都不做)                 │
+         │  └─────────────────────────────────────────────────────────────┘
+         │         │
+         │         ▼
+         │  ┌─────────────────────────────────────────────────────────────┐
+         │  │ to_output = transition_to_observation                        │
+         │  │ 输入: EnvTransition                                           │
+         │  │ 输出: RobotObservation (从 transition["observation"] 提取)    │
+         │  └─────────────────────────────────────────────────────────────┘
+         │  ──────────────────────────────────────────────────────────────
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  obs_processed: RobotObservation (dict[str, Any])                          │
+│  (由于 IdentityProcessorStep，与原始 obs 完全相同)                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+         │
+         ▼  build_dataset_frame(dataset.features, obs_processed, prefix="observation")
+         │
+         │  ┌─────────────────────────────────────────────────────────────┐
+         │  │ 将 dict 按数据集特征规范打包成数据帧                          │
+         │  │ 定义: datasets/utils.py:673-699                              │
+         │  │                                                             │
+         │  │ 遍历 dataset.features:                                      │
+         │  │   - observation.state (dtype=float32, shape=(6,))           │
+         │  │     → 从 obs_processed 中提取 6 个关节值，组成 np.array      │
+         │  │   - observation.images.handeye (dtype=video)                 │
+         │  │     → obs_processed["handeye"]                               │
+         │  │   - observation.images.fixed (dtype=video)                   │
+         │  │     → obs_processed["fixed"]                                │
+         │  └─────────────────────────────────────────────────────────────┘
+         │  ──────────────────────────────────────────────────────────────
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  observation_frame: dict[str, np.ndarray]                                   │
+│  {                                                                           │
+│    "observation.state": np.array([...], dtype=np.float32),  # shape=(6,)    │
+│    "observation.images.handeye": np.ndarray(HWC, uint8),                    │
+│    "observation.images.fixed": np.ndarray(HWC, uint8),                     │
+│  }                                                                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 10.7 action 在 record_loop 中的完整处理流程
+
+#### 10.7.1 Policy 推理路径的 action 处理
+
+**对应源码**: `record.py:369-387, 430-437`
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  predict_action() 返回 ────────────────────────────────────────────────────  │
+│  定义: control_utils.py:125-189                                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  action_values: np.ndarray(shape=(6,), dtype=np.float32)                    │
+│  [15.5, -30.2, 45.0, -20.0, 10.0, 80.0]                                     │
+│  (这是 policy 输出的原始动作，已从 torch.Tensor 转换为 numpy)                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+         │
+         ▼  行 384-387: 转换为 RobotAction 字典格式
+         │
+         │  ┌─────────────────────────────────────────────────────────────┐
+         │  │ action_names = dataset.features["action"]["names"]          │
+         │  │ # = ["shoulder_pan.pos", "shoulder_lift.pos", ...]          │
+         │  │                                                             │
+         │  │ act_processed_policy: RobotAction = {                        │
+         │  │     f"{name}": float(action_values[i])                      │
+         │  │     for i, name in enumerate(action_names)                  │
+         │  │ }                                                           │
+         │  └─────────────────────────────────────────────────────────────┘
+         │  ──────────────────────────────────────────────────────────────
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  act_processed_policy: RobotAction (dict[str, float])                       │
+│  {                                                                           │
+│    "shoulder_pan.pos": 15.5,                                                │
+│    "shoulder_lift.pos": -30.2,                                             │
+│    "elbow_flex.pos": 45.0,                                                 │
+│    "wrist_flex.pos": -20.0,                                                │
+│    "wrist_roll.pos": 10.0,                                                  │
+│    "gripper.pos": 80.0,                                                     │
+│  }                                                                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+         │
+         ▼  行 432-433: robot_action_processor((act_processed_policy, obs))
+         │
+         │  ┌─────────────────────────────────────────────────────────────┐
+         │  │ to_transition = robot_action_observation_to_transition      │
+         │  │ 输入: (RobotAction, RobotObservation) 元组                   │
+         │  │ 输出: EnvTransition {"action": {...}, "observation": {...}} │
+         │  └─────────────────────────────────────────────────────────────┘
+         │         │
+         │         ▼
+         │  ┌─────────────────────────────────────────────────────────────┐
+         │  │ steps[0] = IdentityProcessorStep()                          │
+         │  │ 返回: EnvTransition (完全相同)                               │
+         │  └─────────────────────────────────────────────────────────────┘
+         │         │
+         │         ▼
+         │  ┌─────────────────────────────────────────────────────────────┐
+         │  │ to_output = transition_to_robot_action                       │
+         │  │ 返回: RobotAction dict (从 transition["action"] 提取)        │
+         │  └─────────────────────────────────────────────────────────────┘
+         │  ──────────────────────────────────────────────────────────────
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  robot_action_to_send: RobotAction (dict[str, float])                       │
+│  (由于 IdentityProcessorStep，与 act_processed_policy 完全相同)             │
+└─────────────────────────────────────────────────────────────────────────────┘
+         │
+         ▼  robot.send_action(robot_action_to_send)
+```
+
+#### 10.7.2 Teleop 示教路径的 action 处理
+
+**对应源码**: `record.py:390-396, 434-437`
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  teleop.get_action() ──────────────────────────────────────────────────────  │
+│  定义: 各类 teleoperator 实现 (so100_leader.py 等)                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  act: RobotAction (dict[str, float])                                        │
+│  (与 robot_action 格式相同，键名带 .pos 后缀)                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+         │
+         ▼  teleop_action_processor((act, obs))
+         │
+         │  ┌─────────────────────────────────────────────────────────────┐
+         │  │ to_transition = robot_action_observation_to_transition      │
+         │  │ 输入: (RobotAction, RobotObservation)                       │
+         │  │ 输出: EnvTransition                                         │
+         │  └─────────────────────────────────────────────────────────────┘
+         │         │
+         │         ▼
+         │  ┌─────────────────────────────────────────────────────────────┐
+         │  │ steps[0] = IdentityProcessorStep()                         │
+         │  │ 返回: EnvTransition (完全相同)                               │
+         │  └─────────────────────────────────────────────────────────────┘
+         │         │
+         │         ▼
+         │  ┌─────────────────────────────────────────────────────────────┐
+         │  │ to_output = transition_to_robot_action                       │
+         │  │ 返回: RobotAction dict                                       │
+         │  └─────────────────────────────────────────────────────────────┘
+         │  ──────────────────────────────────────────────────────────────
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  act_processed_teleop: RobotAction (dict[str, float])                       │
+│  (与原始 act 完全相同，因为 IdentityProcessorStep)                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+         │
+         ▼  与 policy 路径后续处理相同...
+```
+
+### 10.8 处理器流水线的可扩展性
+
+**重要**: 虽然默认配置使用 `IdentityProcessorStep`（无操作），但处理器流水线支持多种实际处理步骤：
+
+| 处理器类型 | 功能 | 示例 |
+|-----------|------|------|
+| `NormalizeStep` | 归一化观测/动作 | 将像素值从 [0,255] 归一化到 [0,1] |
+| `RescaleStep` | 重新缩放动作 | 将动作范围从 [-1,1] 映射到实际关节范围 |
+| `DenormalizeStep` | 反归一化动作 | 将归一化动作转回原始范围 |
+| `QueueStep` | 动作队列管理 | 缓存多个动作，平滑输出 |
+| `HistoryStep` | 观测历史 | 维护最近 N 帧的观测 |
+
+**加载预训练策略时的实际配置**:
+
+```python
+# 加载策略时，会从 pretrained_model 中加载 preprocessor 和 postprocessor
+preprocessor, postprocessor = make_pre_post_processors(
+    policy_cfg=cfg.policy,
+    pretrained_path=cfg.policy.pretrained_path,
+    dataset_stats=dataset.meta.stats,
+)
+# 这些预处理器/后处理器可能包含 NormalizeStep、RescaleStep 等实际处理步骤
+```
+
+### 10.9 数据类型转换总览
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        数据类型转换总览                                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Python float/numpy                    torch.Tensor                    numpy ndarray
+     │                                    │                                │
+     │                                    │                                │
+     ▼                                    ▼                                ▼
+┌─────────────┐                    ┌─────────────┐                  ┌─────────────┐
+│ RobotAction │ ◄─────────────────► │ PolicyAction│                  │ observation │
+│ (dict)      │   policy 输出转换    │ (Tensor)    │                  │ frame       │
+└─────────────┘                    └─────────────┘                  └─────────────┘
+     │                                    │                                │
+     │  robot_action_processor            │  predict_action                │ build_dataset
+     │  teleop_action_processor           │  内部处理                        │ _frame
+     │                                    │                                │
+     ▼                                    ▼                                ▼
+┌─────────────┐                    ┌─────────────┐                  ┌─────────────┐
+│ EnvTransition│                   │ EnvTransition│                 │ EnvTransition│
+│ (内部格式)   │                    │ (内部格式)   │                  │ (内部格式)   │
+└─────────────┘                    └─────────────┘                  └─────────────┘
+
+关键转换点:
+1. predict_action() 内部: numpy.ndarray → torch.Tensor → numpy.ndarray
+2. record_loop 行 385-387: numpy.ndarray → RobotAction (dict with float)
+3. robot_action_processor: (RobotAction, RobotObservation) → EnvTransition → RobotAction
+4. build_dataset_frame: dict → dict[str, np.ndarray]
+```
+
+### 10.10 关键发现
+
+1. **默认无操作**: `make_default_processors()` 返回的所有处理器都使用 `IdentityProcessorStep`，不修改任何数据
+2. **数据直通**: 在默认配置下，`obs_processed` 与 `obs` 完全相同，`robot_action_to_send` 与输入 action 完全相同
+3. **实际处理在预训练策略中**: 当加载 `preprocessor`/`postprocessor` 时，才会执行真正的归一化/反归一化等操作
+4. **格式转换而非数据转换**: 处理器流水线主要做的是格式转换（dict ↔ EnvTransition），真正的数据处理需要自定义 ProcessorStep
+
+---
+
+## 11. 数据结构验证总结
 
 ### 验证方法
 
