@@ -2,6 +2,808 @@
 
 ---
 
+## 零、ACM0 参数传递链路（从命令行到串口打开）
+
+```
+命令行: lerobot-record --robot.port=/dev/ttyACM0
+    ↓
+[record.py:500] @parser.wrap() → parser 解析命令行参数
+    传入: args = ["--robot.port=/dev/ttyACM0", ...]
+    传出: cfg = RecordConfig(robot=SO101FollowerConfig(port="/dev/ttyACM0", ...))
+    ↓
+[record.py:506] robot = make_robot_from_config(cfg.robot)
+    传入: config = SO101FollowerConfig(port="/dev/ttyACM0", ...)
+    传出: SO101Follower 实例
+    ↓
+[utils.py:32-35] 根据 config.type="so101_follower" 创建实例
+    return SO101Follower(config)
+    ↓
+[so101_follower.py:45-60] SO101Follower.__init__()
+    self.bus = FeetechMotorsBus(port=self.config.port, ...)
+    传入: port="/dev/ttyACM0"
+    ↓
+[feetech.py:128] FeetechMotorsBus.__init__()
+    self.port_handler = scs.PortHandler(self.port)
+    传入: port="/dev/ttyACM0"
+    传出: PortHandler 实例（此时串口未打开，仅保存路径）
+    ↓
+[record.py:569] robot.connect()
+    ↓
+[so101_follower.py:93] self.bus.connect()
+    ↓
+[motors_bus.py:437] self._connect(handshake=True)
+    ↓
+[motors_bus.py:443] self.port_handler.openPort()
+    ↓
+[port_handler.py:61] setBaudRate(1_000_000)
+    ↓
+[port_handler.py:79] setupPort(cflag_baud)
+    ↓
+[port_handler.py:195-202] serial.Serial(
+        port="/dev/ttyACM0",    ★ 这里才真正打开串口设备文件
+        baudrate=1_000_000,
+        bytesize=serial.EIGHTBITS,
+        timeout=0
+    )
+    ↓
+系统调用: open("/dev/ttyACM0", O_RDWR | O_NOCTTY | O_NONBLOCK)
+         ioctl(fd, TCSETS, ...)  # 设置波特率/8N1格式
+    ↓
+串口已连接，后续可通过 get_observation() 读取数据
+```
+
+### 详细代码：命令行参数解析
+
+```python
+# lerobot/src/lerobot/record.py:499-500
+@parser.wrap()
+def record(cfg: RecordConfig) -> LeRobotDataset:
+    # @parser.wrap() 装饰器会解析命令行参数
+    # 用户执行: lerobot-record --robot.port=/dev/ttyACM0 ...
+    # 解析后 cfg.robot = SO101FollowerConfig(port="/dev/ttyACM0", ...)
+```
+
+**详细解析流程：**
+
+```python
+# lerobot/src/lerobot/configs/parser.py:187-230
+def wrap(config_path: Path | None = None):
+    """装饰器：解析命令行参数并构造配置对象"""
+
+    def wrapper_outer(fn):
+        @wraps(fn)
+        def wrapper_inner(*args, **kwargs):
+            argspec = inspect.getfullargspec(fn)  # 分析被装饰函数的参数
+            # argspec.args[0] = 'cfg', argspec.annotations['cfg'] = RecordConfig
+            argtype = argspec.annotations[argspec.args[0]]
+
+            # 如果已传入 cfg 对象则直接使用（用于测试或直接调用）
+            if len(args) > 0 and type(args[0]) is argtype:
+                cfg = args[0]
+                args = args[1:]
+            else:
+                # ★ 主要分支：从命令行解析
+                cli_args = sys.argv[1:]  # ['--robot.port=/dev/ttyACM0', ...]
+
+                # 1. 加载插件（如果有 --env.discover_packages_path 参数）
+                plugin_args = parse_plugin_args(PLUGIN_DISCOVERY_SUFFIX, cli_args)
+                # PLUGIN_DISCOVERY_SUFFIX = "discover_packages_path"
+                # 解析后 plugin_args = {}（无插件参数）
+
+                for plugin_cli_arg, plugin_path in plugin_args.items():
+                    try:
+                        load_plugin(plugin_path)  # 动态导入插件包
+                    except PluginLoadError as e:
+                        raise PluginLoadError(f"{e}\nFailed plugin CLI Arg: {plugin_cli_arg}") from e
+                    cli_args = filter_arg(plugin_cli_arg, cli_args)  # 移除已处理的参数
+
+                # 2. 过滤掉 .path 参数（特殊处理，如 --policy.path）
+                # RecordConfig.__get_path_fields__() 返回 ["policy"]（来自 PreTrainedConfig）
+                if has_method(argtype, "__get_path_fields__"):
+                    path_fields = argtype.__get_path_fields__()
+                    # path_fields = ["policy"]
+                    cli_args = filter_path_args(path_fields, cli_args)
+                    # 移除 --policy.path 参数（稍后在 RecordConfig.__post_init__ 中处理）
+
+                # 3. 使用 draccus 解析命令行参数
+                if has_method(argtype, "from_pretrained") and config_path_cli:
+                    # 如果指定了 --config_path 且类有 from_pretrained 方法
+                    cli_args = filter_arg("config_path", cli_args)
+                    cfg = argtype.from_pretrained(config_path_cli, cli_args=cli_args)
+                else:
+                    # ★ 正常流程：调用 draccus.parse
+                    cfg = draccus.parse(config_class=argtype, config_path=config_path, args=cli_args)
+                    # config_class = RecordConfig
+                    # args = ['--robot.port=/dev/ttyACM0', '--robot.type=so101_follower', ...]
+
+            # 4. 调用原始函数
+            response = fn(cfg, *args, **kwargs)
+            return response
+
+        return wrapper_inner
+    return wrapper_outer
+```
+
+**draccus.parse 内部流程：**
+
+```python
+# venv/lib/python3.13/site-packages/draccus/__init__.py
+def parse(
+    config_class: Type[T],        # RecordConfig
+    config_path: Optional[Union[Path, str]] = None,  # None
+    args: Optional[Sequence[str]] = None,  # ['--robot.port=/dev/ttyACM0', '--robot.type=so101_follower', ...]
+    prog: Optional[str] = None,
+    exit_on_error: bool = True,
+    preferred_help: str = HelpOrder.inline,
+) -> T:
+    """解析命令行参数并返回配置对象实例"""
+    # 创建 ArgumentParser
+    parser = ArgumentParser(
+        config_class=config_class,    # RecordConfig
+        config_path=config_path,       # None
+        exit_on_error=exit_on_error,
+        prog=prog,
+        preferred_help=preferred_help,
+    )
+    # ArgumentParser.__init__ 会遍历 RecordConfig 的所有字段
+    # 为每个字段注册 argparse action，包括 robot: RobotConfig
+    return parser.parse_args(args)  # 返回 RecordConfig 实例
+```
+
+**ArgumentParser._set_dataclass 注册字段：**
+
+```python
+# venv/lib/python3.13/site-packages/draccus/argparsing.py
+def _set_dataclass(
+    self,
+    dataclass: Union[Type[Dataclass], Dataclass],
+    default: Optional[Union[Dataclass, Dict]] = None,
+    dataclass_wrapper_class: Type[DataclassWrapper] = DataclassWrapper,
+):
+    """为 dataclass 的所有字段添加命令行参数"""
+    if not isinstance(dataclass, type):
+        default = dataclass if default is None else default
+        dataclass = type(dataclass)
+
+    # 创建 DataclassWrapper，它会遍历所有字段并注册到 parser
+    new_wrapper = dataclass_wrapper_class(dataclass, default=default, preferred_help=self.preferred_help)
+    new_wrapper.register_actions(parser=self.parser)
+    # 注册后，解析器可以识别：
+    #   --robot.port=/dev/ttyACM0
+    #   --robot.type=so101_follower
+    #   --robot.cameras="{...}"
+    #   --dataset.repo_id=lerobot/test
+    #   --dataset.fps=30
+    #   --dataset.num_episodes=50
+```
+
+**DataclassWrapper 处理 ChoiceRegistry 类型：**
+
+```python
+# venv/lib/python3.13/site-packages/draccus/argparsing.py (DataclassWrapper.register_actions)
+# 当字段类型是 ChoiceRegistry 时（如 robot: RobotConfig）
+# DataclassWrapper 会检测到该类型有 _choice_registry 字典
+# 添加 --robot.type 参数，枚举所有已注册的子类：
+#   --robot.type {so100_follower,so101_follower,bi_so100_follower,bi_so101_follower,koch_follower,lekiwi,stretch3,viperx,hope_jr_hand,hope_jr_arm,reachy2,mock_robot}
+
+# 子类注册流程：
+# so101_follower.py:24
+@RobotConfig.register_subclass("so101_follower")  # 装饰器
+@dataclass
+class SO101FollowerConfig(RobotConfig):
+    port: str
+# 装饰器执行：RobotConfig._choice_registry["so101_follower"] = SO101FollowerConfig
+```
+
+**解析 --robot.type 并创建子类实例：**
+
+```python
+# 当用户指定 --robot.type=so101_follower
+# draccus 解析器会在 RobotConfig._choice_registry 中查找 "so101_follower"
+# 找到 SO101FollowerConfig 类
+
+# 然后继续解析该子类的字段：
+#   --robot.port=/dev/ttyACM0  → SO101FollowerConfig.port = "/dev/ttyACM0"
+#   --robot.id=black         → SO101FollowerConfig.id = "black"
+#   --robot.disable_torque_on_disconnect=True → ...
+
+# 最终构造：
+# cfg = RecordConfig(
+#     robot=SO101FollowerConfig(port="/dev/ttyACM0", id="black", ...),
+#     dataset=DatasetRecordConfig(repo_id=lerobot/test, single_task="...", ...),
+#     ...
+# )
+```
+
+**完整命令行示例：**
+
+```bash
+# 用户执行：
+lerobot-record \
+    --robot.type=so101_follower \
+    --robot.port=/dev/ttyACM0 \
+    --robot.id=black \
+    --robot.cameras="{handeye: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}}" \
+    --dataset.repo_id=lerobot/test \
+    --dataset.single_task="Pick the cube" \
+    --dataset.fps=30 \
+    --dataset.num_episodes=50
+
+# 解析流程：
+# 1. sys.argv[1:] = [
+#       '--robot.type=so101_follower',
+#       '--robot.port=/dev/ttyACM0',
+#       '--robot.id=black',
+#       '--robot.cameras={handeye: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}}',
+#       '--dataset.repo_id=lerobot/test',
+#       '--dataset.single_task=Pick the cube',
+#       '--dataset.fps=30',
+#       '--dataset.num_episodes=50'
+#   ]
+
+# 2. draccus.parse() 创建 RecordConfig 实例：
+#    - 检测 --robot.type=so101_follower
+#    - 从 RobotConfig._choice_registry["so101_follower"] 获取 SO101FollowerConfig
+#    - 解析 --robot.port=/dev/ttyACM0 → SO101FollowerConfig.port = "/dev/ttyACM0"
+#    - 解析 --robot.id=black → SO101FollowerConfig.id = "black"
+#    - 解析 --robot.cameras=... → SO101FollowerConfig.cameras = {...}
+#    - 解析 --dataset.* 参数到 DatasetRecordConfig
+```
+
+### 详细代码：SO101FollowerConfig
+
+```python
+# lerobot/src/lerobot/robots/so101_follower/config_so101_follower.py:24-28
+@RobotConfig.register_subclass("so101_follower")
+@dataclass
+class SO101FollowerConfig(RobotConfig):
+    port: str  # 串口设备路径，如 "/dev/ttyACM0"
+```
+
+### 详细代码：make_robot_from_config（工厂方法）
+
+```python
+# lerobot/src/lerobot/robots/utils.py:32-35
+elif config.type == "so101_follower":
+    from .so101_follower import SO101Follower
+    return SO101Follower(config)
+# 传入: config = SO101FollowerConfig(port="/dev/ttyACM0", ...)
+# 传出: SO101Follower 实例
+```
+
+### 详细代码：SO101Follower.__init__（创建 MotorsBus）
+
+```python
+# lerobot/src/lerobot/robots/so101_follower/so101_follower.py:45-60
+def __init__(self, config: SO101FollowerConfig):
+    super().__init__(config)
+    self.config = config
+    norm_mode_body = MotorNormMode.DEGREES if config.use_degrees else MotorNormMode.RANGE_M100_100
+
+    self.bus = FeetechMotorsBus(
+        port=self.config.port,        # ← 传入 "/dev/ttyACM0"
+        motors={
+            "shoulder_pan": Motor(1, "sts3215", norm_mode_body),
+            "shoulder_lift": Motor(2, "sts3215", norm_mode_body),
+            "elbow_flex": Motor(3, "sts3215", norm_mode_body),
+            "wrist_flex": Motor(4, "sts3215", norm_mode_body),
+            "wrist_roll": Motor(5, "sts3215", norm_mode_body),
+            "gripper": Motor(6, "sts3215", MotorNormMode.RANGE_0_100),
+        },
+        calibration=self.calibration,
+    )
+```
+
+### 详细代码：FeetechMotorsBus.__init__（创建 PortHandler）
+
+```python
+# lerobot/src/lerobot/motors/feetech/feetech.py:116-138
+def __init__(
+    self,
+    port: str,                      # "/dev/ttyACM0"
+    motors: dict[str, Motor],
+    calibration: dict[str, MotorCalibration] | None = None,
+    protocol_version: int = DEFAULT_PROTOCOL_VERSION,
+):
+    super().__init__(port, motors, calibration)
+    self.protocol_version = protocol_version
+    self._assert_same_protocol()
+    import scservo_sdk as scs
+
+    self.port_handler = scs.PortHandler(self.port)
+    # ★ 此时 port_handler 保存了 "/dev/ttyACM0"，
+    # 但串口尚未打开（is_open=False，ser=None）
+```
+
+### 详细代码：robot.connect()（触发串口打开）
+
+```python
+# lerobot/src/lerobot/robots/so101_follower/so101_follower.py:85-105
+def connect(self, calibrate: bool = True) -> None:
+    """连接机器人硬件：打开串口、校准电机、连接相机"""
+    if self.is_connected:
+        raise DeviceAlreadyConnectedError(...)
+
+    self.bus.connect()      # ← 调用 MotorsBus.connect()
+    # ...
+```
+
+### 详细代码：MotorsBus.connect()
+
+```python
+# lerobot/src/lerobot/motors/motors_bus.py:421-440
+def connect(self, handshake: bool = True) -> None:
+    """打开串口并初始化通信"""
+    if self.is_connected:
+        raise DeviceAlreadyConnectedError(...)
+
+    self._connect(handshake)    # ← 调用内部 _connect
+    self.set_timeout()
+    logger.debug(f"{self.__class__.__name__} connected.")
+
+def _connect(self, handshake: bool = True) -> None:
+    try:
+        if not self.port_handler.openPort():   # ← 调用 PortHandler.openPort()
+            raise OSError(f"Failed to open port '{self.port}'.")
+        elif handshake:
+            self._handshake()
+    except (FileNotFoundError, OSError, serial.SerialException) as e:
+        raise ConnectionError(
+            f"\nCould not connect on port '{self.port}'. Make sure you are using the correct port."
+            "\nTry running `lerobot-find-port`\n"
+        ) from e
+```
+
+### 详细代码：PortHandler.openPort() → setupPort()（真正打开串口）
+
+```python
+# scservo_sdk/port_handler.py:32-39
+def openPort(self):
+    """打开串口。实际通过 setBaudRate 触发 setupPort 完成物理打开。"""
+    return self.setBaudRate(self.baudrate)   # 默认 1_000_000 bps
+
+def setBaudRate(self, baudrate):
+    """设置波特率并（重新）打开串口"""
+    baud = self.getCFlagBaud(baudrate)  # 校验波特率
+
+    if baud <= 0:
+        return False
+    else:
+        self.baudrate = baud
+        return self.setupPort(baud)      # ← 调用 setupPort 真正打开
+
+def setupPort(self, cflag_baud):
+    """真正创建 serial.Serial 对象并打开串口设备文件"""
+    if self.is_open:
+        self.closePort()  # 先关闭再重新打开
+
+    # ★ 这里才真正调用 pyserial 打开串口
+    self.ser = serial.Serial(
+        port=self.port_name,            # "/dev/ttyACM0"
+        baudrate=self.baudrate,          # 1_000_000
+        bytesize=serial.EIGHTBITS,       # 8 数据位
+        timeout=0                        # 非阻塞读
+    )
+
+    self.is_open = True
+    self.ser.reset_input_buffer()        # 清空接收缓冲
+
+    # 计算每字节传输耗时（ms）：1 帧 = 1 起始位 + 8 数据位 + 1 停止位 = 10 位
+    self.tx_time_per_byte = (1000.0 / self.baudrate) * 10.0
+    # 1Mbps 下 = (1000/1000000) * 10 = 0.01 ms/byte
+
+    return True
+```
+
+**serial.Serial 内部流程（pyserial 源码）：**
+
+```python
+# pyserial/serial/serialposix.py（Linux/MacOS 串口实现）
+class Serial(SerialBase):
+    def __init__(
+        self,
+        port=None,
+        baudrate=9600,
+        bytesize=EIGHTBITS,
+        parity=PARITY_NONE,
+        stopbits=STOPBITS_ONE,
+        timeout=None,
+        ...
+    ):
+        # 1. 端口名称处理
+        self.port = port  # "/dev/ttyACM0"
+
+        # 2. 初始化默认参数
+        self._baudrate = baudrate          # 1_000_000
+        self._bytesize = bytesize          # 8
+        self._parity = parity              # 无校验
+        self._stopbits = stopbits          # 1
+
+        # 3. timeout 处理
+        self._timeout = timeout          # 0（非阻塞）
+        self._inter_byte_timeout = None
+
+        # 4. 打开端口（实际系统调用）
+        self._isOpen = False
+        self.open()
+
+    def open(self):
+        """打开串口设备文件"""
+        # 4.1 打开设备文件
+        self.fd = os.open(
+            self.port,                          # "/dev/ttyACM0"
+            os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK  # 读写 + 不作为终端 + 非阻塞
+        )
+        # 返回文件描述符 fd（整数）
+
+        # 4.2 设置波特率
+        self._reconfigure_port()
+
+    def _reconfigure_port(self):
+        """配置串口参数（通过 ioctl 系统调用）"""
+        # 4.2.1 获取当前终端设置
+        termios.tcgetattr(self.fd)
+        # 返回 termios 结构体，包含 c_iflag, c_oflag, c_cflag, c_lflag, cc[]
+
+        # 4.2.2 构造新配置
+        # 清除 c_cflag（控制标志）
+        self.cflag = 0
+        # 设置波特率：1_000_000 是非标准值，需要特殊处理
+        # Linux 下非标准波特率通过 termios.B38400 和自定义分频器实现
+        self.cflag |= termios.B38400  # 占位，实际通过分频器设置 1Mbps
+
+        # 设置数据位：8 位
+        self.cflag |= termios.CS8
+
+        # 清除校验位标志
+        self.cflag &= ~termios.PARENB   # 无校验
+        self.cflag &= ~termios.CSTOPB   # 1 停止位
+
+        # 4.2.3 应用配置
+        termios.tcsetattr(self.fd, termios.TCSANOW, [iflag, oflag, cflag, lflag, cc])
+        # 系统调用：ioctl(fd, TCSETS, ...)
+        # TCSETS：立即应用新设置
+
+        # 4.2.4 配置自定义波特率（Linux 专用）
+        if self._baudrate == 1000000:
+            # 需要设置 USB ACM 设备的波特率分频器
+            # ioctl(fd, TIOCSSERIAL, ...)
+            # 设置波特率 = 1000000
+            pass
+```
+
+**系统调用（内核层）：**
+
+```
+open("/dev/ttyACM0", O_RDWR | O_NOCTTY | O_NONBLOCK)
+    ↓
+[内核] usb_serial_open()
+    ├─ 查找 USB ACM 设备
+    ├─ 分配 tty 设备号（如 ttyACM0）
+    ├─ 创建文件描述符 fd
+    └─ 设置 f_op 为 tty 操作函数集
+    ↓
+ioctl(fd, TCSETS, termios_config)
+    ↓
+[内核] tty_termios_ioctl() → uart_set_termios()
+    ├─ 设置数据位：CS8（8 数据位）
+    ├─ 设置停止位：1 位
+    ├─ 设置校验：无校验
+    └─ 设置波特率：通过 ACM 设备请求
+        ↓
+[内核] acm_tty_set_termios() → acm_set_line()
+    ├─ 构造 USB 控制请求：SET_LINE_CODING
+    └─ 通过 USB 发送到设备
+        ↓
+[STM32 微控制器] 接收波特率配置
+    └─ 配置 UART 硬件：1_000_000 bps
+
+后续操作：
+    write(fd, buf, len) → [内核] tty_write() → acm_write() → USB 发送
+    read(fd, buf, len)  → [内核] tty_read() → acm_read()  → USB 接收
+```
+
+**内核层写操作（发送命令到电机）：**
+
+```c
+// Linux 内核：drivers/usb/class/cdc-acm.c:814-866
+static ssize_t acm_tty_write(struct tty_struct *tty, const u8 *buf, size_t count)
+{
+    struct acm *acm = tty->driver_data;  // ACM 设备实例
+    struct acm_wb *wb;                    // 写缓冲区
+    int stat;
+
+    // 1. 分配写缓冲区
+    spin_lock_irqsave(&acm->write_lock, flags);
+    wbn = acm_wb_alloc(acm);   // 分配一个空闲的写缓冲区（wb）
+    if (wbn < 0) {
+        spin_unlock_irqrestore(&acm->write_lock, flags);
+        return 0;  // 没有可用缓冲区
+    }
+    wb = &acm->wb[wbn];
+
+    // 2. 限制写入大小（不超过 ACM 块大小）
+    count = (count > acm->writesize) ? acm->writesize : count;
+
+    // 3. 复制用户数据到内核缓冲区
+    memcpy(wb->buf, buf, count);  // 从用户空间复制
+    wb->len = count;
+
+    // 4. 启动 USB 传输
+    stat = acm_start_wb(acm, wb);
+    spin_unlock_irqrestore(&acm->write_lock, flags);
+
+    if (stat < 0)
+        return stat;
+    return count;  // 返回写入字节数
+}
+
+static int acm_start_wb(struct acm *acm, struct acm_wb *wb)
+{
+    // 填充 USB URB（USB Request Block）
+    usb_fill_bulk_urb(
+        wb->urb,
+        acm->dev,
+        usb_sndbulkpipe(acm->dev, acm->data->out_ep),  // bulk-out 端点
+        wb->buf,
+        wb->len,
+        acm_write_bulk,     // 回调函数（写入完成时调用）
+        wb
+    );
+
+    // 提交 URB 到 USB 核心
+    return usb_submit_urb(wb->urb, GFP_ATOMIC);
+}
+```
+
+**内核层读操作（接收电机响应）：**
+
+```c
+// Linux 内核：drivers/usb/class/cdc-acm.c:516-587
+// 读操作由 USB 端点触发，不直接通过 tty_read 调用
+
+// 1. 设备打开时启动读 URB
+static int acm_tty_open(struct tty_struct *tty, struct file *filp)
+{
+    struct acm *acm = tty->driver_data;
+
+    // 为每个读缓冲区启动 URB
+    for (i = 0; i < ACM_NR; i++) {
+        struct acm_rb *rb = &acm->rb[i];
+
+        usb_fill_bulk_urb(
+            rb->urb,
+            acm->dev,
+            usb_rcvbulkpipe(acm->dev, acm->data->in_ep),  // bulk-in 端点
+            rb->buf,
+            acm->readsize,
+            acm_read_bulk_callback,  // 回调函数
+            rb
+        );
+
+        usb_submit_urb(rb->urb, GFP_KERNEL);
+    }
+
+    return 0;
+}
+
+// 2. USB 读取完成回调（异步触发）
+static void acm_read_bulk_callback(struct urb *urb)
+{
+    struct acm_rb *rb = urb->context;
+    struct acm *acm = rb->instance;
+    int status = urb->status;
+
+    switch (status) {
+    case 0:  // 成功读取
+        acm_process_read_urb(acm, urb);
+        break;
+    case -EPIPE:  // 端点阻塞
+        set_bit(EVENT_RX_STALL, &acm->flags);
+        break;
+    // ... 其他错误处理
+    }
+
+    // 重新提交 URB（持续监听）
+    if (!stopped && !stalled && !cooldown) {
+        acm_submit_read_urb(acm, rb->index, GFP_ATOMIC);
+    }
+}
+
+// 3. 处理读取的数据并推送到 TTY 缓冲区
+static void acm_process_read_urb(struct acm *acm, struct urb *urb)
+{
+    unsigned long flags;
+
+    if (!urb->actual_length)
+        return;
+
+    spin_lock_irqsave(&acm->read_lock, flags);
+
+    // 将 USB 数据推送到 TTY 翻转缓冲区
+    tty_insert_flip_string(&acm->port, urb->transfer_buffer, urb->actual_length);
+    // 数据从 USB 缓冲区 → TTY 线路规程缓冲区
+
+    spin_unlock_irqrestore(&acm->read_lock, flags);
+
+    // 通知 TTY 层有新数据
+    tty_flip_buffer_push(&acm->port);
+    // 唤醒阻塞在 read(fd, ...) 的用户空间进程
+}
+```
+
+**用户空间 read 调用流程：**
+
+```
+用户空间：
+    bytes_read = read(fd, buf, N)  // 阻塞等待数据
+    ↓
+系统调用：
+    sys_read(fd, buf, N)
+    ↓
+VFS 层：
+    vfs_read() → tty_read()
+    ↓
+TTY 层：
+    n_tty_read()
+    ├─ 检查 tty 缓冲区是否有数据
+    ├─ 如果无数据，进程阻塞（加入等待队列）
+    └─ 当 tty_flip_buffer_push() 调用时，唤醒进程
+    ↓
+数据返回：
+    复制 tty 缓冲区数据到用户空间 buf
+    返回实际读取字节数
+```
+
+**STM32 微控制器（USB 固件）：**
+
+```
+[STM32 微控制器] 接收 USB 数据
+    ↓
+USB 中断服务程序（ISR）
+    └─ 检测到 bulk-out 端点数据到达
+    ↓
+STM32 USB 驱动：
+    usb_ep_receive_handler()
+    └─ 读取 USB 数据到 DMA 缓冲区
+    ↓
+数据解析：
+    usb_packet_callback()
+    └─ 遍历接收到的包：
+        - 检查包头：0xFF 0xFF
+        - 检查 ID：是否匹配本设备 ID（1~6）
+        - 检查指令码：
+          * 0x82 = INST_SYNC_READ  → 读寄存器命令
+          * 0x83 = INST_SYNC_WRITE → 写寄存器命令
+    ↓
+读寄存器处理（Present_Position=56，长度=2）：
+    handle_sync_read(addr=56, length=2, data=[1,2,3,4,5,6])
+    for motor_id in [1,2,3,4,5,6]:
+        if motor_id == self.id:
+            // 从 UART 硬件读取当前寄存器值
+            position = read_uart_register(56)  // 读 2 字节
+            break
+    ↓
+构造响应包：
+    response = [0xFF, 0xFF, 0x01, 0x04, 0x00, 0x00, 0x08, CHK]
+    // ID=1, LEN=4, ERR=0, DATA_LOW=0x00, DATA_HIGH=0x08
+
+    // 计算校验和
+    checksum = ~(0x01 + 0x04 + 0x00 + 0x00 + 0x08) & 0xFF
+    response[7] = checksum  // 0xF2
+
+    // 通过 USB bulk-in 端点发送
+    usb_transmit(response)
+    ↓
+[主机] 通过 acm_read_bulk_callback() 接收响应
+```
+
+**STM32 UART 寄存器读取（底层硬件）：**
+
+```
+handle_sync_read(addr=56, length=2)
+    ↓
+检查地址 56 = Present_Position（2 字节）
+    ↓
+访问 UART/串口接收数据：
+    - STM32 的 UART 外设接收来自电机的 RS485 数据
+    - 或通过 I2C/SPI 接口读取
+    ↓
+返回位置编码：
+    // sts3215 电机返回 12-bit 编码的位置
+    // 范围 0~4095，对应 0°~360°
+    return [low_byte, high_byte]  // 小端格式
+```
+
+**完整数据流向（主机 → 电机 → 主机）：**
+
+```
+用户空间 Python：
+    obs = robot.get_observation()
+    ↓
+port_handler.writePort([FF FF FE 0A 82 38 02 01 02 03 04 05 06 20])
+    ↓
+sys_write(fd, buf, 14)
+    ↓
+[VFS] → [TTY 层] → [ACM 驱动]
+    ↓
+[USB 核心] usb_submit_urb() → [USB 主机]
+    ↓
+[USB 总线] +5V 数据线传输
+    ↓
+[STM32 USB 固件] 接收并解析
+    ↓
+[STM32 UART/总线] → [sts3215 舵机] 读取寄存器 56
+    ↓
+[sts3215 硬件] 返回 Present_Position 值 0x0800 (2048)
+    ↓
+[STM32] 构造响应包并 USB 发送
+    ↓
+[USB 总线] ← 接收响应包 [FF FF 01 04 00 00 08 F2]
+    ↓
+[USB 主机] → [ACM 驱动] acm_read_bulk_callback()
+    ↓
+[TTY 缓冲区] tty_insert_flip_string() → 唤醒 read()
+    ↓
+sys_read(fd, buf, N) → 返回数据到用户空间
+    ↓
+port_handler.readPort(8) → bytes b'\x00\x08'
+    ↓
+group_sync_read.getData(1, 56, 2) → SCS_MAKEWORD(0x00, 0x08) = 2048
+    ↓
+motors_bus._normalize() → ((2048-100)/(3900-100))*200-100 = 2.53
+    ↓
+最终返回：
+    obs["shoulder_pan.pos"] = 2.53
+```
+
+**USB ACM 设备驱动流程：**
+
+```c
+// Linux 内核：drivers/usb/class/cdc-acm.c
+static int acm_tty_open(struct tty_struct *tty, struct file *filp)
+{
+    // ACM 设备打开时执行
+    struct acm *acm = tty->driver_data;
+
+    // 初始化 USB 端点
+    // - bulk-in 端点：接收数据（电机响应）
+    // - bulk-out 端点：发送数据（命令）
+    // - interrupt-in 端点：状态通知
+
+    // 启动 USB 读取 URB
+    usb_submit_urb(acm->readurb);
+
+    return 0;
+}
+
+static int acm_set_line(struct acm *acm)
+{
+    // 设置串口线路编码（波特率、数据位、停止位、校验）
+    struct usb_cdc_line_coding linecoding;
+
+    linecoding.dwDTERate = cpu_to_le32(acm->line.dwDTERate);  // 1000000
+    linecoding.bCharFormat = acm->line.bCharFormat;          // 停止位：0=1bit
+    linecoding.bParityType = acm->line.bParityType;          // 校验：0=无
+    linecoding.bDataBits = acm->line.bDataBits;            // 数据位：8
+
+    // USB 控制传输：SET_LINE_CODING 请求
+    return usb_control_msg(
+        acm->dev,
+        usb_sndctrlpipe(acm->dev, 0),
+        USB_CDC_REQ_SET_LINE_CODING,  // 0x20
+        USB_TYPE_CLASS | USB_RECIP_INTERFACE,
+        0,
+        acm->ctrlif,  // 接口号
+        &linecoding,   // 编码参数
+        7,            // 长度
+        1000           // 超时 ms
+    );
+}
+```
+
+---
+
 ## 调用链总览（含传入传出）
 
 ```
@@ -658,7 +1460,22 @@ def _normalize(self, ids_values):
 
 ---
 
-## 十二、关键文件与行号索引
+## 十二、ACM0 参数传递关键文件与行号
+
+| 步骤 | 文件 | 行号 | 说明 |
+|------|------|------|------|
+| 命令行解析 | [record.py](lerobot/src/lerobot/record.py) | 499-500 | `@parser.wrap()` 装饰器解析 --robot.port |
+| 配置类 | [config_so101_follower.py](lerobot/src/lerobot/robots/so101_follower/config_so101_follower.py) | 24-28 | `SO101FollowerConfig(port: str)` |
+| 工厂方法 | [utils.py](lerobot/src/lerobot/robots/utils.py) | 32-35 | `make_robot_from_config()` |
+| 机器人初始化 | [so101_follower.py](lerobot/src/lerobot/robots/so101_follower/so101_follower.py) | 45-60 | `FeetechMotorsBus(port="/dev/ttyACM0")` |
+| MotorsBus 初始化 | [feetech.py](lerobot/src/lerobot/motors/feetech/feetech.py) | 116-138 | `PortHandler("/dev/ttyACM0")` |
+| 机器人连接 | [so101_follower.py](lerobot/src/lerobot/robots/so101_follower/so101_follower.py) | 85-93 | `robot.connect()` → `bus.connect()` |
+| 串口打开 | [motors_bus.py](lerobot/src/lerobot/motors/motors_bus.py) | 421-443 | `connect()` → `_connect()` → `openPort()` |
+| 物理打开串口 | [port_handler.py](scservo_sdk/port_handler.py) | 178-212 | `setupPort()` → `serial.Serial("/dev/ttyACM0")` |
+
+---
+
+## 十三、数据读取关键文件与行号
 
 | 步骤 | 文件 | 行号 | 说明 |
 |------|------|------|------|
