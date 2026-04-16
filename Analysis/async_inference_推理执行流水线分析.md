@@ -95,19 +95,236 @@ lerobot 的做法是把"推理"和"执行"拆成两个进程,用 gRPC 通信:
 
 两个进程各跑各的,通过一个线程安全的 `action_queue` 交换数据。
 
-关键代码在 [robot_client.py:459-471](../../lerobot/src/lerobot/scripts/server/robot_client.py#L459-L471):
+### 3.1 核心数据结构（helpers.py）
+
+理解两个文件之前,先看贯穿始终的数据结构:
 
 ```python
-while self.running:
-    # ① 执行:有 action 就从队列里 pop 一个执行
-    if self.actions_available():
-        self.control_loop_action(verbose)
+# ─── 时间基准（所有带时间信息的数据都继承它）───
+@dataclass
+class TimedData:
+    timestamp: float   # unix 时间戳，用于跨进程计算网络延迟
+    timestep: int      # 全局帧号，用于去重和 temporal ensemble 对齐
 
-    # ② 触发下一次推理:队列剩余 ≤ 阈值时,发观测给 server
-    if self._ready_to_send_observation():
-        self.control_loop_observation(task, verbose)
+# ─── 带时间的 action（server → client）───
+@dataclass
+class TimedAction(TimedData):
+    action: Action     # Tensor, shape=(action_dim,)，各关节目标位置（度）
 
-    time.sleep(max(0, self.config.environment_dt - elapsed))
+# ─── 带时间的观测（client → server）───
+@dataclass
+class TimedObservation(TimedData):
+    observation: RawObservation  # dict[str, Tensor/ndarray]
+                                 #   "observation.images.cam_high": (H,W,3) uint8
+                                 #   "observation.state": (action_dim,) float64
+    must_go: bool = False        # True 时 server 立刻推理，不排队
+
+# ─── client 发给 server 的初始化配置 ───
+@dataclass
+class RemotePolicyConfig:
+    policy_type: str              # "act"
+    pretrained_name_or_path: str  # 模型路径
+    lerobot_features: dict        # 输入输出特征描述
+    actions_per_chunk: int        # = chunk_size，每次推理返回多少帧
+    device: str = "cpu"           # 推理设备
+```
+
+### 3.2 RobotClient 初始化（robot_client.py `__init__`）
+
+Client 启动时连接硬件、建立 gRPC channel、初始化状态:
+
+```python
+class RobotClient:
+    def __init__(self, config: RobotClientConfig):
+        # 1. 连接机器人硬件（打开串口、初始化电机和相机）
+        self.robot = make_robot_from_config(config.robot)
+        self.robot.connect()
+
+        # 2. 建立 gRPC channel，用于和 policy_server 通信
+        self.stub = services_pb2_grpc.AsyncInferenceStub(
+            grpc.insecure_channel(self.server_address, ...)
+        )
+
+        # 3. 关键状态变量
+        self.latest_action = -1        # 已执行到的最新帧号（-1=还没执行任何帧）
+        self.action_chunk_size = -1    # server 每次 chunk 的帧数（首次收到后更新）
+
+        # action_queue: 两线程共享的缓冲，存 TimedAction
+        self.action_queue = Queue()
+        self.action_queue_lock = threading.Lock()
+
+        # start_barrier: 保证主线程和后台线程同时启动
+        self.start_barrier = threading.Barrier(2)
+
+        # must_go: 队列空时强制推理的开关
+        self.must_go = threading.Event()
+        self.must_go.set()
+```
+
+### 3.3 握手流程（client `start()` → server `Ready()` + `SendPolicyInstructions()`）
+
+Client 调用 `start()` 完成 gRPC 握手和模型加载:
+
+```python
+# ── client 端 ──
+def start(self):
+    # 第一步：握手，确认 server 已就绪
+    self.stub.Ready(services_pb2.Empty())
+
+    # 第二步：把模型配置发给 server
+    policy_config_bytes = pickle.dumps(self.policy_config)
+    self.stub.SendPolicyInstructions(
+        services_pb2.PolicySetup(data=policy_config_bytes)
+    )
+```
+
+```python
+# ── server 端 ──
+def SendPolicyInstructions(self, request, context):
+    policy_specs = pickle.loads(request.data)   # → RemotePolicyConfig
+
+    # 根据类型（如 "act"）拿到 Policy 子类，加载模型权重
+    policy_class = get_policy_class(self.policy_type)
+    self.policy = policy_class.from_pretrained(policy_specs.pretrained_name_or_path)
+    self.policy.to(self.device)                 # 移到 cpu/cuda/mps
+```
+
+### 3.4 主控制循环（client `control_loop()`）
+
+这是整个 client 的心脏。每个 tick（~33ms @30FPS）执行一次:
+
+```python
+def control_loop(self, task, verbose=False):
+    self.start_barrier.wait()  # 等后台线程就绪
+
+    while self.running:
+        tick_start = time.perf_counter()
+
+        # ① 从 action_queue pop 一帧发给舵机
+        if self.actions_available():
+            self.control_loop_action(verbose)
+
+        # ② 队列剩余不足时，采观测发给 server 触发推理
+        if self._ready_to_send_observation():
+            self.control_loop_observation(task, verbose)
+
+        # ③ sleep 补齐帧间隔，维持恒定 FPS
+        time.sleep(max(0, self.config.environment_dt - elapsed))
+```
+
+### 3.5 执行 action（client `control_loop_action()`）
+
+```python
+def control_loop_action(self, verbose=False):
+    with self.action_queue_lock:
+        timed_action = self.action_queue.get_nowait()  # 非阻塞取队首
+
+    # tensor → dict{"shoulder_pan": 45.0, ...} → 串口 sync_write → 舵机运动
+    self.robot.send_action(
+        self._action_tensor_to_action_dict(timed_action.get_action())
+    )
+
+    with self.latest_action_lock:
+        self.latest_action = timed_action.get_timestep()  # 更新已执行帧号
+```
+
+### 3.6 采观测并发送给 server（client `control_loop_observation()` → server `SendObservations()`）
+
+```python
+# ── client 端 ──
+def control_loop_observation(self, task, verbose=False):
+    # 1. 从硬件采集一帧观测（相机 async_read + 舵机 sync_read）
+    raw_observation = self.robot.get_observation()
+    raw_observation["task"] = task
+
+    # 2. 打包成 TimedObservation，附上时间戳和当前帧号
+    observation = TimedObservation(
+        timestamp=time.time(),
+        observation=raw_observation,
+        timestep=max(self.latest_action, 0),  # 告诉 server "在第 N 帧后采的"
+    )
+
+    # 3. must_go 标志：队列空 + 事件已 set → 强制推理
+    with self.action_queue_lock:
+        observation.must_go = self.must_go.is_set() and self.action_queue.empty()
+
+    # 4. 非阻塞发送（不等推理结果）
+    self.send_observation(observation)
+```
+
+```python
+# ── server 端 ──
+def SendObservations(self, request_iterator, context):
+    # 拼接分块字节 → pickle 反序列化为 TimedObservation
+    received_bytes = receive_bytes_in_chunks(request_iterator, ...)
+    timed_observation = pickle.loads(received_bytes)
+
+    # 尝试入队（可能被过滤：帧号重复 / 和上次太像）
+    self._enqueue_observation(timed_observation)
+```
+
+### 3.7 server 端推理并返回（server `GetActions()`）
+
+```python
+# ── server 端 ──
+def GetActions(self, request, context):
+    try:
+        # 阻塞等待 observation_queue 里有一条观测（超时返回空包）
+        obs = self.observation_queue.get(timeout=self.config.obs_queue_timeout)
+
+        # 完整推理流水线：预处理 → predict → 后处理
+        action_chunk = self._predict_action_chunk(obs)  # → list[TimedAction]
+
+        # pickle 序列化后返回给 client
+        return services_pb2.Actions(data=pickle.dumps(action_chunk))
+
+    except Empty:
+        return services_pb2.Empty()  # 超时无观测，返回空包
+```
+
+`_predict_action_chunk` 内部:
+
+```python
+def _predict_action_chunk(self, observation_t):
+    # 1. 预处理：RawObservation → policy 格式（缩放、归一化、加 batch 维度）
+    observation = self._prepare_observation(observation_t)
+
+    # 2. 推理
+    action_tensor = self._get_action_chunk(observation)
+    #   → policy.predict_action_chunk(observation)
+    #   → shape: (1, chunk_size, action_dim) 截取前 actions_per_chunk 帧
+
+    # 3. 后处理：CPU 化 + 包装成 TimedAction 列表
+    action_tensor = action_tensor.cpu().squeeze(0)   # (chunk_size, action_dim)
+    return self._time_action_chunk(
+        observation_t.get_timestamp(),    # 基准时间戳
+        list(action_tensor),              # 每帧一个 Tensor
+        observation_t.get_timestep()      # 基准帧号
+    )
+```
+
+### 3.8 后台线程拉取 action（client `receive_actions()`）
+
+```python
+# ── client 端后台线程 ──
+def receive_actions(self):
+    self.start_barrier.wait()
+
+    while self.running:
+        # 阻塞等待 server 返回（server 推理完才回复）
+        actions_chunk = self.stub.GetActions(services_pb2.Empty())
+
+        if len(actions_chunk.data) == 0:
+            continue  # server 超时返回空包，重试
+
+        timed_actions = pickle.loads(actions_chunk.data)  # → list[TimedAction]
+        self.action_chunk_size = max(self.action_chunk_size, len(timed_actions))
+
+        # temporal ensemble：和队列里已有的 action 融合
+        self._aggregate_action_queues(timed_actions, self.config.aggregate_fn)
+
+        # 收到 action 后重置 must_go（为下次空队列做准备）
+        self.must_go.set()
 ```
 
 ---
@@ -116,22 +333,56 @@ while self.running:
 
 ### 1. `chunk_size_threshold`——不等队列空就提前推理
 
-看 [robot_client.py:396-398](../../lerobot/src/lerobot/scripts/server/robot_client.py#L396-L398):
-
 ```python
+# ── client 端 ──
 def _ready_to_send_observation(self):
-    return self.action_queue.qsize() / self.action_chunk_size <= self._chunk_size_threshold
+    """触发条件：队列剩余比例 ≤ threshold"""
+    with self.action_queue_lock:
+        return self.action_queue.qsize() / self.action_chunk_size <= self._chunk_size_threshold
 ```
 
 cs=100、`threshold=0.5` 时:**队列剩 50 个 action 就开始推下一个 chunk**。
 设计意图是让"新 chunk 到货的时刻"正好接上"旧 chunk 耗尽的时刻",避免 stall。
 
+注意：`action_chunk_size` 初始为 `-1`，首次 chunk 到货前 `qsize/(-1)` 为负数，
+自动 ≤ threshold，等价于"一开始就触发推理"。这是正确的冷启动行为。
+
 ### 2. Temporal Ensemble——多 chunk 融合
 
-看 [robot_client.py:231-273](../../lerobot/src/lerobot/scripts/server/robot_client.py#L231-L273)
-的 `_aggregate_action_queues`:
+新 chunk 到达时,不是简单替换旧队列,而是**按时间戳对齐**。
+核心实现在 `_aggregate_action_queues`:
 
-新 chunk 到达时,不是简单替换旧队列,而是**按时间戳对齐**:
+```python
+# ── client 端 ──
+def _aggregate_action_queues(self, incoming_actions, aggregate_fn=None):
+    # aggregate_fn(x1, x2): x1=旧预测, x2=新预测。默认取 x2（新覆盖旧）
+    # 典型替代：weighted_average，对同一时刻多次预测加权平均，减少抖动
+
+    current_action_queue = {a.get_timestep(): a.get_action() for a in self.action_queue.queue}
+
+    for new_action in incoming_actions:
+        # 情况 1：帧号 ≤ 已执行帧号 → 已过期，直接丢弃
+        if new_action.get_timestep() <= self.latest_action:
+            continue
+
+        # 情况 2：帧号不在旧队列 → 纯未来帧，直接入队
+        elif new_action.get_timestep() not in current_action_queue:
+            future_queue.put(new_action)
+
+        # 情况 3：帧号重叠 → temporal ensemble，融合两次预测
+        else:
+            future_queue.put(TimedAction(
+                timestep=new_action.get_timestep(),
+                action=aggregate_fn(
+                    current_action_queue[new_action.get_timestep()],  # 旧的
+                    new_action.get_action()                            # 新的
+                ),
+            ))
+
+    self.action_queue = future_queue  # 原子替换
+```
+
+图示:
 
 ```
 队列里的 chunk A:  [f60, f61, ..., f99]        (chunk A 的尾巴,40 帧)
@@ -147,9 +398,46 @@ cs=100、`threshold=0.5` 时:**队列剩 50 个 action 就开始推下一个 chu
 
 ### 3. `must_go` 事件——防止队列真的空掉
 
-如果推理实在赶不上,队列会空。此时 [robot_client.py:417-429](../../lerobot/src/lerobot/scripts/server/robot_client.py#L417-L429)
-会标记 `must_go`,让下一条观测**强制**触发推理,避免卡死。这是兜底机制,
-不是正常工作路径——如果 `must_go` 频繁被触发,说明参数没调好。
+如果推理实在赶不上,队列会空。`must_go` 是兜底机制,涉及三个位置:
+
+```python
+# ── client 端：采观测时设置 must_go ──
+def control_loop_observation(self, task, verbose=False):
+    ...
+    with self.action_queue_lock:
+        # 仅当 must_go 事件已 set 且队列为空时，标记强制推理
+        observation.must_go = self.must_go.is_set() and self.action_queue.empty()
+
+    self.send_observation(observation)  # must_go=True 随观测发给 server
+
+    if observation.must_go:
+        self.must_go.clear()  # 用完就清，避免后续每帧都强制推理
+```
+
+```python
+# ── server 端：入队时检查 must_go ──
+def _enqueue_observation(self, obs):
+    if (
+        obs.must_go                    # ← 强制推理！跳过所有 sanity check
+        or self.last_processed_obs is None
+        or self._obs_sanity_checks(obs, self.last_processed_obs)
+    ):
+        if self.observation_queue.full():
+            self.observation_queue.get_nowait()  # 先清掉旧的
+        self.observation_queue.put(obs)
+        return True
+    return False
+```
+
+```python
+# ── client 端：收到新 chunk 后重置 must_go ──
+def receive_actions(self):
+    ...
+    self._aggregate_action_queues(timed_actions, ...)
+    self.must_go.set()  # 重置，为下一次空队列做准备
+```
+
+如果 `must_go` 频繁被触发,说明推理速度跟不上执行速度——参数没调好或硬件瓶颈。
 
 ---
 
