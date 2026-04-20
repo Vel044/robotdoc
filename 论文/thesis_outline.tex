@@ -1,0 +1,437 @@
+\documentclass[12pt, a4paper]{article}
+
+% ── 中文支持 ──────────────────────────────────────────────
+\usepackage{ctex}
+\usepackage{geometry}
+\geometry{left=2.5cm, right=2.5cm, top=3cm, bottom=3cm}
+
+% ── 常用宏包 ──────────────────────────────────────────────
+\usepackage{titlesec}
+\usepackage{titletoc}
+\usepackage{enumitem}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{fontawesome5}
+
+% ── 超链接样式 ────────────────────────────────────────────
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!60!black,
+  urlcolor=blue!60!black,
+}
+
+% ── 标题格式 ──────────────────────────────────────────────
+\titleformat{\section}{\large\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{1em}{}
+\titleformat{\subsubsection}{\normalsize\itshape}{\thesubsubsection}{1em}{}
+
+% ── 页眉页脚 ──────────────────────────────────────────────
+\usepackage{fancyhdr}
+\setlength{\headheight}{14pt}
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{\small LeRobot 系统级性能剖析研究}
+\lhead{\small 毕业论文大纲}
+\cfoot{\thepage}
+
+% ── 定义备注命令 ──────────────────────────────────────────
+\newcommand{\src}[1]{\textcolor{gray}{\small \textit{[来源：#1]}}}
+\newcommand{\newexp}[1]{\textcolor{red!70!black}{\small \textbf{[新实验：#1]}}}
+\newcommand{\todo}[1]{\textcolor{orange!80!black}{\small \textbf{[TODO：#1]}}}
+
+% ══════════════════════════════════════════════════════════
+\begin{document}
+
+% ── 封面信息 ──────────────────────────────────────────────
+\begin{center}
+  {\LARGE\bfseries LeRobot 平台感知—推理—执行流程的\\[6pt]系统级性能剖析研究}
+
+  \vspace{1.2em}
+  {\large 毕业论文大纲（草稿）}
+
+  \vspace{0.8em}
+  {\normalsize \today}
+\end{center}
+
+\vspace{1em}
+\hrule
+\vspace{1.5em}
+
+% ── 目录 ──────────────────────────────────────────────────
+\tableofcontents
+\newpage
+
+% ══════════════════════════════════════════════════════════
+\section{绪论}
+
+\subsection{研究背景与意义}
+\begin{itemize}[leftmargin=2em]
+  \item 协作机器人与 VLA 模型快速发展，软件栈日趋复杂；
+  \item 主流机器人系统基于通用宏内核构建，与"感知—推理—执行"紧耦合运行特征存在明显差异；
+  \item 引入 ACT 等 AI 推理框架后，系统性能瓶颈与资源消耗机理缺乏系统性分析。
+\end{itemize}
+
+\subsection{研究目标}
+\begin{enumerate}[leftmargin=2em]
+  \item 建立跨层次（AI框架层 / 运行时层 / OS内核层 / 硬件I/O层）性能分析模型；
+  \item 端到端量化感知、推理、执行各阶段性能开销；
+  \item 定位主要瓶颈，为系统优化与软件架构改进提供实验依据。
+\end{enumerate}
+
+\subsection{主要贡献}
+\begin{itemize}[leftmargin=2em]
+  \item 提出覆盖 AI 框架到内核的四层性能分析模型；
+  \item 通过 ftrace/torch.profiler/perf 多工具联合剖析，量化各阶段时间开销；
+  \item 揭示 strace 对系统调用测量带来的 9× 时间放大问题，验证 ftrace 的必要性；
+  \item 基于量化结果，系统梳理优化路径及其成本收益。
+\end{itemize}
+
+\subsection{论文组织结构}
+
+各章内容简述如下（第 2–7 章）。
+
+% ══════════════════════════════════════════════════════════
+\section{相关工作}
+
+\subsection{机器人操作系统与框架}
+\begin{itemize}[leftmargin=2em]
+  \item ROS2、LeRobot、LCM 对比——通信机制与实时性；
+  \item LeRobot v0.3.4 架构概述：record/replay/train/eval 流程。
+\end{itemize}
+
+\subsection{嵌入式边缘 AI 推理}
+\begin{itemize}[leftmargin=2em]
+  \item TFLite、ONNX Runtime、PyTorch Mobile 在 ARM 上的部署现状；
+  \item 树莓派5（Cortex-A76）的计算能力与限制。
+\end{itemize}
+
+\subsection{ACT 与 VLA 模型}
+\begin{itemize}[leftmargin=2em]
+  \item ACT 模型原理：CVAE 编解码器、动作分块（chunk）、time ensemble；
+  \item chunk\_size 与推理频率的权衡。
+\end{itemize}
+\src{ACT模型原理.md，ACT推理.md}
+
+\subsection{系统级 Profiling 技术}
+\begin{itemize}[leftmargin=2em]
+  \item strace / ftrace / perf / torch.profiler 工具对比；
+  \item 已有机器人系统性能分析工作综述。
+\end{itemize}
+
+% ══════════════════════════════════════════════════════════
+\section{系统架构与负载特征分析}
+
+\subsection{LeRobot 软件栈架构}
+
+五层结构：
+
+\begin{center}
+\begin{tabular}{cl}
+  \toprule
+  层级 & 主要组件 \\
+  \midrule
+  应用层    & record.py / RecordRunner / lerobot-* CLI \\
+  AI框架层  & ACT policy / ResNet18 / Transformer \\
+  运行时层  & PyTorch / ATen / OpenMP 线程池 / OpenCV \\
+  内核层    & futex / pselect6 / ioctl / V4L2 / TTY \\
+  硬件层    & USB 摄像头 / Feetech SCServo / ttyACM0 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+关键代码入口：\texttt{lerobot/src/lerobot/record.py}，核心循环：
+\texttt{get\_observation()} $\to$ \texttt{select\_action()} $\to$ \texttt{send\_action()}。
+
+\src{LeRobot软件栈全链路分析.md}
+
+\subsection{三类典型工作负载特征}
+\newexp{各跑一次 episode，用 Python logging 采集帧率、推理次数、观测维度}
+
+三类任务：\textbf{抓取（Grasp）}、\textbf{推倒（Push）}、\textbf{分类（Classify）}。
+
+\begin{center}
+\begin{tabular}{lccc}
+  \toprule
+  指标 & 抓取 & 推倒 & 分类 \\
+  \midrule
+  Episode 时长（s）     & \todo{测量} & \todo{测量} & \todo{测量} \\
+  推理调用次数          & \todo{测量} & \todo{测量} & \todo{测量} \\
+  摄像头路数            & 2 & 2 & 2 \\
+  关节自由度            & 6 & 6 & 6 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{感知—推理—执行三阶段划分}
+\begin{itemize}[leftmargin=2em]
+  \item 阶段边界（代码级）：\texttt{get\_observation()} / \texttt{select\_action()} / \texttt{send\_action()}；
+  \item 时间预算目标：30 fps $\Rightarrow$ 33.3 ms/帧；
+  \item 当前实测：单帧循环 2.2–4.2 s（推理主导）。
+\end{itemize}
+
+% ══════════════════════════════════════════════════════════
+\section{跨层次性能分析模型与剖析方法}
+
+\subsection{四层性能分析模型}
+
+\begin{center}
+\begin{tabular}{lll}
+  \toprule
+  层级 & 可观测指标 & 工具 \\
+  \midrule
+  AI 推理框架层 & 算子耗时、张量形状、FLOP & torch.profiler \\
+  Python 运行时层 & GIL 争用、帧循环时间 & Python logging \\
+  OS 内核层 & 系统调用次数/耗时、线程调度 & ftrace, strace \\
+  硬件 I/O 层 & 传输字节数、等待时延 & perf, ioctl trace \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{工具链选型}
+
+\textbf{strace vs ftrace 的关键差异}：
+
+\begin{itemize}[leftmargin=2em]
+  \item strace 通过 ptrace 拦截每次系统调用，带来约 \textbf{9× 系统时间放大}（实测：20.12 s $\to$ 2.20 s）；
+  \item ftrace 工作在内核 tracepoint，开销极低，适合生产级测量；
+  \item \textbf{本文以 ftrace 数据为准，strace 仅用于初期探索。}
+\end{itemize}
+
+\src{内核数据搜集分析.md，方法论.md}
+
+\subsection{实验配置}
+\begin{itemize}[leftmargin=2em]
+  \item 硬件：树莓派5（ARM Cortex-A76，4核，8 GB LPDDR4X）；
+  \item 软件：LeRobot v0.3.4 / PyTorch 2.x / Python 3.10 / Ubuntu 24.04；
+  \item 关键参数：\texttt{chunk\_size=100}，fps=30，串口波特率=1 Mbps；
+  \item 每类任务采集 $\geq 3$ 次 episode 取均值，排除冷启动影响（模型加载 ~114万次 read 调用仅在第一次出现）。
+\end{itemize}
+
+% ══════════════════════════════════════════════════════════
+\section{系统级性能剖析结果}
+
+\subsection{感知阶段}
+
+\subsubsection{摄像头路径}
+
+调用链：\texttt{cv2.VideoCapture.read()} $\to$ \texttt{grabFrame}（VIDIOC\_DQBUF）\\
+$\to$ \texttt{retrieveFrame}（libjpeg 解码）。
+
+\begin{itemize}[leftmargin=2em]
+  \item pselect6 行为：摄像头后台线程（TID 4222/4224）阻塞 \textbf{23–32 ms}，符合 30 fps 帧间隔物理极限；
+  \item MJPEG 解码耗时：\textbf{10–30 ms/帧}（libjpeg CPU 密集，是摄像头路径主要开销）；
+  \item 整体摄像头贡献观测耗时约 \textbf{1.9 ms}（主线程视角，后台异步）。
+\end{itemize}
+\src{pselect6最终结果.md，OpenCV视频流数据流分析.md}
+
+\subsubsection{舵机路径}
+
+调用链：\texttt{motors\_bus.sync\_read()} $\to$ \texttt{GroupSyncRead}\\
+$\to$ \texttt{PortHandler} $\to$ \texttt{/dev/ttyACM0}。
+
+\begin{itemize}[leftmargin=2em]
+  \item Sync Read 包格式：\texttt{[0xFF 0xFF 0xFE LEN 0x82 ADDR LEN ID$_1$..ID$_6$ CHK]}；
+  \item Present\_Position 寄存器地址 56，sign-magnitude 编码（bit15 为方向位）；
+  \item 耗时：\textbf{1.2 ms/帧}，开销可忽略。
+\end{itemize}
+\src{observation读取ACM0数据完整流程.md，Lerobot内舵机读写完整链路.md}
+
+\subsection{推理阶段}
+
+\subsubsection{整体耗时分布}
+
+\begin{itemize}[leftmargin=2em]
+  \item chunk 切换帧：推理耗时 \textbf{2000–4000 ms}（偶发峰值 2148 ms）；
+  \item chunk 内帧：从 \texttt{\_action\_queue} 取缓存，$<$1 ms；
+  \item 推理占总循环时间 $>$99\%，是系统主瓶颈。
+\end{itemize}
+\src{recordloop每部分时间全部分析.md}
+
+\subsubsection{算子级耗时分解}
+\newexp{torch.profiler op-level profiling，分解 ResNet18 / Transformer Encoder / Decoder / 前后处理占比}
+
+\begin{center}
+\begin{tabular}{lcc}
+  \toprule
+  模块 & 耗时（ms） & 占推理比例（\%） \\
+  \midrule
+  ResNet18 特征提取（×2 摄像头） & \todo{} & \todo{} \\
+  CVAE Encoder（4层 Transformer） & \todo{} & \todo{} \\
+  Action Decoder（1层 Transformer） & \todo{} & \todo{} \\
+  前处理（归一化、Tensor转换） & \todo{} & \todo{} \\
+  后处理（queue写入、限幅） & \todo{} & \todo{} \\
+  \midrule
+  合计 & \todo{} & 100\% \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection{PyTorch 线程行为}
+
+\begin{itemize}[leftmargin=2em]
+  \item futex 调用：\textbf{64,569 次 / 40 s episode}，总等待时间 3,252 s（27 线程并行累计）；
+  \item op=0（FUTEX\_WAIT）占多数，op=9（FUTEX\_WAIT\_BITSET）用于 ATen 线程池任务队列；
+  \item ARM Cortex-A76 使用 OpenMP 并行，NEON SIMD 加速 GEMM，但计算量仍是瓶颈。
+\end{itemize}
+\src{futex最终结果.md，ACT推理.md}
+
+\subsection{执行阶段}
+
+\subsubsection{sync\_write 路径}
+
+\begin{itemize}[leftmargin=2em]
+  \item 调用链：\texttt{motors\_bus.sync\_write()} $\to$ \texttt{GroupSyncWrite.txPacket()} $\to$ \texttt{write()} $\to$ TTY $\to$ USB bulk transfer；
+  \item 无回包，半双工 TTY 总线，耗时 \textbf{1–3 ms}；
+  \item 异步写不可行：总线半双工冲突 + 安全限幅 read-modify-write 链路断裂。
+\end{itemize}
+\src{USB串口写路径.md，motors\_bus异步读写设计分析.md}
+
+\subsubsection{异步推理流水线分析}
+
+不 stall 条件推导：
+
+\[
+  N \geq 2 \times T_{\text{infer}} \times F
+\]
+
+代入当前参数（$T_{\text{infer}} = 2\,\text{s}$，$F = 30\,\text{fps}$，$N = 100$）：
+
+\[
+  \text{需要} \; N \geq 120, \quad \text{当前} \; N = 100 < 120 \quad \Rightarrow \text{stall 不可避免}
+\]
+
+\begin{itemize}[leftmargin=2em]
+  \item stall 周期：20 帧卡顿 / 70 帧正常，循环出现；
+  \item time ensemble 失效：chunk B 到达时前 50 帧已过期被丢弃；
+  \item 增大 chunk\_size 会导致动作质量下降（实验已确认），非可行方案。
+\end{itemize}
+\src{async\_inference\_推理执行流水线分析.md}
+
+\subsection{全链路综合分析}
+
+\subsubsection{时间预算表（单帧，33.3 ms 目标）}
+
+\begin{center}
+\begin{tabular}{lrr}
+  \toprule
+  阶段 & 实测耗时 & 占目标比例 \\
+  \midrule
+  感知（舵机 + 图像，主线程视角） & 5.2 ms & 15.6\% \\
+  推理（chunk 内均摊） & \todo{} ms & \todo{}\% \\
+  执行（sync\_write） & 4.8 ms & 14.4\% \\
+  其余调度开销 & \todo{} ms & \todo{}\% \\
+  \midrule
+  实际单帧循环（推理帧） & 2200–4200 ms & \textbf{66×–126× 超时} \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection{系统调用分布（40 s episode）}
+
+\begin{center}
+\begin{tabular}{lrrl}
+  \toprule
+  系统调用 & 次数 & 均值耗时 & 主要来源 \\
+  \midrule
+  futex    & 64,569 & $<$1 $\mu$s & PyTorch 线程池 + Trae 服务 \\
+  pselect6 & 36,191 & 421 ns & 摄像头后台线程 V4L2 等待 \\
+  ioctl    & \todo{} & \todo{} & 串口配置 + V4L2 帧队列管理 \\
+  write    & 35,651 & 38 $\mu$s & USB 串口写 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{结论}：系统调用本身开销极低（pselect6 均值 421 ns），瓶颈在用户态 CPU 推理计算，非 IO。
+
+\newexp{CPU 频率锁定（performance governor）对推理峰值 2148 ms 的影响}
+
+\src{recordloop每部分时间全部分析.md，内核数据搜集分析.md}
+
+% ══════════════════════════════════════════════════════════
+\section{性能瓶颈分析与优化建议}
+
+\subsection{瓶颈归因}
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{主瓶颈}：ACT 推理（ARM CPU 矩阵乘法），2000–4000 ms/次；
+  \item \textbf{次瓶颈}：MJPEG 解码（10–30 ms/帧，可替换为 YUYV 消除）；
+  \item \textbf{非瓶颈确认}：系统调用本身（pselect6 421 ns，futex $<$1 $\mu$s，均远低于推理耗时）。
+\end{itemize}
+
+\subsection{优化方向分析}
+
+\begin{center}
+\begin{tabular}{p{3.5cm}p{2.8cm}cc}
+  \toprule
+  优化方向 & 预期收益 & 可行性 & 实现复杂度 \\
+  \midrule
+  INT8/FP16 量化 & 推理降 2–4$\times$ & 高 & 中 \\
+  ONNX Runtime 后端 & 推理降 1.5–2$\times$ & 高 & 低 \\
+  异步推理（gRPC 双进程） & 消除 stall（需 $T_{\text{infer}}<1.67$ s） & 需配合量化 & 高 \\
+  MJPEG $\to$ YUYV & 解码降至 0 & 高（相机支持） & 低 \\
+  异步舵机读 & 隐藏 1.2 ms & 收益低 & 低 \\
+  异步舵机写 & \textbf{不可行} & \textcolor{red}{×} & — \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{软件架构改进方向}
+
+\begin{itemize}[leftmargin=2em]
+  \item 推理模块解耦（独立进程 + gRPC），避免 GIL 与主循环相互干扰；
+  \item 摄像头格式统一为 YUYV，消除 libjpeg CPU 解码路径；
+  \item 面向机器人负载的内核优化方向：实时调度器（SCHED\_FIFO）、USB 驱动优先级提升。
+\end{itemize}
+
+% ══════════════════════════════════════════════════════════
+\section{总结与展望}
+
+\subsection{主要工作总结}
+
+\begin{enumerate}[leftmargin=2em]
+  \item 建立了覆盖 AI 框架到内核的四层性能分析模型；
+  \item 通过 Python 日志 + ftrace + torch.profiler 多工具联合，端到端量化了 LeRobot 感知—推理—执行各阶段开销；
+  \item 揭示 ACT 推理（2000–4000 ms）为主瓶颈，系统调用 overhead 可忽略；
+  \item 推导了异步推理流水线不 stall 的数学条件，指出当前参数配置的局限性；
+  \item 系统梳理了各优化路径的可行性与成本收益。
+\end{enumerate}
+
+\subsection{研究局限性}
+
+\begin{itemize}[leftmargin=2em]
+  \item 仅在 SO101 单臂场景下测试，未覆盖双臂或移动机器人；
+  \item 未实施量化等优化方案并验证，结论停留在分析层面；
+  \item 无 GPU 对比基线，难以量化 CPU 推理与加速器的差距。
+\end{itemize}
+
+\subsection{未来工作}
+
+\begin{itemize}[leftmargin=2em]
+  \item INT8 量化 + ONNX Runtime 实验，验证推理加速收益；
+  \item 扩展至多任务场景（更多抓取类别）与多机器人平台；
+  \item 探索面向机器人负载特征的实时操作系统设计。
+\end{itemize}
+
+% ══════════════════════════════════════════════════════════
+\section*{附录：需要补充的新实验}
+\addcontentsline{toc}{section}{附录：需要补充的新实验}
+
+\begin{center}
+\begin{tabular}{cp{3.8cm}p{3.5cm}c}
+  \toprule
+  优先级 & 实验内容 & 填充章节 & 预计耗时 \\
+  \midrule
+  $\bigstar\bigstar\bigstar$ & torch.profiler op-level profiling & 第5.2节推理算子分解 & 1 天 \\
+  $\bigstar\bigstar\bigstar$ & 三类任务各跑 episode 采集日志 & 第3章负载特征对比表 & 1 天 \\
+  $\bigstar\bigstar$ & CPU 频率锁定对比 & 第5.4节峰值成因分析 & 半天 \\
+  $\bigstar$ & perf stat（IPC, cache-miss） & 判断 compute vs memory bound & 半天 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\end{document}
