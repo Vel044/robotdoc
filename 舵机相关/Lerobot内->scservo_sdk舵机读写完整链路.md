@@ -9,17 +9,24 @@
 ## 一、总体架构
 
 ```
-record.py                 # 推理逻辑：观测推理执行的循环record_loop()
-    ↓ 
-so101_follower.py          # 机器人层：业务逻辑（观测/动作键名、标定、安全限幅）
-    ↓ self.bus
-motors_bus.py              # 总线层：协议无关的抽象（归一化/反归一化、符号编码）
-    ↓ 继承
-feetech/feetech.py         # 选择硬件层：Feetech 协议具体实现（字节序、Sign-Magnitude）
-    ↓ import scservo_sdk as scs
-scservo_sdk                # SDK层：组包/拆包、串口收发（GroupSyncRead/GroupSyncWrite）
-    ↓ /dev/ttyACM0
-STS-3215 × 6              # 物理层：MCU 内存映射寄存器（EPROM+SRAM）
+         record.py   推理循环 record_loop()
+              │ robot.get_observation() / send_action()
+              ↓
+┌─ Robot 抽象类 ──────────────┐      ┌─ MotorsBus 抽象类 ─────────────────────────┐
+│  ┌─ so101_follower.py ───┐  │      │  motors_bus.py  归一化/反归一化 · 符号编码   │
+│  │  观测/动作键名          │  │      │                                            │
+│  │  标定 · 安全限幅        │  │─────▶│  ┌─ feetech/feetech.py ────────────────┐  │
+│  └───────────────────────┘  │self.bus  │  Feetech协议 · 字节序 · Sign-Magnitude │  │
+└─────────────────────────────┘      │  └────────────────────────────────────────┘  │
+                                     └───────────────────────────────────────────────┘
+                                                          │ import scservo_sdk
+                                                          ↓
+                                                    scservo_sdk
+                                             GroupSyncRead / GroupSyncWrite
+                                                          │ /dev/ttyACM0
+                                                          ↓
+                                                   STS-3215 × 6
+                                               MCU 内存映射寄存器（EPROM + SRAM）
 ```
 
 feetech.py 在 `__init__` 中通过 `import scservo_sdk as scs` 导入 SDK，并创建了以下关键对象：
@@ -34,9 +41,53 @@ self.sync_reader = scs.GroupSyncRead(self.port_handler, self.packet_handler, 0, 
 self.sync_writer = scs.GroupSyncWrite(self.port_handler, self.packet_handler, 0, 0)  # 同步写管理器
 ```
 
-后续 `self.sync_reader.txRxPacket()`、`self.sync_writer.txPacket()` 等调用全部进入 scservo_sdk 的代码。
+### 读CallStack
 
----
+```
+record.py / record_loop()
+    └─ robot.get_observation()
+       robots/so101_follower/so101_follower.py / SO101Follower.get_observation()
+           └─ self.bus.sync_read("Present_Position")
+              motors/motors_bus.py / MotorsBus.sync_read(data_name, motors=None)
+                  ├─ get_address(model_ctrl_table, "sts3215", "Present_Position")
+                  │   → (addr=132, length=4)
+                  └─ self._sync_read(addr=132, length=4, motor_ids=[1..6])
+                     motors/motors_bus.py / MotorsBus._sync_read()
+                         ├─ self.sync_reader.clearParam()
+                         ├─ self.sync_reader.addParam(id)  × 6
+                         ├─ self.sync_reader.txRxPacket()
+                         │  scservo_sdk / GroupSyncRead.txRxPacket()
+                         │      → 串口发送同步读请求，等待6个电机响应
+                         └─ self.sync_reader.getData(id, addr=132, length=4)  × 6
+                            scservo_sdk / GroupSyncRead.getData(id, address, data_length)
+                                → 从响应缓冲区提取该电机的4字节原始位置值 (0–4095)
+```
+
+### 写CallStack
+
+```
+record.py / record_loop()
+    └─ robot.send_action(action)
+       robots/so101_follower/so101_follower.py / SO101Follower.send_action(action: dict)
+           ├─ [可选] self.bus.sync_read("Present_Position")   # 安全限幅时读取当前位置
+           │  ensure_safe_goal_position(goal_present_pos, max_relative_target)
+           │      → 限制单步最大移动幅度
+           └─ self.bus.sync_write("Goal_Position", goal_pos)
+              motors/motors_bus.py / MotorsBus.sync_write(data_name, values: dict)
+                  ├─ _unnormalize(values)       → 归一化值转原始值 (0–4095)
+                  ├─ _encode_sign(ids_values)   → Sign-Magnitude 符号编码
+                  ├─ get_address(model_ctrl_table, "sts3215", "Goal_Position")
+                  │   → (addr=116, length=4)
+                  └─ self._sync_write(addr=116, length=4, ids_values={id: val})
+                     motors/motors_bus.py / MotorsBus._sync_write()
+                         ├─ self.sync_writer.clearParam()
+                         ├─ _serialize_data(value, length=4) → [byte0, byte1, byte2, byte3]
+                         ├─ self.sync_writer.addParam(id, data)  × 6
+                         └─ self.sync_writer.txPacket()
+                            scservo_sdk / GroupSyncWrite.txPacket()
+                                → 串口广播同步写命令，不等待确认响应
+```
+
 
 ## 二、读取当前位置：`get_observation()` → `sync_read("Present_Position")`
 
@@ -661,18 +712,18 @@ def encode_sign_magnitude(value: int, sign_bit_index: int):
 
 ## 四、读 vs 写对比
 
-| | sync_read（get_observation） | sync_write（send_action） |
-|--|-----|-----|
-| 入口 | `self.bus.sync_read("Present_Position")` | `self.bus.sync_write("Goal_Position", goal_pos)` |
-| 寄存器 | Present_Position: 地址56, 2字节 | Goal_Position: 地址42, 2字节 |
-| SDK对象 | `scs.GroupSyncRead` (feetech.py:134) | `scs.GroupSyncWrite` (feetech.py:135) |
-| SDK关键调用 | `sync_reader.txRxPacket()` — 发+收 | `sync_writer.txPacket()` — 只发不收 |
-| 指令码 | `0x82` | `0x83` |
-| 归一化 | `_normalize`（tick→-100~100） | `_unnormalize`（-100~100→tick） |
-| 符号解码 | `_decode_sign`（bit15符号位解码） | `_encode_sign`（Goal_Position不编码，跳过） |
-| 舵机响应 | 每个舵机回一个状态包 | **无响应包** |
-| 耗时 | ~5~15ms（等6个应答） | ~1~3ms（只发不收） |
-| 风险 | 无 | 丢包时舵机不动（静默失败） |
+|             | sync_read（get_observation）             | sync_write（send_action）                        |
+| ----------- | ---------------------------------------- | ------------------------------------------------ |
+| 入口        | `self.bus.sync_read("Present_Position")` | `self.bus.sync_write("Goal_Position", goal_pos)` |
+| 寄存器      | Present_Position: 地址56, 2字节          | Goal_Position: 地址42, 2字节                     |
+| SDK对象     | `scs.GroupSyncRead` (feetech.py:134)     | `scs.GroupSyncWrite` (feetech.py:135)            |
+| SDK关键调用 | `sync_reader.txRxPacket()` — 发+收       | `sync_writer.txPacket()` — 只发不收              |
+| 指令码      | `0x82`                                   | `0x83`                                           |
+| 归一化      | `_normalize`（tick→-100~100）            | `_unnormalize`（-100~100→tick）                  |
+| 符号解码    | `_decode_sign`（bit15符号位解码）        | `_encode_sign`（Goal_Position不编码，跳过）      |
+| 舵机响应    | 每个舵机回一个状态包                     | **无响应包**                                     |
+| 耗时        | ~5~15ms（等6个应答）                     | ~1~3ms（只发不收）                               |
+| 风险        | 无                                       | 丢包时舵机不动（静默失败）                       |
 
 ---
 
@@ -702,10 +753,10 @@ Feetech STS 系列不用标准二补数，而用**符号-幅值（Sign-Magnitude
 
 **哪些寄存器需要此编码：**
 
-| 寄存器 | 符号位 | 场景 |
-|--------|--------|------|
-| `Homing_Offset` | bit11 | 标定时写入，偏移可正可负 |
-| `Goal_Velocity` | bit15 | 指定运动方向 |
-| `Present_Velocity` | bit15 | 读取速度方向 |
-| `Present_Position` | bit15 | 位置跨零点时出现负值 |
-| `Goal_Position` | **无** | 目标位置为无符号值，方向由 drive_mode 处理 |
+| 寄存器             | 符号位 | 场景                                       |
+| ------------------ | ------ | ------------------------------------------ |
+| `Homing_Offset`    | bit11  | 标定时写入，偏移可正可负                   |
+| `Goal_Velocity`    | bit15  | 指定运动方向                               |
+| `Present_Velocity` | bit15  | 读取速度方向                               |
+| `Present_Position` | bit15  | 位置跨零点时出现负值                       |
+| `Goal_Position`    | **无** | 目标位置为无符号值，方向由 drive_mode 处理 |

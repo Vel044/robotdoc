@@ -1,4 +1,5 @@
-\documentclass[12pt, a4paper]{ctexart}
+% !TEX program = xelatex
+\documentclass[12pt, a4paper, fontset=macnew]{ctexart}
 
 %% ── 页面布局（BIT 标准：上下2.5 左3 右2.5）────────────────────
 \usepackage{geometry}
@@ -14,6 +15,8 @@
 \usepackage{booktabs, array, longtable, tabularx}
 \usepackage{xcolor}
 \usepackage[hidelinks]{hyperref}
+\usepackage[backend=biber, style=gb7714-2015]{biblatex}
+\addbibresource{references.bib}
 \usepackage{fancyhdr}
 \usepackage{enumitem}
 \usepackage{titletoc}
@@ -68,6 +71,11 @@
 \newcommand{\src}[1]{\textcolor{gray}{\small\itshape [来源：#1]}}
 \newcommand{\newexp}[1]{\textcolor{red!70!black}{\small\bfseries [新实验：#1]}}
 \newcommand{\mytodo}[1]{\textcolor{orange!80!black}{\small\bfseries [TODO：#1]}}
+\newcommand{\sigdateline}[2]{%
+  \noindent\hspace*{#1}\makebox[\dimexpr\textwidth-#1\relax][l]{%
+    #2：\underline{\hspace{5cm}} 日\;期：\underline{\hspace{1.5cm}} 年 \underline{\hspace{0.8cm}} 月 \underline{\hspace{0.8cm}} 日%
+  }\par
+}
 
 %% ══════════════════════════════════════════════════════════════
 \begin{document}
@@ -77,33 +85,39 @@
 %% ═══════════════════════════════════════════════════════════
 \thispagestyle{empty}
 \begin{center}
-  \vspace*{1.5cm}
-  {\fontsize{36pt}{44pt}\selectfont\heiti\textbf{北京理工大学}}\\[0.6cm]
-  {\zihao{-2}\heiti\textbf{本科生毕业设计（论文）}}\\[4cm]
+  \vspace*{1cm}
+  {\fontsize{36pt}{44pt}\selectfont\heiti\textbf{北京理工大学}}\\[0.5cm]
+  {\zihao{-2}\heiti\textbf{本科生毕业设计（论文）}}\\[2.5cm]
 
   %% 中文题目：黑体 二号 加粗
   {\zihao{2}\heiti\textbf{%
     LeRobot 平台感知—推理—执行流程的\\[6pt]%
     系统级性能剖析研究%
-  }}\\[1.2cm]
+  }}\\[1cm]
 
   %% 英文题目：Times New Roman 三号 加粗
   {\zihao{3}\rmfamily\bfseries
     System-Level Performance Profiling of\\[4pt]
     Perception-Inference-Execution Pipeline\\[4pt]
     in the LeRobot Framework%
-  }\\[4cm]
+  }\\[2.5cm]
 
   %% 学生信息表
   \renewcommand{\arraystretch}{2.0}
   \begin{tabular}{@{}p{3.6cm}p{6cm}@{}}
-    学\quad\quad\quad 院：& \underline{\hspace{5.5cm}} \\
-    专\quad\quad\quad 业：& \underline{\hspace{5.5cm}} \\
-    班\quad\quad\quad 级：& \underline{\hspace{5.5cm}} \\
-    学\;生\;姓\;名：     & \underline{\hspace{5.5cm}} \\
-    学\quad\quad\quad 号：& \underline{\hspace{5.5cm}} \\
-    指\;导\;教\;师：     & \underline{\hspace{5.5cm}} \\
+    学\quad\quad\quad 院：& \underline{\makebox[5.5cm][l]{计算机学院}} \\
+    专\quad\quad\quad 业：& \underline{\makebox[5.5cm][l]{软件工程}} \\
+    班\quad\quad\quad 级：& \underline{\makebox[5.5cm][l]{08012204}} \\
+    学\;生\;姓\;名：     & \underline{\makebox[5.5cm][l]{俞乐楠}} \\
+    学\quad\quad\quad 号：& \underline{\makebox[5.5cm][l]{1120221303}} \\
+    指\;导\;教\;师：     & \underline{\makebox[5.5cm][l]{王勇}} \\
   \end{tabular}
+
+  \vspace{1em}
+  {\zihao{-4}\songti
+    20\underline{\makebox[0.6cm][c]{26}}年
+    \underline{\makebox[0.5cm][c]{4}}月
+    \underline{\makebox[0.5cm][c]{20}}日}
 \end{center}
 \clearpage
 
@@ -116,29 +130,29 @@
   {\zihao{3}\heiti\textbf{原创性声明}}
 \end{center}
 
-\vspace{1em}
+\vspace{0.5em}
 \zihao{-4}\songti
 本人郑重声明：所呈交的毕业设计（论文），是本人在指导老师的指导下独立进行研究所取得的成果。除文中已经注明引用的内容外，本文不包含任何其他个人或集体已经发表或撰写过的研究成果。对本文的研究做出重要贡献的个人和集体，均已在文中以明确方式标明。
 
 特此申明。
 
-\vspace{2.5em}
-\hspace{4em} 本人签名：\underline{\hspace{5cm}} 日\;期：\underline{\hspace{1.5cm}} 年 \underline{\hspace{0.8cm}} 月 \underline{\hspace{0.8cm}} 日
+\vspace{1.5em}
+\sigdateline{4em}{本人签名}
 
-\vspace{3em}
+\vspace{2em}
 
 \begin{center}
   {\zihao{3}\heiti\textbf{关于使用授权的声明}}
 \end{center}
 
-\vspace{1em}
+\vspace{0.5em}
 本人完全了解北京理工大学有关保管、使用毕业设计（论文）的规定，其中包括：①学校有权保管、并向有关部门送交本毕业设计（论文）的原件与复印件；②学校可以采用影印、缩印或其它复制手段复制并保存本毕业设计（论文）；③学校可允许本毕业设计（论文）被查阅或借阅；④学校可以学术交流为目的，复制赠送和交换本毕业设计（论文）；⑤学校可以公布本毕业设计（论文）的全部或部分内容。
 
-\vspace{2.5em}
-\hspace{4em} 本人签名：\underline{\hspace{5cm}} 日\;期：\underline{\hspace{1.5cm}} 年 \underline{\hspace{0.8cm}} 月 \underline{\hspace{0.8cm}} 日
+\vspace{1.5em}
+\sigdateline{4em}{本人签名}
 
-\vspace{1em}
-\hspace{1.5em} 指导教师签名：\underline{\hspace{5cm}} 日\;期：\underline{\hspace{1.5cm}} 年 \underline{\hspace{0.8cm}} 月 \underline{\hspace{0.8cm}} 日
+\vspace{0.8em}
+\sigdateline{1.5em}{指导教师签名}
 
 \clearpage
 
@@ -232,11 +246,53 @@ LeRobot; ACT; performance profiling; ARM inference; chunk\_size; perception-infe
 \section{绪论}
 
 \subsection{研究背景与意义}
-\begin{itemize}[leftmargin=2em]
-  \item 协作机器人与 VLA 模型快速发展，软件栈日趋复杂；
-  \item 主流机器人系统基于通用宏内核构建，与"感知—推理—执行"紧耦合运行特征存在明显差异；
-  \item 引入 ACT 等 AI 推理框架后，系统性能瓶颈与资源消耗机理缺乏系统性分析。
-\end{itemize}
+
+近年来，协作机器人在工业制造、医疗服务、仓储物流等领域加速落地，对自主操作能力的需求持续增长。
+以 RT-2\cite{rt2}、OpenVLA\cite{openvla} 为代表的视觉—语言—动作（Vision-Language-Action, VLA）大模型，
+将视觉感知与动作决策统一到端到端网络中，显著提升了机器人在开放场景下的泛化能力。
+然而，此类模型的参数量和计算量远超传统控制方法，
+如何在资源受限的嵌入式平台上实现实时推理，成为制约其部署的关键瓶颈。
+
+在开源机器人学习框架方面，HuggingFace 推出的 LeRobot\cite{lerobot} 集成了
+ACT（Action Chunking with Transformers）\cite{act}、Diffusion Policy\cite{diffusionpolicy}
+等模仿学习策略，并提供从数据采集、模型训练到在线推理的完整工具链；
+同时配套推出 SO-101 开源六自由度机械臂，实现了软件框架与低成本硬件平台的一体化开源。
+Physical Intelligence 提出的 $\pi_0$\cite{pi0} 以流匹配为动作生成核心，
+在双臂协作任务上表现出色；斯坦福 Mobile ALOHA\cite{mobilealoha} 以低成本仿生平台
+搭配联合学习，实现了全身遥操作控制。
+LeRobot 的在线推理循环采用"感知—推理—执行"三阶段紧耦合架构：
+每帧依次完成传感器观测采集（\texttt{get\_observation()}）、
+策略网络推理（\texttt{select\_action()}）和舵机指令下发（\texttt{send\_action()}），
+三个阶段在同一线程内串行执行，任一阶段的性能瓶颈均会直接影响整体帧率。
+
+在实际部署中，本文选用树莓派5（ARM Cortex-A76，4核，4\,GB LPDDR4X）作为边缘推理平台，
+搭配 SO101 六自由度机械臂和 USB 摄像头，在无 GPU 的条件下运行 ACT 策略网络。
+初步测试表明，单次 ACT 推理耗时约 1500-3000\,ms，而传感器采集和指令下发各仅约 1-15\,ms，
+推理阶段占循环总时间的 99\% 以上。
+在 chunk\_size=100（即每次推理输出 100 帧动作）的配置下，
+系统实际帧率仅约 18--19\,fps，距离 30\,fps 的实时目标仍有明显差距。
+
+在开源硬件与低成本本体方面，多个平台为机器人学习研究提供了可复现的硬件基础。
+LeRobot 配套的 SO-101 六自由度机械臂将硬件设计与学习框架深度绑定，
+结构件可 3D 打印，成本低廉，是本文实验平台的直接来源；
+ROBOTIS 的 OpenManipulator 系列\cite{openmanipulator} 提供配套 ROS2 的开源机械臂，
+硬件图纸与代码全开源，适合教学和原型开发；
+TurtleBot 系列\cite{turtlebot4} 作为开源移动机器人的事实标准，最新版本与 ROS2 生态深度集成；
+UC Berkeley HybridRobotics 实验室开发的 Berkeley Humanoid Lite\cite{berkeleyhumanoidlite} 采用 3D 打印方案，
+为小型人形机器人的开源化提供了新思路。
+
+上述性能瓶颈涉及多个系统层次：PyTorch 推理引擎的算子调度、OpenMP 线程池的并行效率、
+Linux 内核的系统调用路径以及 USB/串口的硬件 I/O 延迟。
+然而，现有的机器人系统性能分析工作多聚焦于单一层次（如模型压缩、内核调度或通信延迟），
+缺乏从 AI 框架层到内核层的跨层次联合剖析，
+难以回答"瓶颈究竟在哪一层、由什么原因导致、各优化方向的收益几何"等关键问题。
+
+因此，本文的研究意义在于：
+（1）理论层面——建立覆盖 AI 推理框架层、Python 运行时层、OS 内核层和硬件 I/O 层的四层性能分析模型，
+提出面向"感知—推理—执行"紧耦合场景的多工具联合剖析方法；
+（2）实践层面——端到端量化 LeRobot 在嵌入式 ARM 平台上的各阶段时间开销，
+定位主要性能瓶颈，系统评估 INT8 量化、异步推理流水线等优化方向的可行性与预期收益，
+为同类嵌入式机器人系统的性能优化与软件架构设计提供实验依据和工程参考。
 
 \subsection{研究目标}
 \begin{enumerate}[leftmargin=2em]
@@ -249,13 +305,9 @@ LeRobot; ACT; performance profiling; ARM inference; chunk\_size; perception-infe
 \begin{itemize}[leftmargin=2em]
   \item 提出覆盖 AI 框架到内核的四层性能分析模型；
   \item 通过 ftrace/torch.profiler/perf 多工具联合剖析，量化各阶段时间开销；
-  \item 揭示 strace 对系统调用测量带来的 9× 时间放大问题，验证 ftrace 的必要性；
+  \item 揭示 strace 对系统调用测量带来的 9$\times$ 时间放大问题，验证 ftrace 的必要性；
   \item 基于量化结果，系统梳理优化路径及其成本收益。
 \end{itemize}
-
-\subsection{论文组织结构}
-
-各章内容简述如下（第 2--7 章）。
 
 %% ══════════════════════════════════════════════════════════
 \section{相关工作}
@@ -590,8 +642,18 @@ FPS 与 cs 呈非线性：cs 从 1$\to$10 增益巨大（0.8$\to$6），cs 从 5
 \end{itemize}
 
 %% ══════════════════════════════════════════════════════════
-\section*{附录：待补充实验}
-\addcontentsline{toc}{section}{附录：待补充实验}
+\clearpage
+\section*{参考文献}
+\addcontentsline{toc}{section}{参考文献}
+
+\printbibliography[heading=none]
+
+%% ══════════════════════════════════════════════════════════
+\clearpage
+\section*{附\quad 录}
+\addcontentsline{toc}{section}{附录}
+
+\subsection*{附录A：待补充实验清单}
 
 \begin{center}
 \begin{tabular}{cp{4cm}p{3.5cm}c}
@@ -605,5 +667,12 @@ FPS 与 cs 呈非线性：cs 从 1$\to$10 增益巨大（0.8$\to$6），cs 从 5
   \bottomrule
 \end{tabular}
 \end{center}
+
+%% ══════════════════════════════════════════════════════════
+\clearpage
+\section*{致\quad 谢}
+\addcontentsline{toc}{section}{致谢}
+
+\mytodo{致谢内容}
 
 \end{document}

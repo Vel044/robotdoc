@@ -1,0 +1,217 @@
+%% ══════════════════════════════════════════════════════════════
+%% 参考文献数据库（GB/T 7714—2015 格式，biblatex 管理）
+%% ══════════════════════════════════════════════════════════════
+
+%% ── 第1章 绪论 ──────────────────────────────────────────────
+
+% RT-2: 谷歌 RT 系列的第二代视觉-语言-动作模型，证明 VLA 范式在机器人控制中的有效性
+@article{rt2,
+  author  = {Brohan, Anthony and Brown, Noah and Carbajal, Justice and others},
+  title   = {{RT-2}: Vision-Language-Action Models Transfer Web Knowledge to Robotic Control},
+  journal = {arXiv preprint arXiv:2307.15818},
+  year    = {2023},
+}
+
+% OpenVLA: 开源 VLA 模型，HuggingFace 支持，作为 LeRobot 对比基线之一
+@article{openvla,
+  author  = {Kim, Moo Jin and Pumacay, Karl and Jatavallabhula, Krishna Murthy and others},
+  title   = {{OpenVLA}: An Open-Source Vision-Language-Action Model},
+  journal = {arXiv preprint arXiv:2406.09246},
+  year    = {2024},
+}
+
+% LeRobot: HuggingFace 机器人学习框架，本文的核心实验平台
+@misc{lerobot,
+  author = {Remi Cadene and Simon Alibert and others},
+  title  = {{LeRobot}},
+  year   = {2024},
+  url    = {https://github.com/huggingface/lerobot},
+  note   = {HuggingFace},
+}
+
+% ACT: Action Chunking with Transformers，本文研究的策略网络
+@inproceedings{act,
+  author    = {Zhao, Tony Z. and Kumar, Vikash and Levine, Sergey and Finn, Chelsea},
+  title     = {Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware},
+  booktitle = {Proceedings of Robotics: Science and Systems (RSS)},
+  year      = {2023},
+}
+
+% Diffusion Policy: 另一种主流模仿学习策略，LeRobot 也集成，用于相关工作对比
+@inproceedings{diffusionpolicy,
+  author    = {Chi, Cheng and Feng, Siyuan and Du, Yilun and others},
+  title     = {Diffusion Policy: Visuomotor Policy Learning via Action Diffusion},
+  booktitle = {Proceedings of Robotics: Science and Systems (RSS)},
+  year      = {2023},
+}
+
+% π0: Physical Intelligence 的通用机器人策略模型，基于流匹配，动作生成能力强
+@misc{pi0,
+  author = {Physical Intelligence},
+  title  = {{\\pi0}: A Generalist Robot Policy},
+  year   = {2024},
+  url    = {https://www.physicalintelligence.com/},
+}
+
+% Mobile ALOHA: 仿生移动机械臂平台，低成本硬件 + 模仿学习，数据采集方便
+@inproceedings{mobilealoha,
+  author    = {Zhan, Tony and others},
+  title     = {Mobile ALOHA: Bimanual Mobile Manipulation with Low-Cost Whole-Body Teleoperation},
+  booktitle = {IEEE International Conference on Robotics and Automation (ICRA)},
+  year      = {2024},
+}
+
+%% ── 第2章 相关工作 ──────────────────────────────────────────
+
+% RT-1: RT 系列第一代，证明大规模机器人数据训练 Transformer 的可行性
+@article{rt1,
+  author  = {Brohan, Anthony and Brown, Noah and Carbajal, Justice and others},
+  title   = {{RT-1}: Robotics Transformer for Real-World Control at Scale},
+  journal = {arXiv preprint arXiv:2212.06817},
+  year    = {2022},
+}
+
+% ROS2: 机器人操作系统事实标准，本文软件栈的对比参照
+@inproceedings{ros2,
+  author    = {Macenski, Steve and Foote, Tully and Gerkey, Brian and others},
+  title     = {Robot Operating System 2: Design, architecture, and uses in the wild},
+  booktitle = {Science Robotics},
+  volume    = {7},
+  number    = {66},
+  year      = {2022},
+}
+
+% LCM: Lightweight Communications and Marshalling，实时性通信库，对比参照
+@inproceedings{lcm,
+  author    = {Huang, Albert S. and Olson, Edwin and Moore, David C.},
+  title     = {{LCM}: Lightweight Communications and Marshalling},
+  booktitle = {IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS)},
+  year      = {2010},
+}
+
+% ONNX Runtime: 微软推理引擎，本文优化方向之一（INT8/FP16 量化后端）
+@article{onnxruntime,
+  author = {Microsoft},
+  title  = {{ONNX Runtime}},
+  year   = {2024},
+  url    = {https://github.com/microsoft/onnxruntime},
+}
+
+% TFLite: Google 移动端推理框架，ARM 嵌入式部署的对比参照
+@article{tflite,
+  author = {Google},
+  title  = {{TensorFlow Lite}},
+  year   = {2024},
+  url    = {https://www.tensorflow.org/lite},
+}
+
+% PyTorch Mobile: Meta 移动端推理框架，本文 PyTorch 生态的延伸
+@article{pytorchmobile,
+  author = {Meta},
+  title  = {{PyTorch Mobile}},
+  year   = {2024},
+  url    = {https://pytorch.org/mobile/},
+}
+
+% Transformer: Attention Is All You Need，ACT 策略网络的核心架构
+@inproceedings{transformer,
+  author    = {Vaswani, Ashish and Shazeer, Noam and Parmar, Niki and others},
+  title     = {Attention Is All You Need},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
+  year      = {2017},
+}
+
+% CVAE: Conditional VAE，ACT 中动作解码器的生成模型基础
+@article{cvae,
+  author  = {Sohn, Kihyuk and Lee, Honglak and Yan, Xinchen},
+  title   = {Learning Structured Output Representation using Deep Conditional Generative Models},
+  journal = {Advances in Neural Information Processing Systems (NeurIPS)},
+  year    = {2015},
+}
+
+% ResNet: 深度残差网络，ACT 策略网络中视觉编码器的骨干网络
+@article{resnet,
+  author  = {He, Kaiming and Zhang, Xiangyu and Ren, Shaoqing and Sun, Jian},
+  title   = {Deep Residual Learning for Image Recognition},
+  journal = {IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
+  year    = {2016},
+}
+
+%% ── Profiling 工具与系统分析 ────────────────────────────────
+
+% Brendan Gregg《系统性能》：profiling 方法论的经典参考，支撑本文四层分析模型
+@book{perfbook,
+  author    = {Gregg, Brendan},
+  title     = {Systems Performance: Enterprise and the Cloud},
+  publisher = {Addison-Wesley},
+  year      = {2020},
+  edition   = {2nd},
+}
+
+% ftrace: Linux 内核级函数追踪工具，本文内核层测量的主要工具
+@misc{ftrace,
+  author = {Linux Kernel Organization},
+  title  = {ftrace --- Function Tracer},
+  url    = {https://www.kernel.org/doc/html/latest/trace/ftrace.html},
+  year   = {2024},
+}
+
+% strace: 系统调用追踪工具，本文方法论中与 ftrace 对比的反面案例（9× 开销放大）
+@misc{strace,
+  author = {strace developers},
+  title  = {strace --- System Call Tracer},
+  url    = {https://strace.io/},
+  year   = {2024},
+}
+
+% torch.profiler: PyTorch 官方 profiling 工具，本文 AI 算子级测量的主要工具
+@misc{torchprofiler,
+  author = {PyTorch},
+  title  = {{PyTorch Profiler}},
+  url    = {https://pytorch.org/tutorials/recipes/recipes/profiler_recipe.html},
+  year   = {2024},
+}
+
+%% ── 开源硬件与低成本本体 ───────────────────────────────────
+
+% OpenManipulator: ROBOTIS 开源机械臂，配套 ROS2，全硬件图纸开源，适合教学与原型开发
+@misc{openmanipulator,
+  author = {ROBOTIS},
+  title  = {{OpenManipulator}},
+  year   = {2024},
+  url    = {https://emanual.robotis.com/docs/en/platform/openmanipulator_x/},
+}
+
+% TurtleBot: 开源移动机器人，2010 年由 Willow Garage 创建，ROS 生态事实标准，最新为 TurtleBot 4
+@misc{turtlebot4,
+  author = {Open Robotics and Clearpath Robotics},
+  title  = {{TurtleBot 4}},
+  year   = {2023},
+  url    = {https://www.turtlebot.com/},
+}
+
+% Berkeley Humanoid Lite: UC Berkeley HybridRobotics 实验室开源小型人形机器人，3D 打印硬件方案
+@misc{berkeleyhumanoidlite,
+  author = {HybridRobotics},
+  title  = {{Berkeley Humanoid Lite}},
+  year   = {2025},
+  url    = {https://lite.berkeley-humanoid.org/},
+}
+
+%% ── 树莓派 / ARM 平台 ─────────────────────────────────────
+
+% Raspberry Pi 5 官方文档：Cortex-A76 架构，确认无 GPU 的硬件约束
+@manual{rpi5,
+  author       = {Raspberry Pi Foundation},
+  title        = {Raspberry Pi 5 Documentation},
+  year         = {2024},
+  url          = {https://www.raspberrypi.com/documentation/},
+}
+
+% Cortex-A76 TRM: ARM 官方技术参考手册，确认 NEON SIMD 和 GEMM 加速能力
+@manual{cortexa76,
+  author       = {ARM},
+  title        = {{Cortex-A76} Technical Reference Manual},
+  year         = {2024},
+  url          = {https://developer.arm.com/documentation/},
+}
