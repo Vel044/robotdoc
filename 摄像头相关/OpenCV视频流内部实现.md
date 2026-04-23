@@ -274,8 +274,16 @@ bool CvCaptureCAM_V4L::retrieveFrame(int, OutputArray ret)
 
     const Buffer &currentBuffer = buffers[bufferIndex];
 
-    // lerobot convert_rgb=true（默认）：走 convertToRgb 做 MJPEG 解码 → BGR
-    convertToRgb(currentBuffer);
+    // 根据 convert_rgb 标志决定是否进行色彩空间转换
+    // convert_rgb 默认为 true（在 CvCaptureCAM_V4L::open 中设置）
+    if (convert_rgb) {
+        // 将 YUV/MJPEG 等格式转换为 BGR 格式
+        // 注意：函数名叫 convertToRgb 但实际输出 BGR（OpenCV 的标准格式）
+        // 内部调用 cv::imdecode(MJPEG) 或 cv::cvtColor(YUV→BGR)
+        convertToRgb(currentBuffer);
+    } else {
+        // 不转换，直接返回原始数据
+    }
 
     // 将缓冲区重新入队（VIDIOC_QBUF），供下次 grabFrame 使用
     // 这一步必须在 copyTo 之前，因为 grabFrame 只在 bufferIndex>=0 时才归还旧缓冲区
@@ -288,6 +296,56 @@ bool CvCaptureCAM_V4L::retrieveFrame(int, OutputArray ret)
     frame.copyTo(ret);             // frame（cv::Mat BGR）→ OutputArray ret → Python 侧 np.ndarray
     return true;
 }
+```
+
+#### convertToRgb() 函数说明（重要）
+
+**函数名称 vs 实际行为：**
+
+虽然函数名叫 `convertToRgb()`，但它**实际输出 BGR 格式**。这是 OpenCV 的历史遗留问题，OpenCV 内部统一使用 BGR 格式。
+
+**源码位置**：`opencv/modules/videoio/src/cap_v4l.cpp:1553`
+
+```cpp
+void CvCaptureCAM_V4L::convertToRgb(const Buffer &currentBuffer) {
+    frame.create(imageSize, CV_8UC3);  // 创建 3 通道图像
+
+    switch (palette) {
+    case V4L2_PIX_FMT_YUV420:
+        cv::cvtColor(..., COLOR_YUV2BGR_IYUV);  // 输出 BGR
+        return;
+    case V4L2_PIX_FMT_MJPEG:
+        cv::imdecode(Mat(...), IMREAD_COLOR, &frame);  // 输出 BGR
+        return;
+    case V4L2_PIX_FMT_YUYV:
+        cv::cvtColor(..., COLOR_YUV2BGR_YUYV);  // 输出 BGR
+        return;
+    case V4L2_PIX_FMT_RGB24:
+        cv::cvtColor(..., COLOR_RGB2BGR);  // 输入 RGB24，特意转成 BGR！
+        return;
+    // ... 其他格式都转换成 BGR
+    }
+}
+```
+
+**关键点：**
+
+1. 所有转换都使用 `COLOR_*_BGR_*` 格式常量，输出 BGR
+2. 对于 `V4L2_PIX_FMT_RGB24`（硬件本身就是 RGB），还会特意用 `COLOR_RGB2BGR` 转换成 BGR
+3. 所以 `videocapture.read()` 返回的始终是 **BGR 格式**，不是 RGB
+
+**颜色转换完整流程：**
+
+```
+硬件（MJPEG/YUV/RGB24）
+    ↓
+convertToRgb()  → BGR（OpenCV内部统一格式）
+    ↓
+videocapture.read() 返回 BGR
+    ↓
+Lerobot camera_opencv.py: cv2.cvtColor(BGR→RGB)
+    ↓
+Lerobot 数据流：RGB 格式
 ```
 
 ### frame.copyTo → np.ndarray 转换细节

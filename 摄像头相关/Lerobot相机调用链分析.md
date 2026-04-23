@@ -220,3 +220,122 @@ def _postprocess_image(self, image: np.ndarray, color_mode: ColorMode | None = N
 
 - **BGR→RGB 转换**：默认 `color_mode=ColorMode.RGB`，**每帧都会执行**，约 0.1–0.5ms @ 640×480。返回给上层的 `np.ndarray` 始终是 RGB 格式，shape `(H, W, 3)`，dtype `uint8`。
 - **旋转**：默认 `rotation=Cv2Rotation.NO_ROTATION`，`self.rotation` 为 `None`，**跳过**，`cv2.rotate` 不调用。
+
+---
+
+### 3.6 `cv2.cvtColor` 底层实现（OpenCV C++ 源码追踪）
+
+`cv2.cvtColor(image, cv2.COLOR_BGR2RGB)` 的完整调用链，源码均在 `opencv/modules/imgproc/src/`。
+
+---
+
+#### 第1层：`cvtColor` 入口分发
+
+**源码路径**：`opencv/modules/imgproc/src/color.cpp:192-216`
+
+```cpp
+void cvtColor(InputArray _src, OutputArray _dst, int code, int dcn, AlgorithmHint hint)
+{
+    switch(code)
+    {
+    case COLOR_BGR2RGB:  // COLOR_BGR2RGB 走此 case
+        cvtColorBGR2BGR(_src, _dst, dcn, swapBlue(code));
+        //                                 ↑ swapBlue(COLOR_BGR2RGB) = true
+        break;
+    }
+}
+```
+
+---
+
+#### 第2层：`swapBlue()` — 判断是否需要对调 R/B 通道
+
+**源码路径**：`opencv/modules/imgproc/src/color.hpp:54-80`
+
+```cpp
+inline bool swapBlue(int code)
+{
+    switch(code)
+    {
+    case COLOR_BGR2BGRA: case COLOR_BGRA2BGR: /* ... 纯 BGR 系列 */ :
+        return false;   // BGR 同族不需要对调
+    default:
+        return true;    // COLOR_BGR2RGB 走 default → true（需要对调）
+    }
+}
+```
+
+---
+
+#### 第3层：`cvtColorBGR2BGR` — 分发到 HAL 层
+
+**源码路径**：`opencv/modules/imgproc/src/color_rgb.dispatch.cpp:550-556`
+
+```cpp
+void cvtColorBGR2BGR(InputArray _src, OutputArray _dst, int dcn, bool swapb)
+{
+    CvtHelper<Set<3,4>, Set<3,4>, Set<CV_8U,CV_16U,CV_32F>> h(_src, _dst, dcn);
+
+    hal::cvtBGRtoBGR(h.src.data, h.src.step,
+                     h.dst.data, h.dst.step,
+                     h.src.cols, h.src.rows,
+                     h.depth, h.scn, dcn,
+                     swapb);   // swapb=true
+}
+```
+
+---
+
+#### 第4层：`cvtBGRtoBGR` — 根据位深选 SIMD 路径
+
+**源码路径**：`opencv/modules/imgproc/src/color_rgb.simd.hpp:1101-1115`
+
+```cpp
+void cvtBGRtoBGR(const uchar* src_data, size_t src_step, ...)
+{
+    int blueIdx = swapBlue ? 2 : 0;
+    //            ↑ true → blueIdx=2，表示将通道0和通道2对调
+
+    // 按 depth 选模板：uint8 / uint16 / float
+    CvtColorLoop(..., RGB2RGB<uchar>(scn, dcn, blueIdx));
+}
+```
+
+---
+
+#### 第5层：`RGB2RGB<uchar>::operator()` — 实际像素处理
+
+**源码路径**：`opencv/modules/imgproc/src/color_rgb.simd.hpp:119-175`
+
+```cpp
+void operator()(const _Tp* src, _Tp* dst, int n) const
+{
+    int bi = blueIdx;  // = 2（BGR→RGB）
+
+    // ---- SIMD 快速路径（ARM NEON / x86 SSE，每次处理 16 个像素） ----
+    for(; i <= n-vsize; i += vsize, src += vsize*scn, dst += vsize*dcn)
+    {
+        vt a, b, c;
+        v_load_deinterleave(src, a, b, c);  // 把交错的 BGR 拆成3个独立向量
+
+        if(bi == 2)
+            swap(a, c);   // a=B, c=R → 对调 → a=R, c=B
+
+        v_store_interleave(dst, a, b, c);   // 重新交错写出 RGB
+    }
+
+    // ---- 标量尾部处理（不足一个 SIMD 宽度的像素） ----
+    for(; i < n; i++, src += scn, dst += dcn)
+    {
+        _Tp t0 = src[0], t1 = src[1], t2 = src[2];
+        dst[bi  ] = t0;   // dst[2] = src[0]（B 写到位置2）
+        dst[1]    = t1;   // dst[1] = src[1]（G 不变）
+        dst[bi^2] = t2;   // dst[0] = src[2]（R 写到位置0）
+        //  bi^2 = 2^2 = 0，异或完成双向对调，无需临时变量
+    }
+}
+```
+
+**`bi^2` 位运算技巧**：`blueIdx=2` 时，`2^2=0`，一次异或同时算出两个目标下标，避免了额外的 `if`。
+
+**性能**：640×480 图像 NEON 路径下约 **0.1~0.3ms**，与文档 3.4 节的估算一致。
