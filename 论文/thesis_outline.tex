@@ -312,30 +312,98 @@ Linux 内核的系统调用路径以及 USB/串口的硬件 I/O 延迟。
 %% ══════════════════════════════════════════════════════════
 \section{相关工作}
 
-\subsection{机器人操作系统与框架}
+\subsection{机器人操作系统与通信框架}
+
+\textbf{ROS2}：机器人操作系统（Robot Operating System 2）是 ROS 的下一代版本，
+以 DDS（Data Distribution Service）作为底层通信中间件，支持节点间发布-订阅与服务调用。
+ROS2 引入了节点生命周期管理、QoS 策略（可靠性/持久性/实时性配置）等企业级特性，
+支持跨机器跨平台分布式部署，并可通过 \texttt{rclcpp} / \texttt{rclpy} 接入 C++ 或 Python 节点。
+其通信延迟在局域网内通常为毫秒级，但节点调度仍依赖 Linux CFS 调度器，无硬实时保证。
+ROS2 主要运行于 Ubuntu（官方支持 22.04/24.04），需配合 Linux 内核使用，不支持 Windows/macOS 原生部署。
+
+\textbf{LCM}（Lightweight Communications and Marshalling）：由 MIT 开发的高性能消息传递库，
+设计目标是为实时系统提供低延迟、零拷贝的消息序列化与传输能力。
+LCM 使用 UDP 单播/广播而非 TCP，支持用户态消息队列（类型声明 + 字节流），
+省去了 IDL 编译步骤，延迟可低至数微秒。
+但 LCM 仅提供消息传递层，不含控制回路、参数服务器或 RViz 等生态工具，生态远不如 ROS2。
+
+\src{LeRobot软件栈全链路分析.md}
+
+\subsection{开源机器人硬件平台}
+
+\textbf{SO-101}：HuggingFace LeRobot 配套的六自由度机械臂，
+结构件可 3D 打印，成本低廉，与 LeRobot 框架深度绑定，是本文实验平台的直接来源。
+
+\textbf{OpenManipulator}：ROBOTIS 推出的开源机械臂，提供配套的 ROS2 集成包，
+硬件图纸与代码全开源，适合教学和原型开发，支持 MoveIt! 运动规划。
+
+\textbf{TurtleBot4}：开源移动机器人的事实标准，最新版本与 ROS2 生态深度集成，
+配备 OAK-D 深度相机，适用于室内导航与移动操作任务。
+
+\textbf{Berkeley Humanoid Lite}：UC Berkeley HybridRobotics 实验室开发的 3D 打印小型人形机器人，
+为开源人形机器人平台提供了新思路。
+
+\subsection{机器人策略模型}
+
+机器人策略模型分为两大类：
+
+\textbf{视觉-语言-动作模型（VLA）}：将视觉感知、语言理解和动作执行统一到端到端网络中，
+通过大规模预训练实现开放场景泛化能力。
+代表工作包括：
 \begin{itemize}[leftmargin=2em]
-  \item ROS2、LeRobot、LCM 对比——通信机制与实时性；
-  \item LeRobot v0.3.4 架构概述：record/replay/train/eval 流程。
+  \item \textbf{RT-2}：Google DeepMind 提出，将视觉-语言模型（VLM）输出直接映射为机器人动作 token；
+  \item \textbf{OpenVLA}：开源 VLA 模型，支持多任务泛化，参数量 7B，可在消费级 GPU 部署；
+  \item $\boldsymbol{\pi_0}$：Physical Intelligence 提出，以流匹配（Flow Matching）为核心动作生成机制，
+        在双臂协作任务上表现优异。
 \end{itemize}
 
-\subsection{嵌入式边缘 AI 推理}
+\textbf{模仿学习策略}：通过专家演示数据训练策略网络，不依赖大规模预训练。
+代表工作包括：
 \begin{itemize}[leftmargin=2em]
-  \item TFLite、ONNX Runtime、PyTorch Mobile 在 ARM 上的部署现状；
-  \item 树莓派5（Cortex-A76）的计算能力与限制。
+  \item \textbf{ACT}（Action Chunking with Transformers）：CVAE 编解码器 + Transformer 动作预测，
+        支持动作分块（chunk\_size）和 time ensemble，适合桌面精细操作任务；
+  \item \textbf{Diffusion Policy}：将动作生成建模为扩散过程，适合多模态动作分布。
 \end{itemize}
 
-\subsection{ACT 与 VLA 模型}
-\begin{itemize}[leftmargin=2em]
-  \item ACT 模型原理：CVAE 编解码器、动作分块（chunk）、time ensemble；
-  \item chunk\_size 与推理频率的权衡。
-\end{itemize}
+\textbf{对比}：VLA 泛化能力强但计算量巨大（7B+ 参数），难以在嵌入式 ARM 平台实时运行；
+ACT/Diffusion Policy 参数量较小（ResNet18 + Transformer，约 50M 参数），可在树莓派 5 上运行，
+但推理延迟仍是主要瓶颈（2000--4000 ms/次）。
+
 \src{ACT模型原理.md，ACT推理.md}
 
+\subsection{嵌入式边缘 AI 推理}
+
+在资源受限的嵌入式平台上部署深度学习模型，需要针对硬件特性进行优化：
+
+\textbf{TFLite}：Google 推出的移动端推理框架，支持 FP16/INT8 量化、
+ARM NEON SIMD 加速，广泛用于边缘设备推理。
+
+\textbf{ONNX Runtime}：微软推出的跨平台推理引擎，支持多种执行提供者（CPU/ CUDA / TensorRT），
+在 ARM 上通过 OpenMP 和 NEON 加速，延迟优于 TFLite 约 1.5--2×。
+
+\textbf{PyTorch Mobile}：PyTorch 的移动端部署方案，
+支持 TorchScript 导出和 CPU 优化，但相比 ONNX Runtime 在 ARM 上的优化程度较低。
+
+\textbf{树莓派 5（Cortex-A76）计算能力}：4 核 4 GB LPDDR4X，
+双发射 SIMD 单元支持 NEON，矩阵乘法（GEMM）理论峰值约 50 GFLOPS（FP32），
+实际推理 ACT 模型约 30--50 GFLOPS 利用率，实测推理耗时 2000--4000 ms/次。
+作为对比，RT-2（7B 参数）在树莓派 5 上几乎无法运行，VLA 模型需在 GPU 平台上部署。
+
 \subsection{系统级 Profiling 技术}
+
+机器人系统的性能分析需要跨层次工具链：
+
 \begin{itemize}[leftmargin=2em]
-  \item strace / ftrace / perf / torch.profiler 工具对比；
-  \item 已有机器人系统性能分析工作综述。
+  \item \textbf{strace}：通过 \texttt{ptrace} 拦截系统调用，开销极大（9× 时间放大），仅用于定性探索；
+  \item \textbf{ftrace}：内核态 tracepoint，开销极低（纳秒级），适合生产环境测量；
+  \item \textbf{perf}：硬件性能计数器（PMC），可测量 IPC、Cache-miss 等微架构指标；
+  \item \textbf{torch.profiler}：PyTorch 算子级 profiling，分解前向/反向传播各算子耗时。
 \end{itemize}
+
+已有机器人系统性能分析工作多聚焦于单一层次（模型压缩、内核调度或通信延迟），
+缺乏从 AI 框架层到内核层的跨层次联合剖析。
+
+\src{内核数据搜集分析.md，方法论.md}
 
 %% ══════════════════════════════════════════════════════════
 \section{系统架构与负载特征分析}
@@ -364,23 +432,28 @@ Linux 内核的系统调用路径以及 USB/串口的硬件 I/O 延迟。
 \src{LeRobot软件栈全链路分析.md}
 
 \subsection{三类典型工作负载特征}
-\newexp{各跑一次 episode，用 Python logging 采集帧率、推理次数、观测维度}
 
-三类任务：\textbf{抓取（Grasp）}、\textbf{推倒（Push）}、\textbf{分类（Sort）}。
+三类任务：\textbf{抓取（Grasp / pick）}、\textbf{推倒（Push）}、\textbf{分类（Sort / classification）}。
+统一硬件（树莓派5）、统一模型架构（ACT，cs=100）、统一目标帧率（30 fps），
+每类任务采集 $n=20$ 个 episode，episode 时长统一对齐至约 30 s 以排除时长差异干扰。
 
 \begin{center}
 \begin{tabular}{lccc}
   \toprule
   指标 & 抓取 & 推倒 & 分类 \\
   \midrule
-  Episode 时长（s）     & \mytodo{测量} & \mytodo{测量} & \mytodo{测量} \\
-  推理调用次数          & \mytodo{测量} & \mytodo{测量} & \mytodo{测量} \\
-  inference\_pct（\%）  & \mytodo{} & \mytodo{} & \mytodo{} \\
-  摄像头路数            & 1 & 1 & 1 \\
-  关节自由度            & 6 & 6 & 6 \\
+  Episode 均值时长（s）  & 30.0 & 30.7 & 30.0 \\
+  obs\_pct（\%）         & 15.4 $\pm$ 1.6 & 15.4 $\pm$ 1.9 & 16.7 $\pm$ 1.9 \\
+  inference\_pct（\%）   & 36.5 $\pm$ 2.5 & 34.9 $\pm$ 1.2 & 35.9 $\pm$ 2.0 \\
+  action\_pct（\%）      & 4.8 $\pm$ 0.3 & 4.4 $\pm$ 0.3 & 4.4 $\pm$ 0.3 \\
+  wait\_pct（\%）        & 43.3 $\pm$ 2.3 & \textbf{45.2} $\pm$ 2.0 & 42.9 $\pm$ 2.2 \\
+  摄像头路数             & 1 & 1 & 1 \\
+  关节自由度             & 6 & 6 & 6 \\
   \bottomrule
 \end{tabular}
 \end{center}
+
+\src{实验数据/02\_三类任务工作负载对比/cs100\_task\_comparison.md}
 
 \subsection{感知—推理—执行三阶段划分}
 \begin{itemize}[leftmargin=2em]
@@ -409,12 +482,34 @@ Linux 内核的系统调用路径以及 USB/串口的硬件 I/O 延迟。
 
 \subsection{工具链选型}
 
-\textbf{strace vs ftrace 的关键差异}：
+\textbf{strace vs ftrace 机制与开销对比}：
+
+两者作用层次不同，开销来源也不同：
+
 \begin{itemize}[leftmargin=2em]
-  \item strace 通过 ptrace 拦截每次系统调用，带来约 \textbf{9× 系统时间放大}（实测：20.12 s $\to$ 2.20 s）；
-  \item ftrace 工作在内核 tracepoint，开销极低，适合生产级测量；
-  \item \textbf{本文以 ftrace 数据为准，strace 仅用于初期探索。}
+  \item \textbf{strace}：通过 \texttt{ptrace} 系统调用在用户态拦截目标进程的每一次系统调用入口与出口。
+        每次拦截都需要一次进程上下文切换（目标进程 $\to$ strace 进程），
+        导致系统时间从 \textbf{2.20 s 放大至 20.12 s（约 9×）}。
+        其开销与系统调用频率正相关，频繁调用时干扰极大，不可用于生产级测量。
+
+  \item \textbf{ftrace}：通过 Linux 内核 tracepoint / \texttt{trace\_printk()} 在内核态直接写入 ring buffer，
+        \textbf{插桩本身开销极低}（纳秒级，无进程切换）。
+        但将 ring buffer 内容导出至用户态文件（\texttt{cat /sys/kernel/debug/tracing/trace > log}）
+        是一次批量文件 I/O，当 event 密集时，\textbf{导出过程本身会消耗额外 CPU 和内存带宽}，
+        且导出期间 ring buffer 可能覆盖旧数据（丢失事件）。
+
+  \item \textbf{本文策略}：以 ftrace 插桩数据为主要内核态度量依据；
+        strace 仅用于初期定性探索系统调用分布，不计入最终时序数据。
 \end{itemize}
+
+% TODO: 补充对比实验——量化 ftrace log 导出阶段的 CPU/内存开销
+% 对比方案：
+%   A) ftrace 插桩 + 实时 cat 导出（当前方案）
+%   B) ftrace 插桩 + trace-cmd record（内核侧 per-CPU buffer，降低导出压力）
+%   C) 无任何 tracing（baseline）
+% 指标：episode 期间系统时间、用户时间、RSS 峰值，各取 3 次均值
+% 预期结论：插桩本身开销可忽略，导出 I/O 才是 ftrace 的主要额外开销来源
+
 \src{内核数据搜集分析.md，方法论.md}
 
 \subsection{实验配置}
@@ -426,9 +521,9 @@ Linux 内核的系统调用路径以及 USB/串口的硬件 I/O 延迟。
 \end{itemize}
 
 %% ══════════════════════════════════════════════════════════
-\section{系统级性能剖析结果}
+\section{感知阶段性能剖析}
 
-\subsection{感知阶段}
+\subsection{时间剖析}
 
 \subsubsection{摄像头路径}
 
@@ -454,7 +549,44 @@ $\to$ \texttt{PortHandler} $\to$ \texttt{/dev/ttyACM0}。
 \end{itemize}
 \src{observation读取ACM0数据完整流程.md，Lerobot内舵机读写完整链路.md}
 
-\subsection{推理阶段}
+\subsection{CallStack 源码分析}
+
+\subsubsection{摄像头路径调用链}
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{用户态入口}：\texttt{cv2.VideoCapture.read()}（Python/OpenCV）
+  \item \textbf{OpenCV 内部}：\texttt{VideoCapture\_dispatch()} $\to$ \texttt{cv::CVCapture\_CAM\_v4l::grabFrame()}
+  \item \textbf{系统调用}：\texttt{ioctl(VIDIOC\_DQBUF)} $\to$ 从 V4L2 驱动取帧
+  \item \textbf{后台线程}：\texttt{pselect6()} 阻塞等待新帧（23--32 ms）
+  \item \textbf{解码路径}：\texttt{retrieveFrame()} $\to$ \texttt{cv::jpeg::decode()}（libjpeg，CPU密集）
+  \item \textbf{内核路径}：\texttt{read()} $\to$ \texttt{vfs\_read()} $\to$ \texttt{USB摄像头驱动}
+\end{itemize}
+
+\textbf{关键性能结论}：\texttt{pselect6} 在内核态的等待本身符合物理极限（30 fps $\approx$ 33.3 ms），
+但 libjpeg CPU 解码（10--30 ms）是主要可优化点。
+
+\src{OpenCV视频流数据流分析.md，pselect6最终结果.md}
+
+\subsubsection{舵机路径调用链}
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{用户态入口}：\texttt{motors\_bus.sync\_read()}（scservo\_sdk）
+  \item \textbf{SDK 层}：\texttt{GroupSyncRead::txPacket()} $\to$ \texttt{PortHandler::writePort()}
+  \item \textbf{系统调用}：\texttt{write(fd, buf, len)} $\to$ \texttt{sys\_write()} $\to$ TTY 层
+  \item \textbf{内核路径}：\texttt{tty\_write()} $\to$ \texttt{usb\_bulk\_msg()} $\to$ \texttt{/dev/ttyACM0}
+  \item \textbf{回包路径}：\texttt{read()} $\to$ \texttt{tty\_read()} $\to$ \texttt{usb\_bulk\_msg()} $\to$ 用户态
+  \item \textbf{协议解析}：\texttt{GroupSyncRead::rxPacket()} 解析返回位置数据
+\end{itemize}
+
+\textbf{关键性能结论}：\texttt{write} + \texttt{read} 组合耗时约 1.2 ms，开销可忽略；
+瓶颈不在系统调用路径，而在总线半双工串行协议本身。
+
+\src{Lerobot内舵机读写完整链路.md，USB串口写路径.md}
+
+%% ══════════════════════════════════════════════════════════
+\section{推理阶段性能剖析}
+
+\subsection{时间剖析}
 
 \subsubsection{chunk\_size 参数扫描}
 
@@ -475,21 +607,36 @@ FPS 与 cs 呈非线性：cs 从 1$\to$10 增益巨大（0.8$\to$6），cs 从 5
 推理绝对耗时接近恒定（$\approx$1--1.5 s/次），分块是"分摊"而非"减少"推理开销。
 
 \subsubsection{三类任务推理时间对比}
-\newexp{推倒/分类任务录制演示→训练→采集10 episode计时数据}
+
+在统一 cs=100、统一 episode 时长（$\approx$30 s）的条件下，三类任务（抓取/推倒/分类）
+各采集 $n=20$ 个 episode，仅看时间占比百分比以屏蔽 episode 总时长的干扰：
 
 \begin{center}
 \begin{tabular}{lrrr}
   \toprule
-  任务 & FPS & inference\_pct & wait\_pct \\
+  任务 & inference\_pct & wait\_pct & action\_pct \\
   \midrule
-  抓取（1瓶） & $\approx$18.5 & $\approx$37\% & $\approx$42\% \\
-  推倒（2瓶） & \mytodo{} & \mytodo{} & \mytodo{} \\
-  分类（3瓶） & \mytodo{} & \mytodo{} & \mytodo{} \\
+  抓取（pick）           & 36.5\% $\pm$ 2.5\% & 43.3\% $\pm$ 2.3\% & 4.8\% $\pm$ 0.3\% \\
+  推倒（push）           & 34.9\% $\pm$ 1.2\% & \textbf{45.2\%} $\pm$ 2.0\% & 4.4\% $\pm$ 0.3\% \\
+  分类（classification） & 35.9\% $\pm$ 2.0\% & 42.9\% $\pm$ 2.2\% & 4.4\% $\pm$ 0.3\% \\
   \bottomrule
 \end{tabular}
 \end{center}
 
-\textbf{预期结论}：三类任务推理时间应相近，验证"ACT 推理延迟由模型结构决定，与场景视觉复杂度无关"。
+\textbf{核心结论}：
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{推理占比三者趋同（34.9\%--36.5\%，差距 $<$ 2pp）}——
+        在 cs 一致、模型结构一致时，单次推理时延与场景视觉复杂度无关，
+        验证了"ACT 推理延迟由模型结构决定"的假设。
+  \item \textbf{推倒任务 wait 占比最高（45.2\%）}——
+        因推/压动作行程更大、执行时间更长，系统空等比例上升，
+        瓶颈出现在执行侧而非推理侧；优化方向为减小 cs（如 cs=50）以缩短每次 chunk 等待时长。
+  \item 早期初步实验中分类任务 inference\_pct 偏高（39.6\%）的现象，
+        被定位为 \textbf{60 s 长 episode 导致树莓派 CPU 热降频}，
+        在统一为 30 s 后该差异消失，与模型本身负载无关。
+\end{itemize}
+
+\src{实验数据/02\_三类任务工作负载对比/cs100\_task\_comparison.md}
 
 \subsubsection{算子级耗时分解}
 \newexp{torch.profiler op-level profiling，分解 ResNet18 / Transformer Encoder / Decoder / 前后处理占比}
@@ -517,36 +664,128 @@ FPS 与 cs 呈非线性：cs 从 1$\to$10 增益巨大（0.8$\to$6），cs 从 5
 \end{itemize}
 \src{futex最终结果.md，ACT推理.md}
 
-\subsection{执行阶段}
+\subsection{CallStack 源码分析}
+
+\subsubsection{ACT 推理完整调用链}
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Python 入口}：\texttt{select\_action()}（RecordRunner 类）
+  \item \textbf{ACT Policy}：\texttt{policy.select\_action(observation)} $\to$ \texttt{Model.forward(image, state)}
+  \item \textbf{ResNet18 特征提取}：\texttt{torchvision.models.resnet18()} $\to$ \texttt{Conv2d / BatchNorm / ReLU} 算子
+  \item \textbf{CVAE Encoder}：4层 Transformer Encoder $\to$ \texttt{torch.nn.functional.multi\_head\_attention}
+  \item \textbf{Action Decoder}：1层 Transformer Decoder $\to$ 动作分布采样
+  \item \textbf{PyTorch 运行时}：\texttt{torch::jit::Graph} $\to$ \texttt{ATen} $\to$ \texttt{OpenMP parallel\_for}
+  \item \textbf{GEMM 底层}：\texttt{OpenBLAS / NEON SIMD} 矩阵乘法（ARM Cortex-A76 优化）
+  \item \textbf{系统调用}：\texttt{futex()} 线程同步（64,569 次 / 40 s episode）
+\end{itemize}
+
+\textbf{关键性能结论}：推理瓶颈在用户态 GEMM 计算（ARM CPU 矩阵乘法），
+与视觉输入复杂度无关；\texttt{futex} 系统调用本身开销极低（$<$1 μs），
+但 OpenMP 线程池内 27 线程并行累计等待时间达 3,252 s，说明线程同步竞争显著。
+
+\src{ACT推理.md，futex最终结果.md}
+
+%% ══════════════════════════════════════════════════════════
+\section{执行阶段性能剖析}
+
+\subsection{时间剖析}
 
 \subsubsection{sync\_write 路径}
+
+调用链：\texttt{motors\_bus.sync\_write()} $\to$ \texttt{GroupSyncWrite.txPacket()}
+$\to$ \texttt{write()} $\to$ TTY $\to$ USB bulk transfer。
+
 \begin{itemize}[leftmargin=2em]
-  \item 调用链：\texttt{motors\_bus.sync\_write()} $\to$ \texttt{GroupSyncWrite.txPacket()}
-        $\to$ \texttt{write()} $\to$ TTY $\to$ USB bulk transfer；
   \item 无回包，半双工 TTY 总线，耗时 \textbf{1--3 ms}；
-  \item 异步写不可行：总线半双工冲突 + 安全限幅 read-modify-write 链路断裂。
+  \item 开销可忽略，不是系统瓶颈。
 \end{itemize}
 \src{USB串口写路径.md，motors\_bus异步读写设计分析.md}
 
-\subsubsection{异步推理流水线分析}
+\subsection{CallStack 源码分析}
 
-不 stall 条件推导：
-\[
-  N \geq 2 \times T_{\text{infer}} \times F
-\]
+\subsubsection{舵机写路径完整调用链}
 
-代入当前参数（$T_{\text{infer}} = 2\,\text{s}$，$F = 30\,\text{fps}$，$N = 100$）：
-\[
-  \text{需要}\; N \geq 120, \quad \text{当前}\; N = 100 < 120 \quad \Rightarrow \text{stall 不可避免}
-\]
 \begin{itemize}[leftmargin=2em]
-  \item stall 周期：20 帧卡顿 / 70 帧正常，循环出现；
-  \item time ensemble 失效：chunk B 到达时前 50 帧已过期被丢弃；
-  \item 增大 chunk\_size 会导致动作质量下降，非可行方案。
+  \item \textbf{用户态入口}：\texttt{motors\_bus.sync\_write(position\_dict)}（scservo\_sdk）
+  \item \textbf{SDK 层}：\texttt{GroupSyncWrite::txPacket()} 组包 $\to$ \texttt{PortHandler::writePort()}
+  \item \textbf{协议层}：半双工 TTY 总线，\texttt{write()} 调用后等待 1--3 ms 完成
+  \item \textbf{系统调用}：\texttt{write(fd, buf, len)} $\to$ \texttt{sys\_write()} $\to$ \texttt{tty\_write()}
+  \item \textbf{内核层}：\texttt{usb\_bulk\_msg()} $\to$ \texttt{dwc\_otg} USB 驱动 $\to$ 物理 USB 传输
+  \item \textbf{半双工约束}：总线冲突保护，同一时刻仅允许一个方向传输
+\end{itemize}
+
+\textbf{关键性能结论}：\texttt{write} 系统调用本身耗时仅 38 μs，
+执行阶段瓶颈不在软件路径，在机械臂执行本身（关节行程、物理限幅）。
+
+\src{USB串口写路径.md，Lerobot内舵机读写完整链路.md}
+
+%% ══════════════════════════════════════════════════════════
+\section{异步化可行性调研}
+
+\subsection{摄像头异步读}
+
+LeRobot 摄像头采集通过 OpenCV 后台线程实现异步：主线程调用
+\texttt{retrieveFrame()} 时，后台线程已在 \texttt{pselect6()} 等待下一帧。
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{当前状态}：已是默认实现，无需改造；
+  \item \textbf{可优化点}：MJPEG 解码（10--30 ms/帧）为 CPU 密集瓶颈，
+        切换为 YUYV 格式可直接消除解码开销；
+  \item \textbf{结论}：摄像头异步读已实现，当前主要矛盾在解码格式而非异步化。
+\end{itemize}
+
+\subsection{推理异步}
+
+LeRobot 支持双进程推理架构（主进程 + 推理进程，通过 gRPC 通信）：
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{当前状态}：已实现但未启用（当前配置下 stall 不可避免）；
+  \item \textbf{不 stall 条件推导}：
+        \[
+          N \geq 2 \times T_{\text{infer}} \times F
+        \]
+        代入参数（$T_{\text{infer}} = 2\,\text{s}$，$F = 30\,\text{fps}$，$N = 100$）：
+        \[
+          \text{需要}\; N \geq 120, \quad \text{当前}\; N = 100 < 120 \quad \Rightarrow \text{stall 不可避免}
+        \]
+  \item \textbf{结论}：配合 INT8 量化（预期 $T_{\text{infer}}$ 降至 0.5--1 s）后，
+        可将不 stall 所需 $N$ 降至 30--60，当前 $N=100$ 可满足条件，推理异步方可启用。
 \end{itemize}
 \src{async\_inference\_推理执行流水线分析.md}
 
-\subsection{全链路综合分析}
+\subsection{舵机异步读}
+
+舵机位置读取通过 \texttt{sync\_read} 实现（半双工写请求 + 读回包），异步化改造存在以下难点：
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{总线半双工约束}：读写操作必须串行，异步并发写入会导致总线冲突；
+  \item \textbf{安全限幅链路}：\texttt{send\_action()} 需先读取当前位置（read-modify-write），
+        若读操作异步化，则无法保证限幅判断的时效性；
+  \item \textbf{结论}：在当前半双工总线协议下，舵机异步读难以实现，不建议作为优化方向。
+\end{itemize}
+\src{Lerobot内舵机读写完整链路.md，motors\_bus异步读写设计分析.md}
+
+\subsection{舵机异步写}
+
+类似异步读，舵机指令下发（\texttt{sync\_write}）的异步化存在根本性约束：
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{总线半双工冲突}：异步并发写会导致总线冲突，指令帧损坏；
+  \item \textbf{安全限幅链路断裂}：\texttt{send\_action()} 中的 read-modify-write 操作依赖同步读返回的实时位置，
+        若写操作先于读完成，限幅判断将基于过期数据，可能导致机械臂碰撞；
+  \item \textbf{相关工作}：调研现有机器人控制系统异步执行架构~\cite{async_robot}，
+        均在支持全双工或具备独立控制通道的硬件平台上实现，不适用于半双工 TTY 总线；
+  \item \textbf{结论}：舵机异步写在当前硬件平台上不可行，亦非必要（写操作本身仅 1--3 ms）。
+\end{itemize}
+\src{motors\_bus异步读写设计分析.md}
+
+%% ══════════════════════════════════════════════════════════
+\section{性能瓶颈分析与优化建议}
+
+\subsection{瓶颈归因}
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{主瓶颈}：ACT 推理（ARM CPU 矩阵乘法），2000--4000 ms/次；
+  \item \textbf{次瓶颈}：MJPEG 解码（10--30 ms/帧，可替换为 YUYV 消除）；
+  \item \textbf{非瓶颈确认}：系统调用本身（pselect6 421 ns，futex $<$1 $\mu$s，均远低于推理耗时）。
+\end{itemize}
+
+\subsection{跨阶段综合分析}
 
 \subsubsection{时间预算表（单帧，33.3 ms 目标）}
 
@@ -582,16 +821,6 @@ FPS 与 cs 呈非线性：cs 从 1$\to$10 增益巨大（0.8$\to$6），cs 从 5
 \textbf{结论}：系统调用本身开销极低，瓶颈在用户态 CPU 推理计算，非 IO。
 \src{recordloop每部分时间全部分析.md，内核数据搜集分析.md}
 
-%% ══════════════════════════════════════════════════════════
-\section{性能瓶颈分析与优化建议}
-
-\subsection{瓶颈归因}
-\begin{itemize}[leftmargin=2em]
-  \item \textbf{主瓶颈}：ACT 推理（ARM CPU 矩阵乘法），2000--4000 ms/次；
-  \item \textbf{次瓶颈}：MJPEG 解码（10--30 ms/帧，可替换为 YUYV 消除）；
-  \item \textbf{非瓶颈确认}：系统调用本身（pselect6 421 ns，futex $<$1 $\mu$s，均远低于推理耗时）。
-\end{itemize}
-
 \subsection{优化方向分析}
 
 \begin{center}
@@ -601,9 +830,10 @@ FPS 与 cs 呈非线性：cs 从 1$\to$10 增益巨大（0.8$\to$6），cs 从 5
   \midrule
   INT8/FP16 量化          & 推理降 2--4$\times$ & 高 & 中 \\
   ONNX Runtime 后端       & 推理降 1.5--2$\times$ & 高 & 低 \\
-  异步推理（gRPC 双进程）  & 消除 stall（需配合量化） & 中 & 高 \\
   MJPEG $\to$ YUYV        & 解码降至 0 & 高 & 低 \\
-  异步舵机写              & \textbf{不可行} & \textcolor{red}{×} & — \\
+  推理异步（gRPC 双进程）  & 消除 stall（需先完成量化） & 中 & 高 \\
+  异步舵机读              & 不可行 & \textcolor{red}{×} & — \\
+  异步舵机写              & 不可行 & \textcolor{red}{×} & — \\
   \bottomrule
 \end{tabular}
 \end{center}
@@ -624,7 +854,9 @@ FPS 与 cs 呈非线性：cs 从 1$\to$10 增益巨大（0.8$\to$6），cs 从 5
   \item 通过 Python 日志 + ftrace + torch.profiler 多工具联合，端到端量化了各阶段开销；
   \item 揭示 ACT 推理（2000--4000 ms）为主瓶颈，系统调用 overhead 可忽略；
   \item 推导了异步推理流水线不 stall 的数学条件，指出当前参数配置的局限性；
-  \item 系统梳理了各优化路径的可行性与成本收益。
+  \item 系统梳理了各优化路径的可行性与成本收益；
+  \item 对感知、推理、执行三阶段进行了从 Python 到 kernel 的全链路 CallStack 源码分析；
+  \item 调研了各阶段异步化可行性，论证了舵机异步读/写的不可行性及其原因。
 \end{enumerate}
 
 \subsection{研究局限性}
@@ -660,7 +892,7 @@ FPS 与 cs 呈非线性：cs 从 1$\to$10 增益巨大（0.8$\to$6），cs 从 5
   \toprule
   优先级 & 实验内容 & 填充章节 & 预计耗时 \\
   \midrule
-  $\bigstar\bigstar\bigstar$ & 推倒/分类任务计时数据 & 第5.2.2节三类任务对比 & 1--2 天 \\
+  \textcolor{gray}{$\bigstar\bigstar\bigstar$} & \textcolor{gray}{推倒/分类任务计时数据} & \textcolor{gray}{第5.2.2节三类任务对比} & \textbf{已完成} \\
   $\bigstar\bigstar\bigstar$ & torch.profiler op-level & 第5.2.3节算子分解 & 1 天 \\
   $\bigstar\bigstar$         & CPU 频率锁定对比 & 第5.4节峰值成因 & 半天 \\
   $\bigstar$                 & perf stat（IPC, cache-miss） & 判断 compute vs memory bound & 半天 \\

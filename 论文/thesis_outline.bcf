@@ -2964,6 +2964,7 @@
     <bcf:citekey order="8" intorder="1">openmanipulator</bcf:citekey>
     <bcf:citekey order="9" intorder="1">turtlebot4</bcf:citekey>
     <bcf:citekey order="10" intorder="1">berkeleyhumanoidlite</bcf:citekey>
+    <bcf:citekey order="11" intorder="1">async_robot</bcf:citekey>
   </bcf:section>
   <!-- SORTING TEMPLATES -->
   <bcf:sortingtemplate name="none">
