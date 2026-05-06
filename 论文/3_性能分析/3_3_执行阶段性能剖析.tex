@@ -1,0 +1,66 @@
+\subsection{执行阶段性能剖析}\label{sec:execution}
+
+执行阶段的核心是机械臂六个 STS3215 舵机的位置指令下发（\texttt{sync\_write}）。
+为完整描述舵机链路，本节同时纳入感知阶段中物理通道完全重合的舵机位置读取
+（\texttt{sync\_read}）。两者共用同一条 \texttt{/dev/ttyACM0} 半双工 TTY 总线、
+相同的 SCServo 协议帧结构与 USB 串口内核路径，仅在数据包内的指令字节
+（0x82 vs 0x83）和方向（写 vs 读+回包）上不同。
+
+\subsubsection{舵机感知读取（sync\_read 路径）}
+
+调用链：\texttt{motors\_bus.sync\_read()} $\to$ \texttt{GroupSyncRead}
+$\to$ \texttt{PortHandler} $\to$ \texttt{/dev/ttyACM0}。
+
+\begin{itemize}[leftmargin=2em]
+  \item Sync Read 包格式：\texttt{[0xFF 0xFF 0xFE LEN 0x82 ADDR LEN ID1..ID6 CHK]}；
+  \item Present\_Position 寄存器地址 56，sign-magnitude 编码（bit15 为方向位）；
+  \item 耗时：\textbf{1.2 ms/帧}，开销可忽略。
+\end{itemize}
+
+\textbf{完整调用链}：
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{用户态入口}：\texttt{motors\_bus.sync\_read()}（scservo\_sdk）
+  \item \textbf{SDK 层}：\texttt{GroupSyncRead::txPacket()} $\to$ \texttt{PortHandler::writePort()}
+  \item \textbf{系统调用}：\texttt{write(fd, buf, len)} $\to$ \texttt{sys\_write()} $\to$ TTY 层
+  \item \textbf{内核路径}：\texttt{tty\_write()} $\to$ \texttt{usb\_bulk\_msg()} $\to$ \texttt{/dev/ttyACM0}
+  \item \textbf{回包路径}：\texttt{read()} $\to$ \texttt{tty\_read()} $\to$ \texttt{usb\_bulk\_msg()} $\to$ 用户态
+  \item \textbf{协议解析}：\texttt{GroupSyncRead::rxPacket()} 解析返回位置数据
+\end{itemize}
+\src{observation读取ACM0数据完整流程.md，Lerobot内舵机读写完整链路.md，USB串口写路径.md}
+
+\subsubsection{舵机指令下发（sync\_write 路径）}
+
+调用链：\texttt{motors\_bus.sync\_write()} $\to$ \texttt{GroupSyncWrite.txPacket()}
+$\to$ \texttt{write()} $\to$ TTY $\to$ USB bulk transfer。
+
+\begin{itemize}[leftmargin=2em]
+  \item 无回包，半双工 TTY 总线，耗时 \textbf{1--3 ms}；
+  \item 开销可忽略，不是系统瓶颈。
+\end{itemize}
+
+\textbf{完整调用链}：
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{用户态入口}：\texttt{motors\_bus.sync\_write(position\_dict)}（scservo\_sdk）
+  \item \textbf{SDK 层}：\texttt{GroupSyncWrite::txPacket()} 组包 $\to$ \texttt{PortHandler::writePort()}
+  \item \textbf{协议层}：半双工 TTY 总线，\texttt{write()} 调用后等待 1--3 ms 完成
+  \item \textbf{系统调用}：\texttt{write(fd, buf, len)} $\to$ \texttt{sys\_write()} $\to$ \texttt{tty\_write()}
+  \item \textbf{内核层}：\texttt{usb\_bulk\_msg()} $\to$ \texttt{dwc\_otg} USB 驱动 $\to$ 物理 USB 传输
+  \item \textbf{半双工约束}：总线冲突保护，同一时刻仅允许一个方向传输
+\end{itemize}
+\src{USB串口写路径.md，motors\_bus异步读写设计分析.md，Lerobot内舵机读写完整链路.md}
+
+\subsubsection{半双工总线协议特性与瓶颈}
+
+\textbf{关键性能结论}（融合 sync\_read 与 sync\_write 两条路径的共性）：
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{系统调用本身开销可忽略}：\texttt{write} 系统调用耗时仅 38 $\mu$s，
+        \texttt{read} 类似量级，二者组合（sync\_read）约 1.2 ms，单 \texttt{write}（sync\_write）约 1--3 ms；
+  \item \textbf{瓶颈在物理层而非软件路径}：1 Mbps 波特率下，
+        Sync Read 帧 14--15 字节、Sync Write 帧约 28 字节（6 ID × 4 字节位置 + 包头 + 校验），
+        总线传输时间是耗时主体；
+  \item \textbf{半双工约束是异步化的根本障碍}：同一时刻总线仅能容纳一个方向的传输，
+        异步并发会导致总线冲突、指令帧损坏，且 \texttt{send\_action()} 中
+        read-modify-write 的安全限幅链路依赖同步读返回的实时位置，
+        异步化将破坏这一不变量（详见 \S\ref{sec:async-feasibility}）。
+\end{itemize}

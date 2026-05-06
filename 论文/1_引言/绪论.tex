@@ -1,0 +1,243 @@
+\subsection{研究背景与意义}
+
+近年来，协作机器人在工业制造、医疗服务、仓储物流等领域加速落地，对自主操作能力的需求持续增长。
+以 RT-2\cite{rt2}、OpenVLA\cite{openvla} 为代表的视觉—语言—动作（Vision-Language-Action, VLA）大模型，
+将视觉感知与动作决策统一到端到端网络中，显著提升了机器人在开放场景下的泛化能力；
+然而，此类模型的参数量和计算量远超传统控制方法，
+如何在资源受限的嵌入式平台上实现实时推理，成为制约其部署的关键瓶颈。
+
+在开源机器人学习框架方面，HuggingFace 推出的 LeRobot\cite{lerobot} 集成了
+ACT（Action Chunking with Transformers）\cite{act}、Diffusion Policy\cite{diffusionpolicy}
+等模仿学习策略，并提供从数据采集、模型训练到在线推理的完整工具链；
+同时配套推出 SO-101 开源六自由度机械臂，实现了软件框架与低成本硬件平台的一体化开源。
+Physical Intelligence 提出的 $\pi_0$\cite{pi0} 以流匹配为动作生成核心，
+在双臂协作任务上表现出色；斯坦福 Mobile ALOHA\cite{mobilealoha} 以低成本仿生平台
+搭配联合学习，实现了全身遥操作控制。
+LeRobot 的在线推理循环采用"感知—推理—执行"三阶段紧耦合架构：
+每帧依次完成传感器观测采集（\texttt{get\_observation()}）、
+策略网络推理（\texttt{select\_action()}）和舵机指令下发（\texttt{send\_action()}），
+三个阶段在同一线程内串行执行，任一阶段的性能瓶颈均会直接影响整体帧率。
+
+在实际部署中，本文选用树莓派5（ARM Cortex-A76，4核，4\,GB LPDDR4X）作为边缘推理平台，
+搭配 SO101 六自由度机械臂和 USB 摄像头，在无 GPU 的条件下运行 ACT 策略网络
+（开源硬件平台对比详见 \S\ref{sec:hw-platforms}）。
+初步测试表明，单次 ACT 推理耗时约 1500-3000\,ms，而传感器采集和指令下发各仅约 1-15\,ms，
+推理阶段占循环总时间的 99\% 以上。
+在 chunk\_size=100（即每次推理输出 100 帧动作）的配置下，
+系统实际帧率仅约 18--19\,fps，距离 30\,fps 的实时目标仍有明显差距。
+
+上述性能瓶颈涉及多个系统层次：PyTorch 推理引擎的算子调度、OpenMP 线程池的并行效率、
+Linux 内核的系统调用路径以及 USB/串口的硬件 I/O 延迟。
+然而，现有的机器人系统性能分析工作多聚焦于单一层次（如模型压缩、内核调度或通信延迟），
+缺乏从 AI 框架层到内核层的跨层次联合剖析，
+难以回答"瓶颈究竟在哪一层、由什么原因导致、各优化方向的收益几何"等关键问题。
+
+因此，本文的研究意义在于：
+（1）理论层面——建立覆盖 AI 推理框架层、Python 运行时层、OS 内核层和硬件 I/O 层的四层性能分析模型，
+提出面向"感知—推理—执行"紧耦合场景的多工具联合剖析方法；
+（2）实践层面——端到端量化 LeRobot 在嵌入式 ARM 平台上的各阶段时间开销，
+定位主要性能瓶颈，系统评估 INT8 量化、异步推理流水线等优化方向的可行性与预期收益，
+为同类嵌入式机器人系统的性能优化与软件架构设计提供实验依据和工程参考。
+
+\subsection{国内外研究现状}\label{sec:related-work}
+
+本节从机器人通信框架、开源机器人硬件、机器人策略模型、嵌入式边缘 AI 推理、
+系统级 Profiling 技术五个维度梳理与本文相关的研究现状。
+
+\subsubsection{机器人通信框架}
+
+机器人系统通常由传感器采集、策略决策、运动控制、人机交互等多个功能模块组成，
+这些模块运行在不同的进程甚至不同的物理机器上，需要一种\textbf{标准化的通信机制}来协调数据流转。
+ROS\footnote{ROS 全称为 Robot Operating System，但并非操作系统，而是一套运行于 Linux 用户态之上的中间件通信框架。}
+提供统一的发布-订阅消息总线、服务调用接口和参数配置服务，
+使各功能模块可以作为独立节点开发、部署和升级，底层仍依赖 Linux 内核进行进程调度和设备管理。
+在多传感器融合、多机协作、导航+操作叠加等场景下，
+这种通信抽象能显著降低系统集成复杂度，也是 ROS 系列成为学术界和工业界事实标准的原因。
+
+然而，引入 ROS 这类中间件层也带来不可忽视的代价：
+（1）\textbf{通信延迟}：消息需要经过序列化、DDS 传输、反序列化三个阶段，
+单次跨节点通信通常引入 1--5 ms 延迟，在帧间隔仅 33.3 ms（30 fps）的实时控制场景中不可忽略；
+（2）\textbf{资源开销}：DDS 守护进程和 ROS2 节点管理器占用额外的 CPU 和内存，
+在树莓派等资源受限平台上会挤压推理和感知的算力预算；
+（3）\textbf{部署复杂度}：需要构建 ROS2 工作空间、配置 DDS QoS 策略、维护节点间的 topic 命名约定，
+相比直接在 Linux 上编写 Python 脚本，开发门槛和调试成本显著提高。
+
+因此，\textbf{是否引入中间件通信框架取决于具体场景}：
+多机协作、传感器异构、需要 rviz 可视化和导航栈的场景适合 ROS2；
+单机单臂、帧率敏感、追求极简部署的场景则更适合直接在 Linux 用户态运行。
+本文的 LeRobot 平台属于后者——单进程 Python 脚本串行执行感知—推理—执行三阶段，
+无分布式需求，且第\ref{ch:perf}章的剖析将表明通信开销远低于推理开销，
+引入 ROS2 不会带来性能收益。但了解 ROS2 的通信模型有助于理解 LeRobot 的架构选择及其局限性。
+
+\textbf{ROS2}：机器人操作系统（Robot Operating System 2）是 ROS 的下一代版本，
+以 DDS（Data Distribution Service）作为底层通信中间件，支持节点间发布-订阅与服务调用。
+ROS2 引入了节点生命周期管理、QoS 策略（可靠性/持久性/实时性配置）等企业级特性，
+支持跨机器跨平台分布式部署，并可通过 \texttt{rclcpp} / \texttt{rclpy} 接入 C++ 或 Python 节点。
+其通信延迟在局域网内通常为毫秒级，但节点调度仍依赖 Linux CFS 调度器，无硬实时保证。
+ROS2 主要运行于 Ubuntu（官方支持 22.04/24.04），需配合 Linux 内核使用，不支持 Windows/macOS 原生部署。
+
+\textbf{LCM}（Lightweight Communications and Marshalling）：由 MIT 开发的高性能消息传递库，
+设计目标是为实时系统提供低延迟、零拷贝的消息序列化与传输能力。
+LCM 使用 UDP 单播/广播而非 TCP，支持用户态消息队列（类型声明 + 字节流），
+省去了 IDL 编译步骤，延迟可低至数微秒。
+但 LCM 仅提供消息传递层，不含控制回路、参数服务器或 RViz 等生态工具，生态远不如 ROS2。
+
+\src{LeRobot软件栈全链路分析.md}
+
+\subsubsection{开源机器人硬件平台}\label{sec:hw-platforms}
+
+\textbf{SO-101}：HuggingFace LeRobot 配套的六自由度机械臂，
+结构件可 3D 打印，成本低廉，与 LeRobot 框架深度绑定，是本文实验平台的直接来源。
+
+\textbf{OpenManipulator}\cite{openmanipulator}：ROBOTIS 推出的开源机械臂，提供配套的 ROS2 集成包，
+硬件图纸与代码全开源，适合教学和原型开发，支持 MoveIt! 运动规划。
+
+\textbf{TurtleBot4}\cite{turtlebot4}：开源移动机器人的事实标准，最新版本与 ROS2 生态深度集成，
+配备 OAK-D 深度相机，适用于室内导航与移动操作任务。
+
+\textbf{Berkeley Humanoid Lite}\cite{berkeleyhumanoidlite}：UC Berkeley HybridRobotics 实验室开发的
+3D 打印小型人形机器人，为开源人形机器人平台提供了新思路。
+
+\subsubsection{机器人策略模型}\label{sec:policy-models}
+
+从动作生成或策略学习机制看，机器人策略模型并非只有 VLA 和模仿学习两类，
+还包括传统规划控制、强化学习等路线。
+这些方法关注的是动作如何产生、策略如何获得；至于系统是否采用端到端或显式分解式架构，
+则属于另一条系统架构维度，将在下一小节单独讨论。
+
+\textbf{传统规划与控制方法}：通常先建立机器人运动学、动力学或环境几何模型，
+再通过路径规划、轨迹优化和反馈控制生成动作。
+典型方法包括 PID 控制、模型预测控制（Model Predictive Control, MPC）、
+采样式路径规划和 MoveIt!/OMPL 等运动规划框架。
+这类方法可解释性强、实时性好、安全约束清晰，适合结构化工业环境；
+但在高维视觉输入、复杂接触和开放场景泛化方面通常需要额外的感知与任务规划模块支撑。
+
+\textbf{强化学习策略（Reinforcement Learning, RL）}：通过奖励函数引导智能体与环境交互，
+学习状态到动作的映射，不一定依赖专家演示数据。
+代表方法包括 PPO、SAC、TD-MPC 等。
+RL 适合处理长时序决策、非线性控制和需要主动探索的任务，
+但真实机器人采样成本高、训练过程不稳定，往往需要仿真环境、sim-to-real 迁移或安全约束机制。
+因此，在低成本真实机械臂上直接使用 RL 训练策略的工程门槛较高。
+
+\textbf{模仿学习策略（Imitation Learning, IL）}：通过专家演示数据训练策略网络，
+将人类遥操作或已有控制器生成的轨迹作为监督信号。
+本文采用的 ACT 即属于\textbf{端到端模仿学习策略}：
+模型以相机图像和机械臂关节状态为输入，直接预测未来一段动作序列，
+不在在线推理阶段显式调用目标检测、运动规划或传统控制模块。
+代表工作包括：
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{ACT}（Action Chunking with Transformers）：CVAE 编解码器 + Transformer 动作预测，
+        支持动作分块（chunk\_size）和 time ensemble，适合桌面精细操作任务；
+  \item \textbf{Diffusion Policy}：将动作生成建模为扩散过程，适合多模态动作分布。
+\end{itemize}
+
+\textbf{视觉-语言-动作模型（Vision-Language-Action, VLA）}：在端到端动作预测的基础上进一步引入语言理解能力，
+通常利用大规模视觉-语言模型或机器人基础模型进行预训练，再将视觉、语言和动作统一到同一模型中。
+VLA 的优势在于开放词汇指令理解、多任务泛化和跨场景迁移能力；
+代价是模型参数量和计算量显著高于普通模仿学习策略。
+代表工作包括：
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{RT-2}：Google DeepMind 提出，将视觉-语言模型（VLM）输出直接映射为机器人动作 token；
+  \item \textbf{OpenVLA}：开源 VLA 模型，支持多任务泛化，参数量 7B，可在消费级 GPU 部署；
+  \item $\boldsymbol{\pi_0}$：Physical Intelligence 提出，以流匹配（Flow Matching）为核心动作生成机制，
+        在双臂协作任务上表现优异。
+\end{itemize}
+
+\textbf{对比}：VLA 泛化能力强但计算量巨大（7B+ 参数），难以在嵌入式 ARM 平台实时运行；
+RL 具备交互式优化能力，但真实机器人训练成本高且稳定性要求严格；
+传统规划控制实时性好，但对开放视觉场景和复杂接触任务的适应性有限。
+相比之下，ACT/Diffusion Policy 等端到端模仿学习策略参数量较小
+（ResNet18 + Transformer，约 50M 参数），可在树莓派 5 上运行，
+但推理延迟仍是主要瓶颈（2000--4000 ms/次）。
+因此，本文聚焦 LeRobot 框架下 ACT 策略在 ARM CPU 平台上的在线推理性能剖析。
+
+\subsubsection{策略系统架构：端到端与显式分解式}\label{sec:policy-architectures}
+
+与按学习机制划分不同，系统架构描述的是机器人系统内部如何组织感知、
+决策、规划和控制模块。
+从这一维度看，可以将机器人策略系统概括为\textbf{端到端架构}与\textbf{显式分解式架构}两类。
+前者尽量用一个统一模型直接从观测输入映射到动作输出；
+后者显式保留中间状态、任务分解、轨迹规划或底层控制接口。
+模块化、层级式和混合式并不是三个彼此互斥的类别，
+而是显式分解式架构在功能边界、决策层级和模块组合方式上的不同侧面。
+
+\textbf{端到端架构}：模型直接从观测输入（如图像、关节状态、语言指令）预测机器人动作，
+中间不显式拆分为目标检测、状态估计、轨迹规划和控制器等人工设计模块。
+其优势是系统链路短、手工建模较少，便于从大规模数据中学习复杂的视觉—动作映射；
+不足是可解释性和安全约束较弱，对训练数据分布和推理算力依赖较强。
+ACT、Diffusion Policy 和许多 VLA 模型都可以采用端到端架构，
+强化学习策略也可以用端到端神经网络实现。
+
+\textbf{显式分解式架构}：系统显式拆分为感知、状态估计、任务规划、轨迹生成和底层控制等环节，
+各环节之间通过中间表示传递信息。
+这类架构可解释性强、便于调试和加入安全约束，常见于工业机器人、导航系统和基于 MoveIt! 的操作系统；
+但模块边界和中间表示需要人工设计，前级感知误差也可能沿链路逐级传播。
+在具体系统中，它通常体现为几个并存的组织特征：
+\textbf{模块化}强调按功能边界拆分系统，例如感知、规划、控制分别由不同模块实现；
+\textbf{层级式}强调按决策抽象层次或时间尺度拆分系统，
+高层负责语言理解、任务分解和目标选择，低层负责连续动作生成与控制执行；
+\textbf{混合式}强调在同一系统中组合学习模型与显式规划控制模块，
+例如用 VLA/LLM 进行高层任务规划，用 ACT 或 Diffusion Policy 执行低层动作，
+再用传统控制器处理限位保护、速度约束和急停逻辑。
+
+因此，模块化、层级式和混合式系统整体上通常与纯端到端系统相对，
+但并不意味着它们不能使用端到端模型。
+相反，复杂机器人系统常常在某个局部子模块中使用端到端策略：
+例如高层模块决定“抓取杯子并放到托盘上”的子任务顺序，
+低层 ACT 策略负责每个子任务中的连续关节动作生成。
+
+本文实验系统采用的是较简洁的端到端模仿学习架构：
+LeRobot 在线循环中，ACT 策略根据相机图像和关节状态直接输出动作序列，
+系统不额外引入高层任务规划器、显式轨迹优化器或 ROS2/MoveIt! 等模块化控制链路。
+这使得性能瓶颈更集中地体现为 ARM CPU 上的策略网络推理开销。
+
+\src{ACT模型原理.md，ACT推理.md}
+
+\subsubsection{嵌入式边缘 AI 推理}
+
+在资源受限的嵌入式平台上部署深度学习模型，需要针对硬件特性进行优化：
+
+\textbf{TFLite}：Google 推出的移动端推理框架，支持 FP16/INT8 量化、
+ARM NEON SIMD 加速，广泛用于边缘设备推理。
+
+\textbf{ONNX Runtime}：微软推出的跨平台推理引擎，支持多种执行提供者（CPU/ CUDA / TensorRT），
+在 ARM 上通过 OpenMP 和 NEON 加速，延迟优于 TFLite 约 1.5--2×。
+
+\textbf{PyTorch Mobile}：PyTorch 的移动端部署方案，
+支持 TorchScript 导出和 CPU 优化，但相比 ONNX Runtime 在 ARM 上的优化程度较低。
+
+\textbf{树莓派 5（Cortex-A76）计算能力}：4 核 4 GB LPDDR4X，
+双发射 SIMD 单元支持 NEON，矩阵乘法（GEMM）理论峰值约 50 GFLOPS（FP32），
+实际推理 ACT 模型约 30--50 GFLOPS 利用率，实测推理耗时 2000--4000 ms/次。
+作为对比，RT-2（7B 参数）在树莓派 5 上几乎无法运行，VLA 模型需在 GPU 平台上部署。
+
+\subsubsection{系统级 Profiling 技术}
+
+机器人系统的性能分析需要跨层次工具链：
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{strace}：通过 \texttt{ptrace} 拦截系统调用，开销极大（9× 时间放大），仅用于定性探索；
+  \item \textbf{ftrace}：内核态 tracepoint，开销极低（纳秒级），适合生产环境测量；
+  \item \textbf{perf}：硬件性能计数器（PMC），可测量 IPC、Cache-miss 等微架构指标；
+  \item \textbf{torch.profiler}：PyTorch 算子级 profiling，分解前向/反向传播各算子耗时。
+\end{itemize}
+
+已有机器人系统性能分析工作多聚焦于单一层次（模型压缩、内核调度或通信延迟），
+缺乏从 AI 框架层到内核层的跨层次联合剖析。
+
+\src{内核数据搜集分析.md，方法论.md}
+
+\subsection{研究目标}
+\begin{enumerate}[leftmargin=2em]
+  \item 建立跨层次（AI框架层 / 运行时层 / OS内核层 / 硬件I/O层）性能分析模型；
+  \item 端到端量化感知、推理、执行各阶段性能开销；
+  \item 定位主要瓶颈，为系统优化与软件架构改进提供实验依据。
+\end{enumerate}
+
+\subsection{主要贡献}
+\begin{itemize}[leftmargin=2em]
+  \item 提出覆盖 AI 框架到内核的四层性能分析模型；
+  \item 通过 ftrace/torch.profiler/perf 多工具联合剖析，量化各阶段时间开销；
+  \item 揭示 strace 对系统调用测量带来的 9$\times$ 时间放大问题，验证 ftrace 的必要性；
+  \item 基于量化结果，系统梳理优化路径及其成本收益。
+\end{itemize}

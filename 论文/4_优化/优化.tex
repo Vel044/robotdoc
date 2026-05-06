@@ -1,0 +1,121 @@
+\subsection{性能瓶颈归因}
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{主瓶颈}：ACT 推理（ARM CPU 矩阵乘法），2000--4000 ms/次；
+  \item \textbf{次瓶颈}：MJPEG 解码（10--30 ms/帧，可替换为 YUYV 消除）；
+  \item \textbf{非瓶颈确认}：系统调用本身（pselect6 421 ns，futex $<$1 $\mu$s，均远低于推理耗时）。
+\end{itemize}
+
+\subsection{跨阶段综合分析}
+
+\subsubsection{时间预算表（单帧，33.3 ms 目标）}
+
+\begin{center}
+\begin{tabular}{lrr}
+  \toprule
+  阶段 & 实测耗时 & 占目标比例 \\
+  \midrule
+  感知（舵机 + 图像，主线程视角） & 5.2 ms & 15.6\% \\
+  推理（chunk 内均摊） & \mytodo{} ms & \mytodo{}\% \\
+  执行（sync\_write） & 4.8 ms & 14.4\% \\
+  其余调度开销 & \mytodo{} ms & \mytodo{}\% \\
+  \midrule
+  实际单帧循环（推理帧） & 2200--4200 ms & \textbf{66×--126× 超时} \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection{系统调用分布（40 s episode）}
+
+\begin{center}
+\begin{tabular}{lrrl}
+  \toprule
+  系统调用 & 次数 & 均值耗时 & 主要来源 \\
+  \midrule
+  futex    & 64,569 & $<$1 $\mu$s & PyTorch 线程池 \\
+  pselect6 & 36,191 & 421 ns & 摄像头后台线程 V4L2 等待 \\
+  write    & 35,651 & 38 $\mu$s & USB 串口写 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{结论}：系统调用本身开销极低，瓶颈在用户态 CPU 推理计算，非 IO。
+\src{recordloop每部分时间全部分析.md，内核数据搜集分析.md}
+
+\subsection{异步化可行性调研}\label{sec:async-feasibility}
+
+\subsubsection{摄像头异步读}
+
+LeRobot 摄像头采集通过 OpenCV 后台线程实现异步：主线程调用
+\texttt{retrieveFrame()} 时，后台线程已在 \texttt{pselect6()} 等待下一帧。
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{当前状态}：已是默认实现，无需改造；
+  \item \textbf{可优化点}：MJPEG 解码（10--30 ms/帧）为 CPU 密集瓶颈，
+        切换为 YUYV 格式可直接消除解码开销；
+  \item \textbf{结论}：摄像头异步读已实现，当前主要矛盾在解码格式而非异步化。
+\end{itemize}
+
+\subsubsection{推理异步}
+
+LeRobot 支持双进程推理架构（主进程 + 推理进程，通过 gRPC 通信）：
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{当前状态}：已实现但未启用（当前配置下 stall 不可避免）；
+  \item \textbf{不 stall 条件推导}：
+        \[
+          N \geq 2 \times T_{\text{infer}} \times F
+        \]
+        代入参数（$T_{\text{infer}} = 2\,\text{s}$，$F = 30\,\text{fps}$，$N = 100$）：
+        \[
+          \text{需要}\; N \geq 120, \quad \text{当前}\; N = 100 < 120 \quad \Rightarrow \text{stall 不可避免}
+        \]
+  \item \textbf{结论}：配合 INT8 量化（预期 $T_{\text{infer}}$ 降至 0.5--1 s）后，
+        可将不 stall 所需 $N$ 降至 30--60，当前 $N=100$ 可满足条件，推理异步方可启用。
+\end{itemize}
+\src{async\_inference\_推理执行流水线分析.md}
+
+\subsubsection{舵机异步读}
+
+舵机位置读取通过 \texttt{sync\_read} 实现（半双工写请求 + 读回包），异步化改造存在以下难点：
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{总线半双工约束}：读写操作必须串行，异步并发写入会导致总线冲突；
+  \item \textbf{安全限幅链路}：\texttt{send\_action()} 需先读取当前位置（read-modify-write），
+        若读操作异步化，则无法保证限幅判断的时效性；
+  \item \textbf{结论}：在当前半双工总线协议下，舵机异步读难以实现，不建议作为优化方向。
+\end{itemize}
+\src{Lerobot内舵机读写完整链路.md，motors\_bus异步读写设计分析.md}
+
+\subsubsection{舵机异步写}
+
+类似异步读，舵机指令下发（\texttt{sync\_write}）的异步化存在根本性约束：
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{总线半双工冲突}：异步并发写会导致总线冲突，指令帧损坏；
+  \item \textbf{安全限幅链路断裂}：\texttt{send\_action()} 中的 read-modify-write 操作依赖同步读返回的实时位置，
+        若写操作先于读完成，限幅判断将基于过期数据，可能导致机械臂碰撞；
+  \item \textbf{相关工作}：调研现有机器人控制系统异步执行架构~\cite{async_robot}，
+        均在支持全双工或具备独立控制通道的硬件平台上实现，不适用于半双工 TTY 总线；
+  \item \textbf{结论}：舵机异步写在当前硬件平台上不可行，亦非必要（写操作本身仅 1--3 ms）。
+\end{itemize}
+\src{motors\_bus异步读写设计分析.md}
+
+\subsection{优化方向矩阵}
+
+\begin{center}
+\begin{tabular}{p{3.5cm}p{2.8cm}cc}
+  \toprule
+  优化方向 & 预期收益 & 可行性 & 复杂度 \\
+  \midrule
+  INT8/FP16 量化          & 推理降 2--4$\times$ & 高 & 中 \\
+  ONNX Runtime 后端       & 推理降 1.5--2$\times$ & 高 & 低 \\
+  MJPEG $\to$ YUYV        & 解码降至 0 & 高 & 低 \\
+  推理异步（gRPC 双进程）  & 消除 stall（需先完成量化） & 中 & 高 \\
+  异步舵机读              & 不可行 & \textcolor{red}{×} & — \\
+  异步舵机写              & 不可行 & \textcolor{red}{×} & — \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{软件架构改进方向}
+\begin{itemize}[leftmargin=2em]
+  \item 推理模块解耦（独立进程 + gRPC），避免 GIL 与主循环相互干扰；
+  \item 摄像头格式统一为 YUYV，消除 libjpeg CPU 解码路径；
+  \item 面向机器人负载的内核优化方向：实时调度器（SCHED\_FIFO）、USB 驱动优先级提升。
+\end{itemize}

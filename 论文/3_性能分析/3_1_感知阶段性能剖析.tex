@@ -1,0 +1,204 @@
+\subsection{感知阶段性能剖析}\label{sec:perception}
+
+感知阶段对应主循环中的 \texttt{robot.get\_observation()}。
+在本文的 SO-101 实验配置中，一次 observation 由两类数据组成：
+两路 OpenCV 摄像头图像，以及一个 follower 机械臂的 6 个舵机当前位置。
+其中两路摄像头分别为 \texttt{handeye} 和 \texttt{fixed}，分辨率均为
+640$\times$360；舵机状态来自 6 个 STS3215 舵机的
+\texttt{Present\_Position} 寄存器。
+
+从代码结构看，SO-101 follower 的 \texttt{get\_observation()} 先通过
+\texttt{self.bus.sync\_read("Present\_Position")} 同步读取 6 个舵机位置，
+随后遍历 \texttt{self.cameras}，对每路相机调用
+\texttt{cam.async\_read(timeout\_ms=3000)} 取得图像。
+这意味着 obs 阶段并不是单一 I/O，而是“舵机同步读 + 两路相机异步取帧”的组合。
+舵机读取与执行阶段的 \texttt{sync\_write} 共用同一条
+\texttt{/dev/ttyACM0} 半双工总线，协议和内核路径高度重合，
+因此本节只点明其在 obs 中的位置，详细分析放在 \S\ref{sec:execution}。
+
+\subsubsection{摄像头异步读取机制}
+
+LeRobot 的 OpenCV 相机并不是在主线程里每次直接阻塞读取硬件帧。
+每个 \texttt{OpenCVCamera} 对象内部维护一个后台读线程，线程函数为
+\texttt{\_read\_loop()}。源码中它是一个以
+\texttt{stop\_event} 为退出条件的循环：只要没有收到停止信号，就反复通过
+OpenCV 同步读取摄像头，把最新图像放入 \texttt{latest\_frame}，再用
+\texttt{new\_frame\_event.set()} 告诉主线程“新帧已经准备好”。
+主线程中的 \texttt{async\_read()} 不再直接面对摄像头设备，
+而是等待这个事件；事件到达后，它只需短暂获取 \texttt{frame\_lock}，
+从 \texttt{latest\_frame} 取走最近一帧，然后通过
+\texttt{new\_frame\_event.clear()} 复位事件标志，等待下一次更新。
+这里不是两个线程互相通知：后台线程负责生产帧并设置事件，主线程负责等待事件并清除事件。
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[
+    >=Stealth,
+    lane/.style={rectangle, draw=gray!70, fill=gray!5, rounded corners=2pt,
+      minimum width=2.6cm, minimum height=0.8cm, align=center, font=\small},
+    proc/.style={rectangle, draw=blue!60, fill=blue!8, rounded corners=2pt,
+      minimum width=2.9cm, minimum height=0.75cm, align=center, font=\footnotesize},
+    shared/.style={rectangle, draw=orange!70, fill=orange!10, rounded corners=2pt,
+      minimum width=2.9cm, minimum height=0.75cm, align=center, font=\footnotesize},
+    note/.style={font=\scriptsize, text=gray!75}
+  ]
+    \node[lane] (bg) at (0, 2.1) {后台相机线程};
+    \node[proc, right=0.8cm of bg] (read) {OpenCV 同步取帧\\V4L2 / MJPEG 解码};
+    \node[shared, right=0.8cm of read] (cache) {更新 latest\_frame\\frame\_lock 保护};
+    \node[proc, right=0.8cm of cache] (event) {set new\_frame\_event};
+
+    \node[lane] (main) at (0, -0.35) {主线程 obs 阶段};
+    \node[proc, right=0.8cm of main] (wait) {async\_read 等待事件};
+    \node[shared, right=0.8cm of wait] (take) {读取 latest\_frame\\clear 事件标志};
+    \node[proc, right=0.8cm of take] (return) {返回 observation 图像};
+
+    \draw[->, thick, blue!65] (bg) -- (read);
+    \draw[->, thick, blue!65] (read) -- (cache);
+    \draw[->, thick, blue!65] (cache) -- (event);
+    \draw[->, thick, red!65] (event.south) -- node[pos=0.55, right, note]{单向通知} (wait.north);
+    \draw[->, thick, blue!65] (main) -- (wait);
+    \draw[->, thick, blue!65] (wait) -- (take);
+    \draw[->, thick, blue!65] (take) -- (return);
+    \draw[->, thick, blue!65, rounded corners=8pt]
+      (event.north) -- ++(0,0.55) -| node[pos=0.25, above, note]{未收到 stop\_event 时继续循环} (read.north);
+    \draw[->, dashed, thick, gray!70, rounded corners=6pt]
+      (take.north) -- ++(0,0.42) -| node[pos=0.32, below, note]{复位标志，不通知后台线程} (event.south);
+  \end{tikzpicture}
+  \caption{OpenCV 摄像头异步读取中的后台循环、单向事件通知与主线程取缓存关系}
+  \label{fig:opencv-async-read}
+\end{figure}
+
+后台线程会调用 OpenCV 的读帧接口，从 V4L2 摄像头设备取出一帧，
+并在用户态完成 MJPEG 解码和颜色格式整理。整理后的 RGB 图像被写入
+\texttt{latest\_frame}，这个共享缓存由 \texttt{frame\_lock} 保护。
+\texttt{new\_frame\_event} 只承担“帧已就绪”的单向通知作用；
+主线程取走缓存帧后会复位事件标志，避免下一轮直接读到旧帧，
+但这个复位动作不会反向唤醒或驱动后台相机线程。
+
+因此，\texttt{async\_read()} 的“异步”含义是：摄像头硬件读取和 MJPEG 解码
+提前在后台线程中进行，主线程在 obs 阶段只等待事件并读取最近一帧。
+如果后台线程已经准备好图像，主线程很快返回；如果主线程跑得比相机帧率更快，
+则会在等待新帧事件时阻塞。
+
+\subsubsection{是否进入内核}
+
+摄像头路径中有三类等待，需要区分其含义。
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}p{0.22\textwidth}
+  >{\raggedright\arraybackslash}p{0.28\textwidth}
+  >{\raggedright\arraybackslash}X}
+  \toprule
+  位置 & 是否可能进入内核 & 含义 \\
+  \midrule
+  主线程等新帧事件 & 可能进入内核 &
+  线程同步等待。对应 \texttt{new\_frame\_event.wait()}，
+  主线程等后台相机线程把新帧准备好 \\
+  主线程取缓存帧 & 通常不进入内核 &
+  短锁保护。对应 \texttt{frame\_lock}，
+  只是在读写 \texttt{latest\_frame} 时避免两个线程同时改同一块缓存 \\
+  OpenCV 后台线程取帧 & 会进入内核 &
+  设备可读等待。后台线程通过 \texttt{select()} 等待 V4L2 摄像头有帧可取，
+  随后再执行出队操作取得该帧 \\
+  \bottomrule
+\end{tabularx}
+\end{center}
+
+也就是说，主线程的 \texttt{async\_read()} 主要是在等 Python 线程同步事件；
+真正深入 V4L2、USB 摄像头驱动和 videobuf2 队列的是后台读线程。
+这也是为什么主线程观测耗时可能只有毫秒级，而摄像头后台线程的
+\texttt{pselect6} 等待会接近 30 fps 的帧间隔。
+
+\subsubsection{OpenCV 到内核的边界}
+
+论文正文不展开完整源码栈，只保留性能分析需要的边界关系：
+后台相机线程首先进入 OpenCV 的 \texttt{VideoCapture}，随后通过 glibc
+发起 V4L2 相关系统调用，最终进入 Linux 的 V4L2、UVC 和 videobuf2 队列。
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[
+    >=Stealth,
+    box/.style={rectangle, draw=blue!60, fill=blue!7, rounded corners=2pt,
+      minimum width=2.65cm, minimum height=0.74cm, align=center, font=\scriptsize},
+    waitbox/.style={rectangle, draw=orange!75, fill=orange!10, rounded corners=2pt,
+      minimum width=2.65cm, minimum height=0.74cm, align=center, font=\scriptsize},
+    kbox/.style={rectangle, draw=green!55!black, fill=green!7, rounded corners=2pt,
+      minimum width=2.65cm, minimum height=0.74cm, align=center, font=\scriptsize},
+    layer/.style={font=\scriptsize\bfseries, text=gray!80},
+    note/.style={font=\scriptsize, text=gray!75}
+  ]
+    \node[layer] at (-1.45, 3.55) {Python / LeRobot};
+    \node[box] (loop) at (0.95, 3.55) {后台相机线程\\\texttt{\_read\_loop()}};
+    \node[box] (pyread) at (4.05, 3.55) {OpenCV Camera\\\texttt{read()}};
+    \node[box] (tryioctl) at (7.15, 3.55) {\texttt{grab()}\\\texttt{tryIoctl(DQBUF)}};
+
+    \node[note] at (2.35, 2.62) {无完成帧：等待设备可读};
+    \node[note] at (7.15, 2.62) {已有完成帧：出队并解码};
+
+    \node[layer] at (-1.45, 1.75) {glibc / syscall};
+    \node[waitbox] (select) at (2.35, 1.75) {\texttt{select()}\\等待 fd 可读};
+    \node[waitbox] (pselect) at (2.35, 0.65) {\texttt{pselect6}\\睡眠等待};
+    \node[waitbox] (ioctl) at (7.15, 1.75) {\texttt{ioctl}\\\texttt{VIDIOC\_DQBUF}};
+
+    \node[layer] at (-1.45, -0.45) {Linux kernel};
+    \node[kbox] (v4l2) at (2.35, -0.45) {V4L2 / UVC\\设备驱动};
+    \node[kbox] (wq) at (2.35, -1.55) {\texttt{done\_wq}\\等待队列};
+    \node[kbox] (vb2) at (7.15, -0.45) {videobuf2\\完成队列};
+    \node[box] (decode) at (7.15, -1.55) {\texttt{retrieve()}\\MJPEG 解码};
+
+    \draw[->, thick, blue!65] (loop) -- (pyread);
+    \draw[->, thick, blue!65] (pyread) -- (tryioctl);
+
+    \draw[->, thick, orange!75, rounded corners=6pt]
+      (tryioctl.south) -- ++(0,-0.38) -| node[pos=0.28, above, note]{无帧可取} (select.north);
+    \draw[->, thick, orange!75] (select) -- (pselect);
+    \draw[->, thick, orange!75] (pselect) -- (v4l2);
+    \draw[->, thick, orange!75] (v4l2) -- node[right, note]{新帧完成} (wq);
+    \node[note] at (2.35, -2.18) {唤醒后回到 DQBUF 重试};
+
+    \draw[->, thick, green!55!black] (tryioctl) -- node[right, note]{已有完成帧} (ioctl);
+    \draw[->, thick, green!55!black] (ioctl) -- (vb2);
+    \draw[->, thick, green!55!black] (vb2) -- node[right, note]{buffer 元数据} (decode);
+
+    \node[note] at (7.75, 3.03) {用户态};
+    \draw[dashed, gray!55] (-0.10,2.28) -- (8.55,2.28);
+    \node[note] at (7.60, 2.14) {系统调用边界};
+  \end{tikzpicture}
+  \caption{OpenCV 摄像头后台线程从用户态到 V4L2 内核队列的关键路径}
+  \label{fig:opencv-v4l2-callstack}
+\end{figure}
+
+图~\ref{fig:opencv-v4l2-callstack} 中有两条需要区分的路径：
+等待设备可读通常发生在 \texttt{select()} / \texttt{pselect6} 一类调用上；
+真正取出已完成图像缓冲区时，OpenCV 使用 \texttt{VIDIOC\_DQBUF} 将一个已经由驱动填好的
+V4L2 buffer 从完成队列中出队。
+
+需要注意的是，\texttt{VIDIOC\_DQBUF} 并不是把整帧像素从内核重新拷贝一遍。
+在当前 OpenCV V4L2 路径中，摄像头 buffer 通过 mmap 暴露给用户态；
+出队操作主要返回 buffer 的编号、有效字节数和时间戳等元数据。
+MJPEG 到 BGR 图像的解码仍然发生在用户态 OpenCV/libjpeg 中，
+这部分才是 ARM CPU 上摄像头链路中更明显的计算开销。
+
+完整的 OpenCV、glibc 和 Linux 内核源码级 CallStack 与参数说明，
+不放在论文正文中展开，单独记录在
+\texttt{robotdoc/摄像头相关/OpenCV到glibc到内核CallStack源码解析.md}。
+
+\subsubsection{时间剖析}
+
+在 30 fps 摄像头配置下，单路摄像头物理帧间隔约为 33.3 ms。
+实测中，后台线程在 \texttt{pselect6} 或 V4L2 等待路径中阻塞约 23--32 ms，
+符合摄像头帧率上限；MJPEG 解码仍在用户态 OpenCV/libjpeg 中完成，
+在 ARM CPU 上属于摄像头链路的主要计算开销。
+由于 LeRobot 采用后台预取，主线程 obs 阶段看到的是“取缓存帧”的时间，
+而不是完整的摄像头端到端采集时间。
+
+实测的逐层耗时分布与分层架构图见实验 06（摄像头感知层级耗时剖析，
+\texttt{robotdoc/实验/06\_摄像头感知层级耗时剖析/}）\label{exp:06}。
+该实验通过 ftrace 内核插桩和 Python \texttt{perf\_counter} 双层时间戳，
+量化了从 \texttt{pselect6} 阻塞到 tensor 入模的层级耗时，
+并区分了“端到端时延”与“主线程感知耗时”在异步预取下的差异。
+
+\src{OpenCV视频流内部实现.md，OpenCV到glibc到内核CallStack源码解析.md，
+pselect6最终结果.md，实验数据/06\_摄像头感知层级耗时剖析/README.md}

@@ -1,0 +1,202 @@
+LeRobot 是 HuggingFace 推出的开源机器人学习平台，
+提供从数据采集、模型训练到在线部署的完整工具链，
+支持模仿学习（ACT、Diffusion Policy）和强化学习（SAC、TDMPC）等多种策略。
+LeRobot 聚焦于低成本硬件场景，配套 SO-101 六自由度机械臂，
+只需一块树莓派和一台 3D 打印机即可搭建完整的实验环境，
+本文选用 LeRobot 作为实验平台。
+
+\subsection{感知—推理—执行三阶段划分}
+
+LeRobot 的在线推理过程是一个持续运行的帧循环，
+每一帧依次经历\textbf{观测采集}（\texttt{get\_observation()}）、
+\textbf{策略推理}（\texttt{select\_action()}）、
+\textbf{指令下发}（\texttt{send\_action()}）和
+\textbf{等待}四个阶段，周而复始直到 episode 结束。
+其中观测阶段同时采集两类传感器数据：USB 摄像头的图像帧和机械臂 6 个关节的角度位置；
+摄像头图像通过 OpenCV 后台线程异步预取，主线程调用 \texttt{async\_read()} 时直接取回已解码的最新帧，
+关节角度则通过 scservo\_sdk 以 \texttt{sync\_read} 指令从舵机总线同步读取。
+该循环在单个 Python 进程内串行执行，不依赖外部消息中间件，
+这一架构选择作为第\ref{ch:perf}章剖析的基本假设。
+图~\ref{fig:record-loop} 展示了单帧循环的执行流程。
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[>=Stealth,
+    stage/.style={
+      rectangle, rounded corners=3pt, draw=blue!60, fill=blue!8,
+      minimum width=2.8cm, minimum height=1cm, align=center,
+      font=\small\bfseries
+    },
+    sub/.style={
+      rectangle, rounded corners=2pt, draw=gray!70, fill=gray!6,
+      minimum width=2.6cm, minimum height=0.7cm, align=center,
+      font=\footnotesize
+    },
+    note/.style={font=\scriptsize\itshape, text=gray!80}
+  ]
+    \node[stage] (obs)  {观测采集\\[-1pt]{\footnotesize\texttt{get\_observation()}}};
+    \node[stage, right=1.2cm of obs]  (inf)  {策略推理\\[-1pt]{\footnotesize\texttt{select\_action()}}};
+    \node[stage, right=1.2cm of inf]  (act)  {指令下发\\[-1pt]{\footnotesize\texttt{send\_action()}}};
+    \node[stage, right=1.2cm of act]  (wait) {等待\\[-1pt]{\footnotesize\texttt{fps\_sleeper()}}};
+
+    \draw[->, thick, blue!60] (obs)  -- (inf);
+    \draw[->, thick, blue!60] (inf)  -- (act);
+    \draw[->, thick, blue!60] (act)  -- (wait);
+    \draw[->, thick, red!60] (wait.north) -- ++(0,0.8) -| (obs.north)
+      node[pos=0.25, above, note] {下一帧};
+
+    \node[sub, below=0.65cm of obs] (async)
+      {异步读摄像头线程\\[-1pt]{\footnotesize\texttt{async\_read}}};
+
+    \draw[->, thin, gray, dashed] (obs.south) -- (async.north);
+
+    \node[note, right=0.15cm of async.east] {读取最新帧};
+    \node[note, below=0.3cm of inf.south] {ACT / PyTorch};
+    \node[note, below=0.3cm of act.south] {\texttt{sync\_write} $\to$ 舵机};
+  \end{tikzpicture}
+  \caption{LeRobot 单帧推理循环流程：观测$\to$推理$\to$执行$\to$等待，周而复始}
+  \label{fig:record-loop}
+\end{figure}
+
+从代码实现看，循环中的主要阶段边界分别对应
+\texttt{get\_observation()}、\texttt{select\_action()} 和 \texttt{send\_action()}。
+若以 30 fps 作为在线控制目标，则单帧可用时间约为 33.3 ms。
+在当前 chunk\_size=100 的配置下，实测帧率约为 18--19 fps，
+其中策略推理约占总时间的 37\%，等待阶段约占 42\%。
+
+
+\subsection{LeRobot 软件栈架构}
+
+图~\ref{fig:lerobot-stack} 展示了上述推理循环运行时所依赖的软件栈分层结构。
+顶层为应用逻辑层，包含执行、观测、推理三个功能模块；
+中间层为支撑各模块的第三方库与驱动——执行和观测中的舵机操作通过 scservo\_sdk / pyserial 驱动，
+观测中的图像采集通过 OpenCV 完成（含后台异步读线程），
+推理阶段依赖 PyTorch 运行策略网络；底层依次为 glibc 系统库和 Linux 内核。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.9\textwidth]{2_实验环境构建/image/lerobot_stack.png}
+  \caption{LeRobot 软件栈四层架构：应用逻辑层$\to$库与驱动层$\to$glibc$\to$Linux 内核}
+  \label{fig:lerobot-stack}
+\end{figure}
+
+\src{LeRobot软件栈全链路分析.md}
+
+\subsection{三类典型工作负载特征}
+
+三类任务：\textbf{抓取（Grasp / pick）}、\textbf{推倒（Push）}、\textbf{分类（Sort / classification）}。
+统一硬件（树莓派5）、统一模型架构（ACT，cs=100）、统一目标帧率（30 fps），
+每类任务采集 $n=20$ 个 episode，episode 时长统一对齐至约 30 s 以排除时长差异干扰。
+本节使用实验 02 的统计结果作为三类工作负载的基准画像，
+只比较各阶段时间占比，而不把 episode 绝对时长差异混入分析。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{../实验/02_三类任务工作负载对比/cs100_task_comparison.png}
+  \caption{三类任务在 \texttt{chunk\_size=100} 下的阶段时间占比对比}
+  \label{fig:cs100-task-comparison}
+\end{figure}
+
+图~\ref{fig:cs100-task-comparison} 的主要现象有三点。
+第一，三类任务的推理占比都集中在 35\%--36\% 左右，
+说明在模型结构、\texttt{chunk\_size} 和输入配置相同的情况下，
+ACT 单次推理开销主要由模型本身决定，而不是由抓取、推倒、分类这些任务语义决定。
+第二，推倒任务的 \texttt{wait\_pct} 最高，达到 45.2\%，
+比抓取和分类高约 2 个百分点；这更像是动作行程和执行节奏造成的等待增加，
+而不是推理侧变慢。
+第三，\texttt{obs\_pct} 和 \texttt{action\_pct} 在三类任务之间变化很小，
+说明相机读取、舵机状态读取以及舵机写入在当前实验设置下更接近固定开销。
+
+因此，后续性能分析不把三类任务视为三种完全不同的软件路径，
+而是把它们看作同一 LeRobot 推理循环在不同动作负载下的表现。
+抓取和分类更接近基准工作负载；推倒任务由于等待占比最高，
+更适合用来观察执行节奏和 \texttt{chunk\_size} 对整体帧率的影响。
+
+\src{实验/02\_三类任务工作负载对比/cs100\_task\_comparison.md}
+
+\subsection{跨层次性能分析模型}
+
+\begin{center}
+\begin{tabular}{lll}
+  \toprule
+  层级 & 可观测指标 & 工具 \\
+  \midrule
+  AI 推理框架层 & 算子耗时、张量形状、FLOP & torch.profiler \\
+  Python 运行时层 & GIL 争用、帧循环时间 & Python logging \\
+  OS 内核层 & 系统调用次数/耗时、线程调度 & ftrace, strace \\
+  硬件 I/O 层 & 传输字节数、等待时延 & perf, ioctl trace \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{工具链选型}
+
+\textbf{strace vs ftrace 机制与开销对比}：
+
+两者作用层次不同，开销来源也不同：
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{strace}：通过 \texttt{ptrace} 系统调用在用户态拦截目标进程的每一次系统调用入口与出口。
+        每次拦截都需要一次进程上下文切换（目标进程 $\to$ strace 进程），
+        导致系统时间从 \textbf{2.20 s 放大至 20.12 s（约 9×）}。
+        其开销与系统调用频率正相关，频繁调用时干扰极大，不可用于生产级测量。
+
+  \item \textbf{ftrace}：通过 Linux 内核 tracepoint / \texttt{trace\_printk()} 在内核态直接写入 ring buffer，
+        \textbf{插桩本身开销极低}（纳秒级，无进程切换）。
+        但将 ring buffer 内容导出至用户态文件（\texttt{cat /sys/kernel/debug/tracing/trace > log}）
+        是一次批量文件 I/O，当 event 密集时，\textbf{导出过程本身会消耗额外 CPU 和内存带宽}，
+        且导出期间 ring buffer 可能覆盖旧数据（丢失事件）。
+
+  \item \textbf{本文策略}：以 ftrace 插桩数据为主要内核态度量依据；
+        strace 仅用于初期定性探索系统调用分布，不计入最终时序数据。
+\end{itemize}
+
+% TODO: 补充对比实验——量化 ftrace log 导出阶段的 CPU/内存开销
+% 对比方案：
+%   A) ftrace 插桩 + 实时 cat 导出（当前方案）
+%   B) ftrace 插桩 + trace-cmd record（内核侧 per-CPU buffer，降低导出压力）
+%   C) 无任何 tracing（baseline）
+% 指标：episode 期间系统时间、用户时间、RSS 峰值，各取 3 次均值
+% 预期结论：插桩本身开销可忽略，导出 I/O 才是 ftrace 的主要额外开销来源
+
+\src{内核数据搜集分析.md，方法论.md}
+
+\subsection{实验硬件与软件配置}
+本实验平台由树莓派5、SO-101 机械臂和两路 USB 摄像头组成。
+硬件侧实际搭建了两个 SO-101 follower，每个 follower 含 6 个舵机，
+并由一块舵机驱动板统一控制；在线策略推理实验只使用其中一个 follower。
+两路摄像头分别作为手眼相机和固定相机接入，均通过 OpenCV 采集。
+
+\begin{center}
+\begin{tabular}{p{0.22\textwidth}p{0.68\textwidth}}
+  \toprule
+  项目 & 配置 \\
+  \midrule
+  推理主机 & 树莓派5，ARM Cortex-A76，4 核，4 GB LPDDR4X，无 GPU \\
+  机械臂 & SO-101 follower $\times 2$；推理时使用其中 1 个 follower \\
+  舵机与驱动 & 每个 follower 含 6 个舵机，由 1 块舵机驱动板控制 \\
+  摄像头 & USB 摄像头 $\times 2$，位置分别为 \texttt{handeye} 和 \texttt{fixed} \\
+  图像采集 & OpenCV Camera，分辨率 640$\times$360，30 fps \\
+  控制参数 & \texttt{chunk\_size=100}，控制目标 fps=30，串口波特率 1 Mbps \\
+  采集设置 & 每类任务采集 $\geq 3$ 次 episode 取均值，排除冷启动影响 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\begin{center}
+\begin{tabular}{p{0.22\textwidth}p{0.68\textwidth}}
+  \toprule
+  软件/库 & 版本或说明 \\
+  \midrule
+  操作系统 & Raspberry Pi OS \\
+  Python & 3.10 \\
+  LeRobot & 0.3.4 \\
+  PyTorch & 2.7.1 \\
+  torchvision & 0.22.1 \\
+  OpenCV & 4.12.0.88 \\
+  NumPy & 2.2.6 \\
+  pyserial & 3.5 \\
+  feetech-servo-sdk & 1.0.0 \\
+  \bottomrule
+\end{tabular}
+\end{center}

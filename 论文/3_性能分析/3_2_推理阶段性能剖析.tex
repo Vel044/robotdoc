@@ -1,0 +1,96 @@
+\subsection{推理阶段性能剖析}\label{sec:inference}
+
+\subsubsection{时间剖析：chunk\_size 参数扫描}
+
+\begin{center}
+\begin{tabular}{rrrr}
+  \toprule
+  chunk\_size & FPS & inference\_pct & wait\_pct \\
+  \midrule
+  1   & 0.8  & 99.7\% & $\approx$0\% \\
+  10  & 5.7  & 85\%   & 13\% \\
+  50  & 15.1 & 48\%   & 36\% \\
+  100 & 18.5 & 37\%   & 42\% \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+FPS 与 cs 呈非线性：cs 从 1$\to$10 增益巨大（0.8$\to$6），cs 从 50$\to$100 趋缓（15$\to$19），符合边际递减规律。
+推理绝对耗时接近恒定（$\approx$1--1.5 s/次），分块是"分摊"而非"减少"推理开销。
+
+\subsubsection{三类任务推理时间对比}
+
+在统一 cs=100、统一 episode 时长（$\approx$30 s）的条件下，三类任务（抓取/推倒/分类）
+各采集 $n=20$ 个 episode，仅看时间占比百分比以屏蔽 episode 总时长的干扰：
+
+\begin{center}
+\begin{tabular}{lrrr}
+  \toprule
+  任务 & inference\_pct & wait\_pct & action\_pct \\
+  \midrule
+  抓取（pick）           & 36.5\% $\pm$ 2.5\% & 43.3\% $\pm$ 2.3\% & 4.8\% $\pm$ 0.3\% \\
+  推倒（push）           & 34.9\% $\pm$ 1.2\% & \textbf{45.2\%} $\pm$ 2.0\% & 4.4\% $\pm$ 0.3\% \\
+  分类（classification） & 35.9\% $\pm$ 2.0\% & 42.9\% $\pm$ 2.2\% & 4.4\% $\pm$ 0.3\% \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{核心结论}：
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{推理占比三者趋同（34.9\%--36.5\%，差距 $<$ 2pp）}——
+        在 cs 一致、模型结构一致时，单次推理时延与场景视觉复杂度无关，
+        验证了"ACT 推理延迟由模型结构决定"的假设。
+  \item \textbf{推倒任务 wait 占比最高（45.2\%）}——
+        因推/压动作行程更大、执行时间更长，系统空等比例上升，
+        瓶颈出现在执行侧而非推理侧；优化方向为减小 cs（如 cs=50）以缩短每次 chunk 等待时长。
+  \item 早期初步实验中分类任务 inference\_pct 偏高（39.6\%）的现象，
+        被定位为 \textbf{60 s 长 episode 导致树莓派 CPU 热降频}，
+        在统一为 30 s 后该差异消失，与模型本身负载无关。
+\end{itemize}
+
+\src{实验数据/02\_三类任务工作负载对比/cs100\_task\_comparison.md}
+
+\subsubsection{算子级耗时分解}
+\newexp{torch.profiler op-level profiling，分解 ResNet18 / Transformer Encoder / Decoder / 前后处理占比}
+
+\begin{center}
+\begin{tabular}{lcc}
+  \toprule
+  模块 & 耗时（ms） & 占推理比例（\%） \\
+  \midrule
+  ResNet18 特征提取 & \mytodo{} & \mytodo{} \\
+  CVAE Encoder（4层 Transformer） & \mytodo{} & \mytodo{} \\
+  Action Decoder（1层 Transformer） & \mytodo{} & \mytodo{} \\
+  前后处理（归一化、queue写入） & \mytodo{} & \mytodo{} \\
+  \midrule
+  合计 & \mytodo{} & 100\% \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection{PyTorch 线程行为}
+\begin{itemize}[leftmargin=2em]
+  \item futex 调用：\textbf{64,569 次 / 40 s episode}，总等待时间 3,252 s（27线程并行累计）；
+  \item op=0（FUTEX\_WAIT）占多数，op=9（FUTEX\_WAIT\_BITSET）用于 ATen 线程池；
+  \item ARM Cortex-A76 使用 OpenMP 并行，NEON SIMD 加速 GEMM，但计算量仍是瓶颈。
+\end{itemize}
+\src{futex最终结果.md，ACT推理.md}
+
+\subsubsection{ACT 推理完整调用链}
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Python 入口}：\texttt{select\_action()}（RecordRunner 类）
+  \item \textbf{ACT Policy}：\texttt{policy.select\_action(observation)} $\to$ \texttt{Model.forward(image, state)}
+  \item \textbf{ResNet18 特征提取}：\texttt{torchvision.models.resnet18()} $\to$ \texttt{Conv2d / BatchNorm / ReLU} 算子
+  \item \textbf{CVAE Encoder}：4层 Transformer Encoder $\to$ \texttt{torch.nn.functional.multi\_head\_attention}
+  \item \textbf{Action Decoder}：1层 Transformer Decoder $\to$ 动作分布采样
+  \item \textbf{PyTorch 运行时}：\texttt{torch::jit::Graph} $\to$ \texttt{ATen} $\to$ \texttt{OpenMP parallel\_for}
+  \item \textbf{GEMM 底层}：\texttt{OpenBLAS / NEON SIMD} 矩阵乘法（ARM Cortex-A76 优化）
+  \item \textbf{系统调用}：\texttt{futex()} 线程同步（64,569 次 / 40 s episode）
+\end{itemize}
+
+\textbf{关键性能结论}：推理瓶颈在用户态 GEMM 计算（ARM CPU 矩阵乘法），
+与视觉输入复杂度无关；\texttt{futex} 系统调用本身开销极低（$<$1 $\mu$s），
+但 OpenMP 线程池内 27 线程并行累计等待时间达 3,252 s，说明线程同步竞争显著。
+
+\src{ACT推理.md，futex最终结果.md}

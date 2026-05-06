@@ -582,12 +582,109 @@ self.encoder_robot_state_input_proj = nn.Linear(
     self.config.robot_state_feature.shape[0], config.dim_model  # 6 → 512
 )
 
-# forward 里调用：把关节角度送进去做矩阵乘法
+# forward 里调用（modeling_act.py:910）：把归一化后的关节角度送进去做矩阵乘法
+# batch["observation.state"] 是已经归一化的 (1,6)——归一化发生在 preprocessor 流水线里
 encoder_in_tokens.append(
     self.encoder_robot_state_input_proj(batch["observation.state"])
 )
-# batch["observation.state"]: (1, 6)，归一化后的关节角度
 ```
+
+**两阶段调用关系**：归一化和 Linear 投影不在同一个函数里，而是分属推理循环的前后两步：
+
+```
+record.py 推理循环每一帧：
+  ① preprocessor(obs)                ← 流水线在 make_act_pre_post_processors() 里组装
+      └→ NormalizerProcessorStep        归一化 (x-μ)/σ
+  ② model.forward(batch)             ← 归一化后的 batch 传进模型
+      └→ encoder_robot_state_input_proj   矩阵乘法 6→512
+```
+
+#### 归一化的完整调用链
+
+```python
+# ── ① 配置 ─ configuration_act.py ─ ACTConfig 类字段 ─────────────────
+# 三种模态全部用 MEAN_STD（减均值除标准差）
+normalization_mapping: dict[str, NormalizationMode] = field(
+    default_factory=lambda: {
+        "VISUAL": NormalizationMode.MEAN_STD,   # 图像
+        "STATE":  NormalizationMode.MEAN_STD,   # 关节角度 ← robot_state 走这条
+        "ACTION": NormalizationMode.MEAN_STD,   # 动作
+    }
+)
+
+# ── ② 组装 ─ processor_act.py:80 ─ make_act_pre_post_processors() ───
+# 推理初始化时调用一次，构建 preprocessor / postprocessor 两条流水线
+# preprocessor 后来被 record.py 每帧调用：preprocessor(obs) → 归一化后的 obs
+def make_act_pre_post_processors(config, dataset_stats=None):
+    ...
+    input_steps.append(
+        NormalizerProcessorStep(
+            features={**config.input_features, **config.output_features},
+            norm_map=config.normalization_mapping,   # {"STATE": MEAN_STD, ...}
+            stats=dataset_stats,   # 训练集统计量 {key: {"mean": Tensor(6,), "std": Tensor(6,)}}
+            device=config.device,
+        )
+    )
+
+# ── ③ 入口 ─ normalize_processor.py:361 ─ NormalizerProcessorStep.__call__() ─
+# 每帧推理时由 PolicyProcessorPipeline 驱动调用
+class NormalizerProcessorStep(_NormalizationMixin, ProcessorStep):
+    def __call__(self, transition: EnvTransition) -> EnvTransition:
+        new_transition = transition.copy()          # 浅拷贝，不污染调用方的 dict
+        observation = new_transition.get(TransitionKey.OBSERVATION)  # 取观测 dict，含 state 和 images
+        if observation is not None:
+            # inverse=False 表示正向归一化 (x-μ)/σ，把真实角度/像素值压到 ≈N(0,1)
+            new_transition[TransitionKey.OBSERVATION] = self._normalize_observation(
+                observation, inverse=False          # → 跳到 ④
+            )
+        return new_transition                       # 归一化后的 transition，交给下一步（或传给模型）
+
+# ── ④ 遍历特征 ─ normalize_processor.py:242 ─ _normalize_observation() ─
+# 遍历 config 里声明的所有 feature（observation.state、observation.images.* 等）
+def _normalize_observation(self, observation: dict[str, Any], inverse: bool) -> dict[str, Tensor]:
+    new_observation = dict(observation)             # 浅拷贝，value 仍指向原 Tensor
+    for key, feature in self.features.items():      # key="observation.state", feature.type=STATE
+        ...  # 白名单过滤、跳过 ACTION 类型
+        if feature.type != FeatureType.ACTION and key in new_observation:
+            tensor = torch.as_tensor(new_observation[key])  # state: float32 (1,6)；image: uint8 (1,3,H,W)
+            # 按 feature.type 查 norm_map 选归一化模式，ACT 全走 MEAN_STD
+            new_observation[key] = self._apply_transform(tensor, key, feature.type, inverse=inverse)  # → 跳到 ⑤
+    return new_observation
+
+# ── ⑤ 核心计算 ─ normalize_processor.py:287 ─ _apply_transform() ─
+# 实际执行 (x-μ)/σ 或 x*σ+μ，按 feature_type 查 norm_map 选模式
+def _apply_transform(self, tensor: Tensor, key: str, feature_type: FeatureType,
+                     *, inverse: bool = False) -> Tensor:
+    norm_mode = self.norm_map.get(feature_type, NormalizationMode.IDENTITY)
+    # 从 ① 的字典里查：STATE → MEAN_STD（减均值除标准差）
+    # .get() 第二个参数是兜底值 IDENTITY（不做归一化），没在字典里的 feature 直接跳过
+    if norm_mode == NormalizationMode.IDENTITY or key not in self._tensor_stats:
+        return tensor                               # 不需要归一化的字段直接返回
+    ...  # device/dtype 对齐（树莓派上 tensor 和 stats 都在 cpu/float32，通常不触发）
+    stats = self._tensor_stats[key]                 # {"mean": Tensor(6,), "std": Tensor(6,)}
+
+    if norm_mode == NormalizationMode.MEAN_STD and "mean" in stats and "std" in stats:
+        mean, std = stats["mean"], stats["std"]     # mean=[μ₁,μ₂,...,μ₆], std=[σ₁,σ₂,...,σ₆]
+        denom = std + self.eps                      # eps=1e-8 防止某关节 std≈0 除零
+        if inverse:
+            return tensor * std + mean              # 反归一化：归一化值 → 真实角度（⑥走这里）
+        return (tensor - mean) / denom              # 正向归一化：真实角度 → ≈N(0,1) ← robot_state 走这里
+    ...  # MIN_MAX 分支，Diffusion/pi0 等策略用，ACT 不走
+
+# ── ⑥ 反归一化 ─ normalize_processor.py:441 ─ UnnormalizerProcessorStep.__call__() ─
+# 后处理流水线：模型输出动作后调用，把归一化值还原成真实舵机角度发给 Feetech
+class UnnormalizerProcessorStep(_NormalizationMixin, ProcessorStep):
+    def __call__(self, transition: EnvTransition) -> EnvTransition:
+        new_transition = transition.copy()
+        action = new_transition.get(TransitionKey.ACTION)  # 模型输出的 action: Tensor(1,6)，归一化空间
+        ...
+        # inverse=True → _apply_transform 里走 tensor * std + mean
+        # 把 ≈N(0,1) 的值还原成真实舵机目标角度（度）
+        new_transition[TransitionKey.ACTION] = self._normalize_action(action, inverse=True)
+        return new_transition
+```
+
+---
 
 **做了什么**：`nn.Linear(6→512)` 同样是矩阵乘法，把 6 个关节角度变成 512 维：
 
@@ -669,190 +766,305 @@ self.backbone = IntermediateLayerGetter(
 )
 # 返回的是 dict：{"feature_map": Tensor(B,512,h,w)}，所以下面要用 ["feature_map"] 取出来
 
-# forward 里调用：
+# forward 里调用（modeling_act.py:926）：
 cam_features = self.backbone(img)["feature_map"]
 # img:          (1, 3, 360, 640)  ImageNet 归一化后的 RGB 图像
 # cam_features: (1, 512, 12, 20)  每个空间位置一个 512 维特征向量
 ```
 
+##### ResNet18 源码调用链
+
+```python
+# ── 入口 ─ vision/torchvision/models/resnet.py:684 ─ resnet18() ────────
+def resnet18(*, weights: Optional[ResNet18_Weights] = None,
+             progress: bool = True, **kwargs: Any) -> ResNet:
+    weights = ResNet18_Weights.verify(weights)
+    return _resnet(BasicBlock, [2, 2, 2, 2], weights, progress, **kwargs)
+    #                    ↑          ↑
+    #              残差块类型   layer1~4 各 2 个 block
+
+# ── 构建 ─ resnet.py:288 ─ _resnet() ─────────────────────────────────
+def _resnet(block: type[Union[BasicBlock, Bottleneck]],
+            layers: list[int], weights, progress, **kwargs) -> ResNet:
+    ...  # 权重参数预处理
+    model = ResNet(block, layers, **kwargs)  # norm_layer=FrozenBatchNorm2d 从 kwargs 传入
+    if weights is not None:                                              # ACT 传了 "IMAGENET1K_V1"
+        model.load_state_dict(
+            weights.get_state_dict(progress=progress, check_hash=True)   # 从 URL 下载 .pth → {参数名: Tensor}
+        )                                                                # 灌进 model 的 conv/BN，否则全是随机值，提不出有效特征
+    return model
+
+# ── 搭建各层 ─ resnet.py:166 ─ ResNet.__init__() ─────────────────────
+class ResNet(nn.Module):
+    def __init__(self, block, layers, num_classes=1000, ..., norm_layer=None):
+        ...  # 参数校验，默认值处理
+        # ↓ 以下只是搭建结构、分配权重空间，不执行计算
+        # 实际计算在推理时由 IntermediateLayerGetter.forward() 驱动（见下方）
+        self.inplanes = 64  # 当前通道数，每经过一个 _make_layer 会翻倍
+        self.conv1   = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False)
+        self.bn1     = norm_layer(self.inplanes)   # FrozenBatchNorm2d（ACT 传入）
+        self.relu    = nn.ReLU(inplace=True)
+        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.layer1  = self._make_layer(block, 64,  layers[0])                          # 2×BasicBlock(64)
+        self.layer2  = self._make_layer(block, 128, layers[1], stride=2)                # 2×BasicBlock(128)
+        self.layer3  = self._make_layer(block, 256, layers[2], stride=2)                # 2×BasicBlock(256)
+        self.layer4  = self._make_layer(block, 512, layers[3], stride=2)                # 2×BasicBlock(512)
+        ...  # 权重初始化（kaiming 初始化 conv，zero-init 最后一个 BN）
+
+# ── 堆叠 BasicBlock ─ resnet.py:225 ─ ResNet._make_layer() ───────────
+def _make_layer(self, block, planes, blocks, stride=1, dilate=False) -> nn.Sequential:
+    norm_layer = self._norm_layer
+    downsample = None
+    ...  # dilation 处理
+    if stride != 1 or self.inplanes != planes * block.expansion:
+        downsample = nn.Sequential(
+            conv1x1(self.inplanes, planes * block.expansion, stride),  # 1×1 卷积对齐通道和空间
+            norm_layer(planes * block.expansion),
+        )
+    layers = []
+    layers.append(block(self.inplanes, planes, stride, downsample, ...))  # 第 1 个 block（可能带 downsample）
+    self.inplanes = planes * block.expansion
+    for _ in range(1, blocks):
+        layers.append(block(self.inplanes, planes, ...))  # 后续 block 不降采样
+    return nn.Sequential(*layers)
+
+# ── 残差块 ─ resnet.py:59 ─ BasicBlock ────────────────────────────────
+class BasicBlock(nn.Module):
+    expansion: int = 1
+
+    def __init__(self, inplanes, planes, stride=1, downsample=None, ..., norm_layer=None):
+        ...  # 参数校验
+        self.conv1 = conv3x3(inplanes, planes, stride)  # nn.Conv2d(in, out, 3, stride, 1, bias=False)
+        self.bn1   = norm_layer(planes)                  # FrozenBatchNorm2d
+        self.relu  = nn.ReLU(inplace=True)
+        self.conv2 = conv3x3(planes, planes)             # stride=1
+        self.bn2   = norm_layer(planes)
+        self.downsample = downsample  # 可选：1×1 conv + BN，对齐捷径尺寸
+
+    def forward(self, x: Tensor) -> Tensor:
+        identity = x
+        out = self.conv1(x)
+        out = self.bn1(out)       # → FrozenBatchNorm2d.forward()
+        out = self.relu(out)
+        out = self.conv2(out)
+        out = self.bn2(out)       # → FrozenBatchNorm2d.forward()
+        if self.downsample is not None:
+            identity = self.downsample(x)
+        out += identity           # 残差连接
+        out = self.relu(out)
+        return out
+
+# ── 冻结批归一化 ─ vision/torchvision/ops/misc.py:14 ─ FrozenBatchNorm2d ─
+class FrozenBatchNorm2d(torch.nn.Module):
+    def __init__(self, num_features, eps=1e-5):
+        ...  # 注册 4 个 buffer（不参与梯度）：weight(γ), bias(β), running_mean(μ), running_var(σ²)
+
+    def forward(self, x: Tensor) -> Tensor:
+        w  = self.weight.reshape(1, -1, 1, 1)       # γ: (1,C,1,1)
+        b  = self.bias.reshape(1, -1, 1, 1)         # β: (1,C,1,1)
+        rv = self.running_var.reshape(1, -1, 1, 1)   # σ²: (1,C,1,1)
+        rm = self.running_mean.reshape(1, -1, 1, 1)  # μ: (1,C,1,1)
+        scale = w * (rv + self.eps).rsqrt()          # γ / √(σ² + ε)
+        bias  = b - rm * scale                      # β - μ·scale
+        return x * scale + bias
+    # 等价于 y[c] = γ[c]·(x[c]-μ[c])/√(σ²[c]+ε) + β[c]，与普通 BN 唯一区别是 μ/σ² 冻结不更新
+
+# ── 截断包装 ─ vision/torchvision/models/_utils.py:13 ─ IntermediateLayerGetter ─
+# __init__ 里只把 layer4 及之前的子模块装进来，avgpool/fc 直接丢弃
+# 所以 ACT 推理时 ResNet 的 avgpool 和 fc 完全不存在，不会执行
+class IntermediateLayerGetter(nn.ModuleDict):
+    def __init__(self, model: nn.Module, return_layers: dict[str, str]) -> None:
+        layers = OrderedDict()
+        for name, module in model.named_children():  # conv1, bn1, relu, maxpool, layer1, ..., avgpool, fc
+            layers[name] = module
+            if name in return_layers:                # "layer4" 找到了
+                del return_layers[name]
+            if not return_layers:                    # return_layers 清空
+                break                                # ← 停！avgpool、fc 没装进来
+
+    def forward(self, x):
+        out = OrderedDict()
+        for name, module in self.items():            # 只遍历装进来的 8 个子模块
+            x = module(x)                            # 逐个执行
+            if name in self.return_layers:           # layer4 时捕获输出
+                out_name = self.return_layers[name]
+                out[out_name] = x
+        return out                                   # {"feature_map": Tensor(1,512,12,20)}
+
+# ── 前向流程 ─ resnet.py:266 ─ ResNet._forward_impl() ─────────────────
+# ACT 实际走的是 IntermediateLayerGetter.forward()，等效于下面的 _forward_impl 跑到 layer4 就停
+# 下面是 ResNet 原始完整逻辑，用来看数据流和形状变化
+def _forward_impl(self, x: Tensor) -> Tensor:
+    # ── 入口卷积 ─────────────────────────────────────────────────────────
+    x = self.conv1(x)       # nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+                            # 64 个 7×7 滤波器扫 RGB 三通道，stride=2 空间÷2
+                            # (1,3,360,640) → (1,64,180,320)
+    x = self.bn1(x)         # FrozenBatchNorm2d(64)：逐通道 y=γ·(x-μ)/√(σ²+ε)+β，推理时 μ/σ/γ/β 全固定
+                            # 形状不变 (1,64,180,320)，但数值分布拉回 ≈N(0,1)
+    x = self.relu(x)        # max(0,x)，负数清零引入非线性，形状不变
+    x = self.maxpool(x)     # nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+                            # 3×3 窗口取最大值，stride=2 空间再÷2
+                            # (1,64,180,320) → (1,64,90,160)
+
+    # ── 4 个残差 stage ───────────────────────────────────────────────────
+    x = self.layer1(x)      # 2×BasicBlock(64), stride=1, 不降采样
+                            # (1,64,90,160) → (1,64,90,160)
+                            # 每个 BasicBlock: conv3×3 → BN → relu → conv3×3 → BN + shortcut → relu
+    x = self.layer2(x)      # 2×BasicBlock(128), 首个 block stride=2
+                            # (1,64,90,160) → (1,128,45,80)
+                            # 通道 64→128（滤波器翻倍），空间 90×160→45×80（÷2）
+    x = self.layer3(x)      # 2×BasicBlock(256), 首个 block stride=2
+                            # (1,128,45,80) → (1,256,23,40)
+    x = self.layer4(x)      # 2×BasicBlock(512), 首个 block stride=2
+                            # (1,256,23,40) → (1,512,12,20)
+                            # ← IntermediateLayerGetter 在这里截断并返回 feature_map
+                            # 总下采样 = 2^5 = 32（conv1×2 + maxpool×2 + layer2/3/4 各×2）
+                            # 360×640 / 32 = 12×20 = 240 个空间位置
+    return x
+```
+
+**调用链**：
+
+```
+self.backbone(img)                                          # modeling_act.py:926
+  │
+  │  self.backbone 是 IntermediateLayerGetter 实例           # _utils.py:13
+  │  调用 IntermediateLayerGetter.forward(img)：
+  │    for name, module in self.items():
+  │        x = module(x)          ← 逐个执行下面的子模块
+  │
+  ├── x = Conv2d.forward(x)                                 # nn.Conv2d(3→64, 7×7, stride=2)
+  ├── x = FrozenBatchNorm2d.forward(x)                       # misc.py:54，x * scale + bias
+  ├── x = ReLU.forward(x)                                    # max(0, x)
+  ├── x = MaxPool2d.forward(x)                               # 3×3 窗口取 max，stride=2
+  ├── x = layer1.forward(x)                                  # nn.Sequential.forward()
+  │     ├── x = BasicBlock.forward(x)                        # resnet.py:89
+  │     │     ├── x' = Conv2d.forward(x)                     # 3×3 conv
+  │     │     ├── x' = FrozenBatchNorm2d.forward(x')
+  │     │     ├── x' = ReLU.forward(x')
+  │     │     ├── x' = Conv2d.forward(x')                    # 3×3 conv
+  │     │     ├── x' = FrozenBatchNorm2d.forward(x')
+  │     │     ├── shortcut = x (直传，无 downsample)
+  │     │     └── x = ReLU.forward(x' + shortcut)
+  │     └── x = BasicBlock.forward(x)                        # 同上
+  ├── x = layer2.forward(x)                                  # nn.Sequential.forward()
+  │     ├── x = BasicBlock.forward(x)                        # 有 downsample
+  │     │     ├── x' = Conv2d.forward(x)                     # 3×3 conv, stride=2
+  │     │     ├── x' = FrozenBatchNorm2d.forward(x')
+  │     │     ├── x' = ReLU.forward(x')
+  │     │     ├── x' = Conv2d.forward(x')                    # 3×3 conv
+  │     │     ├── x' = FrozenBatchNorm2d.forward(x')
+  │     │     ├── shortcut = downsample(x)                    # conv1x1(stride=2) + BN
+  │     │     └── x = ReLU.forward(x' + shortcut)
+  │     └── x = BasicBlock.forward(x)                        # 无 downsample
+  ├── x = layer3.forward(x)                                  # 同 layer2 结构
+  └── x = layer4.forward(x)                                  # 同 layer2 结构
+        ↑ 这里捕获输出，返回 {"feature_map": Tensor(1, 512, 12, 20)}
+```
+
+
 ##### `self.backbone` 是什么
 
-`IntermediateLayerGetter` 是 torchvision 提供的一个工具，它接收一个完整模型（这里是 ResNet18），把你指定的某些层的**中间输出**抓出来返回。这里指定 `{"layer4": "feature_map"}` 意思是"跑到 layer4 为止，把 layer4 的输出用键名 `feature_map` 返回"。所以调用时返回的是一个 `dict`，你要用 `["feature_map"]` 拿到真正的 Tensor。
-
-##### 为什么不用完整 ResNet18
+`IntermediateLayerGetter` 是 torchvision 提供的一个工具（`vision/torchvision/models/_utils.py:13`），它接收一个完整模型（这里是 ResNet18），把你指定的某些层的**中间输出**抓出来返回。这里指定 `{"layer4": "feature_map"}` 意思是"跑到 layer4 为止，把 layer4 的输出用键名 `feature_map` 返回"。所以调用时返回的是一个 `dict`，你要用 `["feature_map"]` 拿到真正的 Tensor。
 
 原版 ResNet18 是给 ImageNet **分类**用的，最后还有 `avgpool`（全局池化到 (1,1)）+ `fc`（512→1000类）两步。ACT 只要**空间特征图**，不要分类结果，所以在 layer4 就截断。
 
-##### Conv1d / Conv2d / Conv3d 命名澄清
+##### 每一步详解
 
-`conv1` 不是 PyTorch 的类，是 ResNet 给"第一个卷积层"起的变量名（`self.conv1 = ...`）。**真正的 PyTorch 类是 `nn.Conv1d / nn.Conv2d / nn.Conv3d`**，后面的数字代表"滤波器在几个空间维度上滑动"：
+**第 1 步：conv1 — 入口卷积**
 
-| 类          | 滑动维度 | 输入形状        | 权重形状               | 用途         |
-| ----------- | -------- | --------------- | ---------------------- | ------------ |
-| `nn.Conv1d` | 1 维     | (B, C, L)       | (C_out, C_in, K)       | 音频、时序   |
-| `nn.Conv2d` | 2 维     | (B, C, H, W)    | (C_out, C_in, K, K)    | 图像         |
-| `nn.Conv3d` | 3 维     | (B, C, D, H, W) | (C_out, C_in, K, K, K) | 视频、CT/MRI |
-
-通道维 C 永远不滑动，所有 Conv 都是"对所有输入通道求和、输出 C_out 个新通道"。
-
-ACT 处理单帧 RGB 图像 `(1, 3, 360, 640)`，**全程只用 `nn.Conv2d`**——ResNet18 里所有的 `conv1`、`conv2`、捷径降采样 conv，以及后面 §4.4.3 的 1×1 投影，全部是 `Conv2d`，没有 `Conv1d` 或 `Conv3d`。
-
-##### ResNet18 整体流水线
+`conv1` 是 ResNet 给"第一个卷积层"起的变量名，实际类型是 `nn.Conv2d`（全程只用 Conv2d，没有 Conv1d/Conv3d）。
 
 ```
-输入 (1, 3, 360, 640)
-  ↓ conv1 (7×7, 64通道, stride=2) + BN + ReLU + maxpool (3×3, stride=2)
-    → (1, 64, 90, 160)    空间缩4倍，通道3→64
-  ↓ layer1 (2 个 BasicBlock, stride=1)
-    → (1, 64, 90, 160)    不降采样，只做特征提取
-  ↓ layer2 (2 个 BasicBlock, stride=2)
-    → (1, 128, 45, 80)    空间÷2，通道×2
-  ↓ layer3 (2 个 BasicBlock, stride=2)
-    → (1, 256, 23, 40)    空间÷2，通道×2
-  ↓ layer4 (2 个 BasicBlock, stride=2)
-    → (1, 512, 12, 20)    ← 取这个作为 feature_map
+权重: W ∈ ℝ^{64 × 3 × 7 × 7}    ← 64 个 7×7×3 滤波器，无偏置（bias=False，后面 BN 吸收）
+输入: x ∈ ℝ^{1 × 3 × 360 × 640}  ← 归一化后的 RGB 图像
+
+stride=2, padding=3，对输出每个位置 (m,n)、每个输出通道 k：
+    y[k, m, n] = ∑_{c=0}^{2} ∑_{i=0}^{6} ∑_{j=0}^{6} W[k,c,i,j] · x[c, 2m+i-3, 2n+j-3]
+
+每个输出像素 = 3×7×7 = 147 次乘加
+输出: y ∈ ℝ^{1 × 64 × 180 × 320}    ← 空间 ÷2（stride=2），通道 3→64（滤波器数量）
+
+空间公式：H_out = ⌊(H_in + 2·padding - kernel) / stride⌋ + 1 = ⌊(360 + 6 - 7) / 2⌋ + 1 = 180
 ```
 
-下面**把每一步拆开讲**——每一步都是"定义权重+做什么计算+输入输出形状"。
+**第 2 步：bn1 — 冻结批归一化**
 
-##### 第 1 步：conv1 + BN + ReLU + maxpool
-
-这里的 conv1 = `nn.Conv2d`，是网络第 1 个卷积层。
-
-```
-输入: (1, 3, 360, 640)
-权重: W = Tensor(64, 3, 7, 7)  ← 64 个 7×7×3 的滤波器
-偏置: 无（ResNet 的 conv 默认 bias=False，因为后面紧跟 BN 会吸收偏置）
-操作: 滑动窗口卷积，stride=2, padding=3
-计算: 对输出的每个位置 (o_y, o_x)，每个输出通道 k：
-      y[k, o_y, o_x] = Σ_{c=0..2} Σ_{i=0..6} Σ_{j=0..6}
-                        W[k,c,i,j] · x[c, 2·o_y+i-3, 2·o_x+j-3]
-      一共 3×7×7 = 147 次乘加，得到 1 个数
-输出: (1, 64, 180, 320)    ← 空间 ÷2（stride=2），通道 3→64
-```
-
-- **BN（Batch Normalization，批归一化）**：对每个通道做 $y = \gamma\cdot\frac{x-\mu}{\sqrt{\sigma^2+\epsilon}} + \beta$，推理时 $\mu,\sigma,\gamma,\beta$ 全是固定值。
-  卷积输出的数值分布可能很乱（各通道均值、方差差异大），BN 把每个通道"拉回"均值≈0、方差≈1，再用可学习的 γ/β 缩放偏移。
-  `μ, σ` 是训练时统计的通道均值/标准差（推理时固定），`γ, β` 是学到的缩放和偏移，`ε=1e-5` 防止除零。
-  效果：**形状不变**，仍是 `(1, 64, 180, 320)`，但数值分布更稳定，梯度不会爆炸/消失。
-
-- **ReLU（Rectified Linear Unit）**：$y = \max(0, x)$，逐元素操作，**负数全部清零，正数原样保留**。
-  作用：给网络引入非线性——否则多层卷积叠加等价于一层线性变换，没有表达能力。形状不变。
-
-- **maxpool (3×3, stride=2)**：将特征图切成若干 3×3 窗口（步长 2），每个窗口 9 个数只保留最大的 1 个，其余 8 个全丢掉。
-  举例：假设某通道一块 4×4 区域：
-  ```
-  1  3  2  0
-  5  6  1  4
-  3  2  8  7
-  0  1  4  2
-  ```
-  3×3 窗口盖左上角 9 个数 → max = 8；窗口右移 2 格再取 max → 本质就是"粗化"。
-  每个输出位置代表"这片 3×3 区域里哪个特征响应最强"。stride=2 使空间再 ÷2，输出 `(1, 64, 90, 160)`。
-
-```
-BN/ReLU 后: (1, 64, 180, 320)
-maxpool 后: (1, 64, 90, 160)
-```
-
-**直观理解**：conv1 用大卷积核"一眼看 7×7 的区域"提取底层特征（边缘、颜色块），然后 maxpool 保留最显著的响应，把分辨率快速降下来，节省后续计算量。
-
-##### 为什么卷积后空间变小、通道变多
-
-两件事是分开的——**空间变小是 stride 造成的，通道变多是滤波器数量决定的**。
-
-**（a）空间变小：因为 stride**
-
-stride 是滑动窗口每次移动几格。stride=1 每次挪 1 格，输出和输入差不多大；stride=2 每次挪 2 格，**输出尺寸 ≈ 输入的一半**。
-
-公式：`H_out ≈ ⌊H_in / stride⌋`。
-
-- conv1 stride=2：360×640 → 180×320
-- maxpool stride=2：180×320 → 90×160
-- layer2/3/4 首个 block stride=2：每次再 ÷2
-
-**为什么要主动缩**：原图 360×640 = 230400 个像素 token 太多，attention 算不动；缩到 12×20 = 240 个位置才塞得进 Transformer。
-
-**（b）通道变多：因为滤波器数量**
-
-`Conv2d(in_channels=3, out_channels=64, ...)` 意思是"准备 **64 个独立的 (3,7,7) 滤波器**"。
-
-```
-输入 (1, 3, 360, 640)        ← 3 通道：R, G, B
-   ↓ 64 个滤波器分别扫一遍
-滤波器 1 (3,7,7) → 响应图 (180, 320)    ← 比如"竖直边缘"检测
-滤波器 2 (3,7,7) → 响应图 (180, 320)    ← 比如"横向边缘"检测
-滤波器 3 (3,7,7) → 响应图 (180, 320)    ← 比如"红色斑点"检测
-...
-滤波器 64         → 响应图 (180, 320)
-   ↓ 64 张响应图堆起来
-输出 (1, 64, 180, 320)      ← 64 通道
-```
-
-每个滤波器独立扫一遍、汇总 R/G/B 三层后输出 1 张图；**输出通道数 = 滤波器数量 = 你想"检测几种不同特征"**。
-
-**（c）ResNet 为什么设计成"空间÷2 同时通道×2"**
-
-```
-layer2 之前: (1,  64, 90, 160)    总信息 = 64×90×160 = 921600
-layer2 之后: (1, 128, 45,  80)    总信息 = 128×45×80 = 460800
-```
-
-每过一个 stage，空间像素数 ÷4，通道数 ×2，**总量减半**——空间分辨率换语义抽象度：层数越深，每个位置"看到"的原图区域越大，需要更多通道描述更复杂语义。
-
-**直观比喻**：浅层是"高分辨率、少种类"的描述（"这个像素是红的"），深层变成"低分辨率、多种类"的描述（"这个 32×32 区域里有握把、有金属反光、是侧面视角……"——每个位置 512 维就是 512 种语义判断）。
-
-**回到 conv1 具体数字**：
-
-```
-输入  (1,   3, 360, 640)
-        ↓ 64 个 (3,7,7) 滤波器，stride=2
-输出  (1,  64, 180, 320)
-       ↑   ↑    ↑    ↑
-       B  C_out 由 stride=2 决定（÷2）
-           ↑
-           由"64 个滤波器"决定
-```
-
-- **通道 3→64**：3 个 RGB 通道被 64 个滤波器各扫一遍，每个滤波器输出 1 张图 → 64 张图堆成 64 通道
-- **空间 360/640→180/320**：stride=2 让窗口跳着滑 → 尺寸 ÷2
-
-##### 第 2 步：layer1 / layer2 / layer3 / layer4（4 个 stage）
-
-每个 stage 是 `nn.Sequential(BasicBlock, BasicBlock)`，四层做的都是一样的运算：**3×3 Conv2d × 2 + 残差捷径**。区别只在通道数和 stride：
-
-```
-layer1: (1,  64, 90, 160) → (1,  64, 90, 160)   stride=1，不变
-layer2: (1,  64, 90, 160) → (1, 128, 45,  80)   stride=2，通道×2 空间÷2
-layer3: (1, 128, 45,  80) → (1, 256, 23,  40)   stride=2，通道×2 空间÷2
-layer4: (1, 256, 23,  40) → (1, 512, 12,  20)   stride=2，通道×2 空间÷2
-```
-
-**BasicBlock**：和上面 conv1 后面的一样，都是 Conv2d + BN + ReLU 的组合，只不过 kernel 从 7×7 变成 3×3。
-
-```
-主路径:  Conv2d(3×3) → BN（逐通道归一化）→ ReLU（负数清零）→ Conv2d(3×3) → BN
-捷径:    形状不变直接传 x，形状变了用 1×1 Conv 对齐
-输出:    ReLU(主路径 + 捷径)
-```
-
-layer4 输出 `(1, 512, 12, 20)` 就是最终 `feature_map`。下采样总因子 = 2^5 = 32（conv1×2 + maxpool×2 + layer2/3/4 各×2），所以 360×640 → 12×20 = 240 个空间位置。每个位置的 512 维向量 = "原图 32×32 区域对 512 个检测器的响应强度"，检测器来自 ImageNet 预训练。
-
-##### FrozenBatchNorm2d
-
-ACT 把 ResNet18 里的 BatchNorm 全部替换成 `FrozenBatchNorm2d`（[modeling_act.py:708](../../lerobot/src/lerobot/policies/act/modeling_act.py#L708)）——不更新 running statistics，等价于固定的仿射变换：
+ACT 把 ResNet 所有 BN 替换成 `FrozenBatchNorm2d`（推理时 running_mean/var 不更新，等价固定仿射变换）。
 
 $$
-y = \gamma\cdot \frac{x-\mu_{BN}}{\sqrt{\sigma^2_{BN}+\epsilon}} + \beta
+y_c = \gamma_c \cdot \frac{x_c - \mu_c}{\sqrt{\sigma_c^2 + \varepsilon}} + \beta_c, \quad \varepsilon = 10^{-5}
 $$
 
-推理时这能被编译器 fuse 进前面的 conv，更快。
+实际计算（合并成一次乘加，源码 `misc.py:54-63`）：
 
-##### 计算量
+$$
+\text{scale}_c = \frac{\gamma_c}{\sqrt{\sigma_c^2 + \varepsilon}}, \quad \text{bias}_c = \beta_c - \mu_c \cdot \text{scale}_c, \quad y_c = x_c \cdot \text{scale}_c + \text{bias}_c
+$$
 
-ResNet18 对 360×640 输入约 12 GFLOPs，两路摄像头共约 **24 GFLOPs**，是整个推理最贵的部分。
+形状不变 `(1, 64, 180, 320)`，逐通道拉回 ≈N(0,1)，数值稳定。推理时可 fuse 进前面 conv 加速。
 
----
+**第 3 步：relu**
+
+$$
+y = \max(0, x)
+$$
+
+逐元素，负数清零引入非线性（否则多层卷积叠加等价一层线性变换）。形状不变。
+
+**第 4 步：maxpool**
+
+`nn.MaxPool2d(kernel_size=3, stride=2, padding=1)`：3×3 窗口取最大值，stride=2 空间÷2。
+
+$$
+y[m, n] = \max_{i,j \in \{0,1,2\}} x[2m+i, 2n+j]
+$$
+
+```
+(1, 64, 180, 320) → (1, 64, 90, 160)
+```
+
+每个输出像素代表"这片 3×3 区域里特征响应最强的值"。
+
+**第 5 步：layer1~layer4 — 4 个残差 stage**
+
+每个 stage = `nn.Sequential(BasicBlock × 2)`，四层结构相同，区别只在通道数和 stride：
+
+| stage   | 输入形状            | 输出形状            | stride | 通道变化  |
+| ------- | ------------------- | ------------------- | ------ | --------- |
+| layer1  | (1, 64, 90, 160)    | (1, 64, 90, 160)    | 1      | 64→64     |
+| layer2  | (1, 64, 90, 160)    | (1, 128, 45, 80)    | 2      | 64→128    |
+| layer3  | (1, 128, 45, 80)    | (1, 256, 23, 40)    | 2      | 128→256   |
+| layer4  | (1, 256, 23, 40)    | (1, 512, 12, 20)    | 2      | 256→512   |
+
+每个 **BasicBlock** 的计算（`resnet.py:59-105`）：
+
+$$
+\text{out} = \text{Conv2d}_{3\times3}(x) \to \text{BN} \to \text{ReLU} \to \text{Conv2d}_{3\times3} \to \text{BN}
+$$
+
+$$
+\text{output} = \text{ReLU}(\text{out} + \text{shortcut}(x))
+$$
+
+其中 $\text{shortcut}(x)$：
+- 如果输入输出形状相同（layer1 的两个 block、每个 stage 的第 2 个 block）：$\text{shortcut}(x) = x$（直传）
+- 如果形状变了（每个 stage 的第 1 个 block，stride=2 或通道翻倍）：
+
+$$
+\text{shortcut}(x) = \text{BN}(\text{Conv2d}_{1\times1}(x))
+$$
+
+用 1×1 卷积对齐通道数，stride 对齐空间尺寸。
+
+残差连接 $\text{out} + \text{shortcut}(x)$ 的意义：让网络学习的是"残差"（当前层比恒等映射好多少），而不是从头学习完整映射。缓解深层网络梯度消失，使训练更稳定。
+
+**输出**：layer4 输出 `(1, 512, 12, 20)` 就是 `feature_map`。
+
+总下采样因子 $= 2^5 = 32$（conv1 stride=2 + maxpool stride=2 + layer2/3/4 各 stride=2），所以 $360/32 \approx 12$，$640/32 = 20$。每个空间位置对应原图 $32 \times 32$ 区域，512 维 = 512 个 ImageNet 预训练检测器的响应强度。
+
+**计算量**：ResNet18 对 360×640 约 12 GFLOPs，两路摄像头共约 **24 GFLOPs**，占整个推理 >50%。
+
 
 #### 4.4.2 ② 生成 2D 正弦位置编码：给每个空间位置打"坐标"
 

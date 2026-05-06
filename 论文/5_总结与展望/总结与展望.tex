@@ -1,0 +1,24 @@
+\subsection{主要工作总结}
+\begin{enumerate}[leftmargin=2em]
+  \item 建立了覆盖 AI 框架到内核的四层性能分析模型；
+  \item 通过 Python 日志 + ftrace + torch.profiler 多工具联合，端到端量化了各阶段开销；
+  \item 揭示 ACT 推理（2000--4000 ms）为主瓶颈，系统调用 overhead 可忽略；
+  \item 推导了异步推理流水线不 stall 的数学条件，指出当前参数配置的局限性；
+  \item 系统梳理了各优化路径的可行性与成本收益；
+  \item 对感知、推理、执行三阶段进行了从 Python 到 kernel 的全链路 CallStack 源码分析；
+  \item 调研了各阶段异步化可行性，论证了舵机异步读/写的不可行性及其原因。
+\end{enumerate}
+
+\subsection{研究局限性}
+\begin{itemize}[leftmargin=2em]
+  \item 仅在 SO101 单臂场景下测试，未覆盖双臂或移动机器人；
+  \item 未实施量化等优化方案并验证，结论停留在分析层面；
+  \item 无 GPU 对比基线，难以量化 CPU 推理与加速器的差距。
+\end{itemize}
+
+\subsection{未来工作}
+\begin{itemize}[leftmargin=2em]
+  \item INT8 量化 + ONNX Runtime 实验，验证推理加速收益；
+  \item 扩展至多任务场景（更多抓取类别）与多机器人平台；
+  \item 探索面向机器人负载特征的实时操作系统设计。
+\end{itemize}
