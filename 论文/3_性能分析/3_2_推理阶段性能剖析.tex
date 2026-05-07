@@ -31,51 +31,7 @@ LeRobot 在 \texttt{predict\_action()} 外层先检查策略对象的动作队�
 
 \begin{figure}[htbp]
   \centering
-  \begin{tikzpicture}[
-    >=Stealth,
-    node distance=0.7cm,
-    box/.style={rectangle, draw=blue!60, fill=blue!7, rounded corners=2pt,
-      minimum width=2.18cm, minimum height=0.70cm, align=center, font=\scriptsize},
-    fast/.style={rectangle, draw=green!55!black, fill=green!8, rounded corners=2pt,
-      minimum width=2.18cm, minimum height=0.70cm, align=center, font=\scriptsize},
-    full/.style={rectangle, draw=orange!75, fill=orange!9, rounded corners=2pt,
-      minimum width=2.18cm, minimum height=0.70cm, align=center, font=\scriptsize},
-    note/.style={font=\scriptsize, text=gray!75, fill=white, inner sep=0.8pt}
-  ]
-    \node[box] (entry) at (0,0) {\texttt{predict\_action()}};
-    \node[box] (check) at (2.55,0) {检查\\\texttt{\_action\_queue}};
-
-    \node[fast] (pop) at (5.00,1.35) {\texttt{popleft()}\\缓存动作};
-    \node[fast] (postfast) at (7.50,1.35) {\texttt{postprocessor}\\反归一化};
-    \node[fast] (retfast) at (10.00,1.35) {返回\\当前动作};
-
-    \node[full] (obs) at (5.00,-1.20) {numpy obs\\图像 / state};
-    \node[full] (prep) at (7.50,-1.20) {tensor 化\\\texttt{preprocessor}};
-    \node[full] (select) at (10.00,-1.20) {\texttt{policy}\\\texttt{select\_action()}};
-    \node[full] (forward) at (10.00,-2.60) {action chunk\\\texttt{ACT.forward()}};
-    \node[full] (queue) at (7.50,-2.60) {写入 100 帧队列\\弹出第 0 帧};
-    \node[full] (postfull) at (5.00,-2.60) {\texttt{postprocessor}\\返回动作};
-
-    \draw[->, thick, blue!65] (entry) -- (check);
-    \draw[->, thick, green!55!black, rounded corners=6pt]
-      (check.north) -- ++(0,1.65)
-      -- ++(2.45,0)
-      -- (pop.north);
-    \node[note, text=green!45!black] at (3.75,2.17) {队列非空};
-    \draw[->, thick, green!55!black] (pop) -- (postfast);
-    \draw[->, thick, green!55!black] (postfast) -- (retfast);
-
-    \draw[->, thick, orange!80, rounded corners=6pt]
-      (check.south) -- ++(0,-0.28)
-      -- ++(2.45,0)
-      -- (obs.north);
-    \node[note, text=orange!85!black] at (3.75,-0.86) {队列为空};
-    \draw[->, thick, orange!80] (obs) -- (prep);
-    \draw[->, thick, orange!80] (prep) -- (select);
-    \draw[->, thick, orange!80] (select) -- (forward);
-    \draw[->, thick, orange!80] (forward) -- (queue);
-    \draw[->, thick, orange!80] (queue) -- (postfull);
-  \end{tikzpicture}
+  \includegraphics[width=\textwidth]{3_性能分析/image/act_select_action_queue.png}
   \caption{ACT 在线推理中动作队列快速路径与完整推理路径}
   \label{fig:act-select-action-queue}
 \end{figure}
@@ -100,51 +56,7 @@ mean/std 对图像、state 进行归一化。进入 \texttt{ACT.forward()}
 
 \begin{figure}[htbp]
   \centering
-  \begin{tikzpicture}[
-    >=Stealth,
-    box/.style={rectangle, draw=blue!60, fill=blue!7, rounded corners=2pt,
-      minimum width=2.25cm, minimum height=0.70cm, align=center, font=\scriptsize},
-    prep/.style={rectangle, draw=orange!75, fill=orange!9, rounded corners=2pt,
-      minimum width=2.25cm, minimum height=0.70cm, align=center, font=\scriptsize},
-    model/.style={rectangle, draw=cyan!60!black, fill=cyan!8, rounded corners=2pt,
-      minimum width=2.25cm, minimum height=0.70cm, align=center, font=\scriptsize},
-    outbox/.style={rectangle, draw=green!55!black, fill=green!8, rounded corners=2pt,
-      minimum width=2.25cm, minimum height=0.70cm, align=center, font=\scriptsize},
-    note/.style={font=\scriptsize, text=gray!75, fill=white, inner sep=0.8pt}
-  ]
-    \node[box] (obs) at (0.0,3.05) {observation\\2 图像 + state};
-    \node[prep] (tensor) at (2.55,3.05) {输入整理\\HWC $\to$ CHW};
-    \node[prep] (norm) at (5.10,3.05) {mean/std\\归一化};
-
-    \node[model] (resnet) at (1.25,1.45) {两路 ResNet18\\layer4 特征};
-    \node[model] (visproj) at (4.00,1.45) {2D 位置编码\\+ 1$\times$1 投影};
-    \node[model] (state) at (1.25,0.20) {state 投影\\latent=0};
-    \node[model] (tokens) at (4.00,0.20) {拼接 482 tokens\\每个 512 维};
-    \node[model] (encoder) at (6.60,0.20) {Transformer\\Encoder $\times$4};
-    \node[model] (decoder) at (9.20,0.20) {Decoder $\times$1\\100 queries};
-
-    \node[outbox] (head) at (9.20,-1.05) {action head\\$(1,100,6)$};
-    \node[outbox] (queue) at (6.60,-1.05) {写入队列\\逐帧弹出};
-    \node[outbox] (post) at (4.00,-1.05) {\texttt{postprocessor}\\反归一化};
-    \node[outbox] (robot) at (1.25,-1.05) {舵机目标\\$(6,)$};
-
-    \draw[->, thick, blue!65] (obs) -- (tensor);
-    \draw[->, thick, orange!80] (tensor) -- (norm);
-    \draw[->, thick, orange!80, rounded corners=6pt]
-      (norm.south) -- ++(0,-0.45) -| (resnet.north);
-    \draw[->, thick, orange!80, rounded corners=6pt]
-      (norm.south) -- ++(0,-0.45) -| (state.north);
-
-    \draw[->, thick, cyan!65!black] (resnet) -- (visproj);
-    \draw[->, thick, cyan!65!black] (visproj) -- (tokens);
-    \draw[->, thick, cyan!65!black] (state) -- (tokens);
-    \draw[->, thick, cyan!65!black] (tokens) -- (encoder);
-    \draw[->, thick, cyan!65!black] (encoder) -- (decoder);
-    \draw[->, thick, cyan!65!black] (decoder) -- (head);
-    \draw[->, thick, green!55!black] (head) -- (queue);
-    \draw[->, thick, green!55!black] (queue) -- (post);
-    \draw[->, thick, green!55!black] (post) -- (robot);
-  \end{tikzpicture}
+  \includegraphics[width=\textwidth]{3_性能分析/image/act_forward_dataflow.png}
   \caption{队列为空时一次完整 ACT 推理的数据流与模型结构}
   \label{fig:act-forward-dataflow}
 \end{figure}
@@ -159,128 +71,108 @@ Decoder 使用 100 个可学习 query，最终通过线性层输出
 
 \subsubsection{时间剖析：\texttt{chunk\_size} 参数扫描}
 
-\begin{center}
-\begin{tabular}{rrrr}
-  \toprule
-  \texttt{chunk\_size} & FPS & inference\_pct & wait\_pct \\
-  \midrule
-  1   & 0.8  & 99.7\% & $\approx$0\% \\
-  10  & 5.7  & 85\%   & 13\% \\
-  50  & 15.1 & 48\%   & 36\% \\
-  100 & 18.5 & 37\%   & 42\% \\
-  \bottomrule
-\end{tabular}
-\end{center}
+实验 01 在树莓派 5 上对同一 ACT 抓取瓶子策略扫描 \texttt{chunk\_size}，
+取值覆盖 $\{1, 3, 5, 10, 20, 50, 100\}$，每个取值固定记录 20 个 episode，
+其它参数（模型权重、分辨率、目标 fps）保持一致。
+原始数据与绘图脚本保存在 \src{实验 01：chunk\_size 参数扫描}。
+后文先看四个阶段的时间占比如何随 \texttt{chunk\_size} 变化，
+再单独看 FPS 的增长曲线，最后用代表性数值表汇总。
 
-FPS 与 \texttt{chunk\_size} 呈非线性关系：
-\texttt{chunk\_size} 从 1 到 10 时增益巨大（0.8$\to$6），
-从 50 到 100 时增益趋缓（15$\to$19），符合边际递减规律。
-单次完整 ACT 推理的绝对耗时接近恒定（$\approx$1--1.5 s/次），
-分块机制只是把这一次重推理分摊到更多控制帧上，而不是降低
-\texttt{ACT.forward()} 本身的计算量。
+\paragraph{阶段时间占比随 \texttt{chunk\_size} 的演化}
+图~\ref{fig:chunk-size-time-pct} 给出了 obs/inference/action/wait 四阶段
+平均占比（20 episode 均值）随 \texttt{chunk\_size} 的变化曲线。
+\texttt{inference\_pct} 从 cs=1 时的 97.6\% 单调下降到 cs=100 时的 36.5\%，
+对应 \texttt{wait\_pct} 从 0\% 单调上升到 43.3\%；
+\texttt{obs\_pct} 从近 0\% 缓慢增长到 15.4\%，
+\texttt{action\_pct} 始终保持在 5\% 以内。
+这条主曲线说明 \texttt{chunk\_size} 越大，
+单帧分摊到的推理工作量就越小，控制循环把更多预算还给 \texttt{wait}
+（即在帧内等待 fps 节拍），推理不再压满整个 33.3 ms 时间预算。
+观测和执行阶段的占比上升只是相对结果——
+其绝对耗时基本恒定，只是因为 inference 缩短才在比例上变得显眼。
 
-\subsubsection{三类任务推理时间对比}
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{../实验/01_chunk_size参数扫描/chart1_time_pct.png}
+  \caption{\texttt{chunk\_size} 对控制循环阶段时间占比的影响}
+  \label{fig:chunk-size-time-pct}
+\end{figure}
 
-在统一 \texttt{chunk\_size=100}、统一 episode 时长（$\approx$30 s）
-的条件下，三类任务（抓取/推倒/分类）各采集 $n=20$ 个 episode，
-仅看时间占比百分比以屏蔽 episode 总时长的干扰：
+\paragraph{FPS 随 \texttt{chunk\_size} 的非线性增益}
+图~\ref{fig:chunk-size-fps} 给出了实测平均 FPS 随 \texttt{chunk\_size} 的变化曲线。
+FPS 从 cs=1 的 0.8 上升到 cs=100 的 18.7，但增长曲线高度非线性：
+cs=1$\to$10 时 FPS 提升约 6.6 倍（0.8$\to$5.3），cs=10$\to$50 时再提升约 2.9 倍，
+而 cs=50$\to$100 时增益仅约 1.2 倍（15.4$\to$18.7），呈现典型的边际递减。
+原因是单次完整 ACT 推理的绝对耗时接近恒定（$\approx$1--1.5\,s/次），
+分块机制只是把这一次重推理在时间上摊薄到更多控制帧上，
+而不是降低 \texttt{ACT.forward()} 本身的计算量；
+当 cs 增大到推理被摊薄到接近 fps 目标时，
+等待阶段就成为主循环新的瓶颈，进一步增大 cs 不再带来等比增益。
 
-\begin{center}
-\begin{tabular}{lrrr}
-  \toprule
-  任务 & inference\_pct & wait\_pct & action\_pct \\
-  \midrule
-  抓取（pick）           & 36.5\% $\pm$ 2.5\% & 43.3\% $\pm$ 2.3\% & 4.8\% $\pm$ 0.3\% \\
-  推倒（push）           & 34.9\% $\pm$ 1.2\% & \textbf{45.2\%} $\pm$ 2.0\% & 4.4\% $\pm$ 0.3\% \\
-  分类（classification） & 35.9\% $\pm$ 2.0\% & 42.9\% $\pm$ 2.2\% & 4.4\% $\pm$ 0.3\% \\
-  \bottomrule
-\end{tabular}
-\end{center}
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.92\textwidth]{../实验/01_chunk_size参数扫描/chart2_fps.png}
+  \caption{\texttt{chunk\_size} 对控制循环 FPS 的影响}
+  \label{fig:chunk-size-fps}
+\end{figure}
 
-\textbf{核心结论}：
-\begin{itemize}[leftmargin=2em]
-  \item \textbf{推理占比三者趋同（34.9\%--36.5\%，差距 $<$ 2pp）}：
-        在 \texttt{chunk\_size} 一致、模型结构一致时，
-        单次推理时延与场景视觉复杂度无关，
-        验证了“ACT 推理延迟由模型结构决定”的假设。
-  \item \textbf{推倒任务 wait 占比最高（45.2\%）}：
-        因推/压动作行程更大、执行时间更长，系统空等比例上升，
-        瓶颈出现在执行侧而非推理侧；优化方向为减小
-        \texttt{chunk\_size}（如 50）以缩短每次 chunk 等待时长。
-  \item 早期初步实验中分类任务 inference\_pct 偏高（39.6\%）的现象，
-        被定位为 \textbf{60 s 长 episode 导致树莓派 CPU 热降频}，
-        在统一为 30 s 后该差异消失，与模型本身负载无关。
-\end{itemize}
 
-\src{实验数据/02\_三类任务工作负载对比/cs100\_task\_comparison.md}
+cs=100 在树莓派 5 上能跑到 $\approx$18.7 fps，距 30 fps 目标仍有约 38\% 缺口；
+而此时 \texttt{wait\_pct} 已升至 43.3\%，
+说明继续增大 cs 已经不能进一步把 fps 推到 30——
+要逼近目标必须从减小单次推理绝对耗时入手，
+也就是后文（第~\ref{ch:opt} 章）讨论的优化方向。
 
-\subsubsection{单次 ACT 推理耗时分解实验设计}
+\subsubsection{单次 ACT 推理耗时分解}\label{sec:act-infer-breakdown}
 
 上面的 episode 级统计能够说明 \texttt{chunk\_size} 如何分摊推理开销，
-但还不能回答“一次完整 ACT 推理内部究竟慢在哪里”。
-因此需要单独设计一个离线 replay 实验，量化队列为空时一次完整
-\texttt{predict\_action()} 的耗时分布。
-实验固定使用树莓派 5、CPU 推理、两路 \(640\times360\) 相机观测、
-\texttt{chunk\_size=n\_action\_steps=100}、\(B=1\)，并固定同一个
-ACT checkpoint。为了避免真实机器人执行、相机等待和 episode 调度污染数据，
-实验使用单帧 observation replay：先从真实运行中保存一帧代表性 observation，
-随后在离线脚本中重复调用推理路径。
+但还不能回答”一次完整 ACT 推理内部究竟慢在哪里”。
+实验在 \texttt{modeling\_act.py} 的 \texttt{select\_action()} 和 \texttt{ACT.forward()} 内
+插入计时点，通过环境变量 \texttt{LEROBOT\_PROFILING=1} 启用，数据直接写入 CSV。
+在树莓派 5 上记录了 6 次队列为空的完整推理，结果汇总于表~\ref{tab:act-single-infer-profile}。
 
-实验流程为：预热 5 次完整推理，正式记录至少 50 次队列为空的完整推理；
-同时单独记录 50 次队列非空快速路径，作为“只取缓存动作”的对照。
-完整路径的计时边界按下表固定：
-
-\begin{center}
+\begin{table}[htbp]
+\centering
 \small
-\begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}p{0.22\textwidth}
-  >{\raggedright\arraybackslash}p{0.28\textwidth}
-  >{\raggedright\arraybackslash}p{0.18\textwidth}
-  >{\raggedright\arraybackslash}X}
+\begin{tabular}{lrrr}
   \toprule
-  模块 & 计时边界 & 输出指标 & 说明 \\
+  模块 & 平均耗时 ms & 标准差 ms & 占完整推理比例 \\
   \midrule
-  输入整理 &
-  numpy $\to$ Tensor，图像 \texttt{uint8}/255，HWC $\to$ CHW，batch 维 &
-  平均 ms / 标准差 / 占比 &
-  对应 \texttt{predict\_action()} 中进入 \texttt{preprocessor} 之前的循环 \\
-  \texttt{preprocessor} &
-  state 和 image 的 mean/std 归一化 &
-  平均 ms / 标准差 / 占比 &
-  归一化统计量来自 checkpoint，而不是 ImageNet 固定常量 \\
-  \texttt{ACT.forward} &
-  \texttt{predict\_action\_chunk()} 到模型输出 \((1,100,6)\) &
-  平均 ms / 标准差 / 占比 &
-  进一步拆分 ResNet18、视觉 token 构造、Encoder、Decoder、action head \\
-  队列与后处理 &
-  \texttt{\_action\_queue.extend/popleft}、\texttt{postprocessor}、\texttt{squeeze/to("cpu")} &
-  平均 ms / 标准差 / 占比 &
-  与队列非空快速路径对照，验证缓存动作帧的开销接近后处理本身 \\
+  \texttt{select\_action} 完整路径 & 1924.8 & 414.9 & 100.0\% \\
+  \quad ResNet18 + 投影 & 1281.1 & 259.9 & 66.6\% \\
+  \quad Transformer Encoder & 569.5 & 506.3 & 29.6\% \\
+  \quad Transformer Decoder & 44.0 & 4.4 & 2.3\% \\
+  \quad action\_head & 0.7 & 0.8 & $<$0.1\% \\
+  队列非空快速路径（对照） & $<$1 ms & — & — \\
   \bottomrule
-\end{tabularx}
-\end{center}
+\end{tabular}
+\caption{ACT 单次完整推理（队列为空时）的逐模块耗时分解}
+\label{tab:act-single-infer-profile}
+\end{table}
 
-预期结果表固定为“模块、平均耗时 ms、标准差、占完整推理比例、说明”。
-若需要更细的算子级解释，可在 \texttt{ACT.forward} 内使用
-\texttt{torch.profiler} 或手动 \texttt{perf\_counter} 标记：
-两路 ResNet18 特征提取、2D 位置编码与 1$\times$1 投影、
-Transformer Encoder、Transformer Decoder 和 \texttt{action\_head}。
-论文正文只报告模块级比例，完整 profiler 结果保存在实验目录中。
+图~\ref{fig:act-infer-breakdown} 给出了各模块的耗时柱状图。
 
-\subsubsection{PyTorch 线程行为}
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{3_性能分析/image/inference_breakdown.png}
+  \caption{ACT 推理管线逐模块耗时分解}
+  \label{fig:act-infer-breakdown}
+\end{figure}
 
-\begin{itemize}[leftmargin=2em]
-  \item futex 调用：\textbf{64,569 次 / 40 s episode}，
-        总等待时间 3,252 s（27 线程并行累计）；
-  \item op=0（FUTEX\_WAIT）占多数，op=9（FUTEX\_WAIT\_BITSET）
-        用于 ATen 线程池；
-  \item ARM Cortex-A76 使用 OpenMP 并行，NEON SIMD 加速 GEMM，
-        但计算量仍是瓶颈。
-\end{itemize}
+\textbf{关键发现}：ResNet18 视觉特征提取（两路 ResNet18 backbone + 位置编码 + 1×1 投影）
+占据完整推理时间的 \textbf{66.6\%}（平均 1281 ms），是第一瓶颈。
+Transformer Encoder 次之，占 29.6\%（569 ms）。
+Decoder 和 action\_head 占比极低（2.3\% 和 $<$0.1\%），
+不是优化重点。
+队列非空快速路径耗时不足 1 ms，与后处理相当，
+验证了动作缓存机制的有效性。
 
-\textbf{关键性能结论}：推理瓶颈在用户态 PyTorch/ATen 计算，
-尤其是 ResNet18 卷积和 Transformer 中的矩阵乘法。
-\texttt{futex} 系统调用本身开销极低（$<$1 $\mu$s），
-但 OpenMP 线程池内 27 线程并行累计等待时间达 3,252 s，
-说明多线程同步竞争在 ARM CPU 上不可忽略。
+\subsubsection{PyTorch 线程行为与推理优化研究现状}\label{sec:thread-behavior}
 
-\src{ACT推理.md，futex最终结果.md}
+PyTorch 在 ARM CPU 上使用 OpenMP 并行框架，通过 ATen 线程池调度矩阵运算。
+系统调用追踪显示 futex 调用共计 64,569 次 / 40 s episode，
+其中 27 线程并行累计等待时间达 3,252 s，
+说明多线程同步开销在 ARM CPU 上不可忽略。
+
+推理优化方向（如 INT8 量化、算子融合、线程亲和性、NEON SIMD 加速等）
+已有大量文献研究，此处不再展开。

@@ -250,6 +250,42 @@ C 与 D 两组的所有阶段漂移都在 $\pm 8$ pp 内，
 （823\,MB vs 168\,MB），但量级仍可承受。
 strace 不参与最终定量分析，仅用于第~\ref{ch:perf} 章早期对系统调用类型分布的定性探索。
 
+\paragraph{内核源码级插桩}
+
+除上述标准 syscall tracepoint 外，本文还在内核源码中通过
+\texttt{trace\_printk} 插入了自定义计时桩，将更精细的时间拆分信息
+直接写入 ftrace ring buffer，与标准 tracepoint 事件混合输出。
+标准 tracepoint 只记录系统调用入口参数和出口返回值，
+无法拆分调用内部的阻塞睡眠时间与 CPU 处理时间，
+也无法将文件描述符解析为设备名。
+
+本文在两处关键路径上实现了自定义插桩：
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{pselect6}（\texttt{fs/select.c}，\texttt{do\_select()} 函数）：
+    在函数入口通过 \texttt{ktime\_get()} 记录起始时间，
+    在 \texttt{poll\_schedule\_timeout()} 前后打点计算阻塞睡眠时间，
+    函数退出时输出总耗时、睡眠时间、上下文处理时间、返回值、
+    就绪 fd 编号及通过 \texttt{d\_path()} 解析的设备名。
+    例如，trace 中可直接观察到
+    ``\texttt{fd=8, file=video0}'' 表示手眼摄像头帧就绪，
+    ``\texttt{fd=9, file=video2}'' 表示固定摄像头帧就绪，
+    每次等待约 30\,ms，睡眠时间约占总耗时的 99.7\%。
+  \item \textbf{futex}（\texttt{kernel/futex/syscalls.c}，\texttt{do\_futex()} 函数）：
+    类似地在入口和 \texttt{futex\_wait\_multiple()} 前后打点，
+    输出操作码（op）、返回值、总耗时、CPU 时间和睡眠时间。
+    该拆分可以直接区分 futex 快速解锁（sleep$\approx$0）与长时间等待
+    （sleep 接近 total），从而判断 Python 线程间的锁竞争程度。
+    实测数据显示 WAKE 操作（op=1）耗时在微秒级，
+    而 WAIT 操作（op=0）的睡眠时间最高可达 1.8\,s。
+\end{enumerate}
+
+上述信息无法通过标准 tracepoint 或 kprobe 动态插桩获得：
+标准 tracepoint 不提供内部时间拆分；
+kprobe 回调中调用 \texttt{d\_path()} 解析 fd 路径存在死锁风险，
+而 \texttt{do\_select()} 原生上下文中调用是安全的。
+代价是需使用自编译内核，对本文固定的实验平台不构成额外负担。
+
 \src{实验/04\_实验环境与测量工具校准/结论.md，内核数据搜集分析.md}
 
 \subsection{实验硬件与软件配置}
