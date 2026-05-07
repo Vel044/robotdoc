@@ -1,11 +1,168 @@
 \subsection{推理阶段性能剖析}\label{sec:inference}
 
-\subsubsection{时间剖析：chunk\_size 参数扫描}
+本节专门分析 SO-101 在线控制循环中的 ACT 策略推理阶段。
+这里的“推理阶段”并不只是一次 \texttt{ACT.forward()}，
+而是从 \texttt{predict\_action()} 收到 observation 开始，
+经过动作缓存判断、必要时的观测预处理、ACT 模型前向、动作队列写入、
+再到动作反归一化返回的完整路径。
+
+当前实验配置中，ACT 的 \texttt{chunk\_size} 与
+\texttt{n\_action\_steps} 均为 100，单次完整模型推理输出
+\((B,\texttt{chunk\_size},\texttt{action\_dim})=(1,100,6)\) 的动作序列。
+因此在线循环的大多数帧并不会重新执行模型前向，而是直接从
+\texttt{\_action\_queue} 中取出上一次推理缓存的下一帧动作。
+这一区别是理解第~\ref{sec:inference} 节所有时间数据的前提：
+\texttt{chunk\_size} 主要是在时间上分摊单次 ACT 前向开销，
+而不是让一次 ACT 前向本身变快。
+
+\subsubsection{\texttt{select\_action} 与动作队列}
+
+LeRobot 在 \texttt{predict\_action()} 外层先检查策略对象的动作队列。
+如果 \texttt{\_action\_queue} 非空，主循环直接
+\texttt{popleft()} 取出缓存动作，再通过 \texttt{postprocessor}
+反归一化为真实舵机目标；这一帧会跳过图像 tensor 转换、
+\texttt{preprocessor} 和 \texttt{ACT.forward()}。
+只有当队列为空时，系统才会走完整推理路径：
+把 numpy observation 转为 PyTorch Tensor，执行归一化预处理，
+调用 \texttt{policy.select\_action()}，继而触发
+\texttt{predict\_action\_chunk()} 和 \texttt{ACT.forward()}。
+模型一次产生 100 帧归一化动作，写入队列后立即弹出第 0 帧返回；
+后续 99 帧由队列快速路径逐帧取用。
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[
+    >=Stealth,
+    node distance=0.7cm,
+    box/.style={rectangle, draw=blue!60, fill=blue!7, rounded corners=2pt,
+      minimum width=2.18cm, minimum height=0.70cm, align=center, font=\scriptsize},
+    fast/.style={rectangle, draw=green!55!black, fill=green!8, rounded corners=2pt,
+      minimum width=2.18cm, minimum height=0.70cm, align=center, font=\scriptsize},
+    full/.style={rectangle, draw=orange!75, fill=orange!9, rounded corners=2pt,
+      minimum width=2.18cm, minimum height=0.70cm, align=center, font=\scriptsize},
+    note/.style={font=\scriptsize, text=gray!75, fill=white, inner sep=0.8pt}
+  ]
+    \node[box] (entry) at (0,0) {\texttt{predict\_action()}};
+    \node[box] (check) at (2.55,0) {检查\\\texttt{\_action\_queue}};
+
+    \node[fast] (pop) at (5.00,1.35) {\texttt{popleft()}\\缓存动作};
+    \node[fast] (postfast) at (7.50,1.35) {\texttt{postprocessor}\\反归一化};
+    \node[fast] (retfast) at (10.00,1.35) {返回\\当前动作};
+
+    \node[full] (obs) at (5.00,-1.20) {numpy obs\\图像 / state};
+    \node[full] (prep) at (7.50,-1.20) {tensor 化\\\texttt{preprocessor}};
+    \node[full] (select) at (10.00,-1.20) {\texttt{policy}\\\texttt{select\_action()}};
+    \node[full] (forward) at (10.00,-2.60) {action chunk\\\texttt{ACT.forward()}};
+    \node[full] (queue) at (7.50,-2.60) {写入 100 帧队列\\弹出第 0 帧};
+    \node[full] (postfull) at (5.00,-2.60) {\texttt{postprocessor}\\返回动作};
+
+    \draw[->, thick, blue!65] (entry) -- (check);
+    \draw[->, thick, green!55!black, rounded corners=6pt]
+      (check.north) -- ++(0,1.65)
+      -- ++(2.45,0)
+      -- (pop.north);
+    \node[note, text=green!45!black] at (3.75,2.17) {队列非空};
+    \draw[->, thick, green!55!black] (pop) -- (postfast);
+    \draw[->, thick, green!55!black] (postfast) -- (retfast);
+
+    \draw[->, thick, orange!80, rounded corners=6pt]
+      (check.south) -- ++(0,-0.28)
+      -- ++(2.45,0)
+      -- (obs.north);
+    \node[note, text=orange!85!black] at (3.75,-0.86) {队列为空};
+    \draw[->, thick, orange!80] (obs) -- (prep);
+    \draw[->, thick, orange!80] (prep) -- (select);
+    \draw[->, thick, orange!80] (select) -- (forward);
+    \draw[->, thick, orange!80] (forward) -- (queue);
+    \draw[->, thick, orange!80] (queue) -- (postfull);
+  \end{tikzpicture}
+  \caption{ACT 在线推理中动作队列快速路径与完整推理路径}
+  \label{fig:act-select-action-queue}
+\end{figure}
+
+图~\ref{fig:act-select-action-queue} 说明了
+\texttt{chunk\_size=100} 下的两种时间尺度：
+队列非空帧只承担动作取队列和反归一化，属于轻量路径；
+队列为空帧才承担完整 ACT 前向，属于重推理路径。
+因此，按 episode 统计得到的 inference 占比，本质上是少数重推理帧
+在 100 帧执行周期内被均摊后的结果。
+
+\subsubsection{一次完整 ACT 推理的数据流}
+
+队列为空时，\texttt{predict\_action()} 会先把原始 observation
+整理成 ACT 可接受的 batch。两路相机图像从
+\((H,W,C)\) 的 \texttt{uint8} numpy 数组转换为
+\((1,3,360,640)\) 的 \texttt{float32} Tensor；
+关节状态从 \((6,)\) 转为 \((1,6)\)。
+随后 \texttt{preprocessor} 使用随 checkpoint 保存的训练集
+mean/std 对图像、state 进行归一化。进入 \texttt{ACT.forward()}
+后，推理态下不运行训练用 VAE encoder，而是使用全零 latent。
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[
+    >=Stealth,
+    box/.style={rectangle, draw=blue!60, fill=blue!7, rounded corners=2pt,
+      minimum width=2.25cm, minimum height=0.70cm, align=center, font=\scriptsize},
+    prep/.style={rectangle, draw=orange!75, fill=orange!9, rounded corners=2pt,
+      minimum width=2.25cm, minimum height=0.70cm, align=center, font=\scriptsize},
+    model/.style={rectangle, draw=cyan!60!black, fill=cyan!8, rounded corners=2pt,
+      minimum width=2.25cm, minimum height=0.70cm, align=center, font=\scriptsize},
+    outbox/.style={rectangle, draw=green!55!black, fill=green!8, rounded corners=2pt,
+      minimum width=2.25cm, minimum height=0.70cm, align=center, font=\scriptsize},
+    note/.style={font=\scriptsize, text=gray!75, fill=white, inner sep=0.8pt}
+  ]
+    \node[box] (obs) at (0.0,3.05) {observation\\2 图像 + state};
+    \node[prep] (tensor) at (2.55,3.05) {输入整理\\HWC $\to$ CHW};
+    \node[prep] (norm) at (5.10,3.05) {mean/std\\归一化};
+
+    \node[model] (resnet) at (1.25,1.45) {两路 ResNet18\\layer4 特征};
+    \node[model] (visproj) at (4.00,1.45) {2D 位置编码\\+ 1$\times$1 投影};
+    \node[model] (state) at (1.25,0.20) {state 投影\\latent=0};
+    \node[model] (tokens) at (4.00,0.20) {拼接 482 tokens\\每个 512 维};
+    \node[model] (encoder) at (6.60,0.20) {Transformer\\Encoder $\times$4};
+    \node[model] (decoder) at (9.20,0.20) {Decoder $\times$1\\100 queries};
+
+    \node[outbox] (head) at (9.20,-1.05) {action head\\$(1,100,6)$};
+    \node[outbox] (queue) at (6.60,-1.05) {写入队列\\逐帧弹出};
+    \node[outbox] (post) at (4.00,-1.05) {\texttt{postprocessor}\\反归一化};
+    \node[outbox] (robot) at (1.25,-1.05) {舵机目标\\$(6,)$};
+
+    \draw[->, thick, blue!65] (obs) -- (tensor);
+    \draw[->, thick, orange!80] (tensor) -- (norm);
+    \draw[->, thick, orange!80, rounded corners=6pt]
+      (norm.south) -- ++(0,-0.45) -| (resnet.north);
+    \draw[->, thick, orange!80, rounded corners=6pt]
+      (norm.south) -- ++(0,-0.45) -| (state.north);
+
+    \draw[->, thick, cyan!65!black] (resnet) -- (visproj);
+    \draw[->, thick, cyan!65!black] (visproj) -- (tokens);
+    \draw[->, thick, cyan!65!black] (state) -- (tokens);
+    \draw[->, thick, cyan!65!black] (tokens) -- (encoder);
+    \draw[->, thick, cyan!65!black] (encoder) -- (decoder);
+    \draw[->, thick, cyan!65!black] (decoder) -- (head);
+    \draw[->, thick, green!55!black] (head) -- (queue);
+    \draw[->, thick, green!55!black] (queue) -- (post);
+    \draw[->, thick, green!55!black] (post) -- (robot);
+  \end{tikzpicture}
+  \caption{队列为空时一次完整 ACT 推理的数据流与模型结构}
+  \label{fig:act-forward-dataflow}
+\end{figure}
+
+图~\ref{fig:act-forward-dataflow} 中，视觉分支是主要计算来源。
+每路 \(640\times360\) 图像经 ResNet18 的 \texttt{layer4}
+得到 \(512\times12\times20\) 特征图，两路相机共形成
+480 个视觉 token；再加上 1 个 state token 和 1 个全零 latent token，
+构成长度 482、维度 512 的 Transformer Encoder 输入序列。
+Decoder 使用 100 个可学习 query，最终通过线性层输出
+100 帧、每帧 6 维的归一化动作。
+
+\subsubsection{时间剖析：\texttt{chunk\_size} 参数扫描}
 
 \begin{center}
 \begin{tabular}{rrrr}
   \toprule
-  chunk\_size & FPS & inference\_pct & wait\_pct \\
+  \texttt{chunk\_size} & FPS & inference\_pct & wait\_pct \\
   \midrule
   1   & 0.8  & 99.7\% & $\approx$0\% \\
   10  & 5.7  & 85\%   & 13\% \\
@@ -15,13 +172,18 @@
 \end{tabular}
 \end{center}
 
-FPS 与 cs 呈非线性：cs 从 1$\to$10 增益巨大（0.8$\to$6），cs 从 50$\to$100 趋缓（15$\to$19），符合边际递减规律。
-推理绝对耗时接近恒定（$\approx$1--1.5 s/次），分块是"分摊"而非"减少"推理开销。
+FPS 与 \texttt{chunk\_size} 呈非线性关系：
+\texttt{chunk\_size} 从 1 到 10 时增益巨大（0.8$\to$6），
+从 50 到 100 时增益趋缓（15$\to$19），符合边际递减规律。
+单次完整 ACT 推理的绝对耗时接近恒定（$\approx$1--1.5 s/次），
+分块机制只是把这一次重推理分摊到更多控制帧上，而不是降低
+\texttt{ACT.forward()} 本身的计算量。
 
 \subsubsection{三类任务推理时间对比}
 
-在统一 cs=100、统一 episode 时长（$\approx$30 s）的条件下，三类任务（抓取/推倒/分类）
-各采集 $n=20$ 个 episode，仅看时间占比百分比以屏蔽 episode 总时长的干扰：
+在统一 \texttt{chunk\_size=100}、统一 episode 时长（$\approx$30 s）
+的条件下，三类任务（抓取/推倒/分类）各采集 $n=20$ 个 episode，
+仅看时间占比百分比以屏蔽 episode 总时长的干扰：
 
 \begin{center}
 \begin{tabular}{lrrr}
@@ -37,12 +199,14 @@ FPS 与 cs 呈非线性：cs 从 1$\to$10 增益巨大（0.8$\to$6），cs 从 5
 
 \textbf{核心结论}：
 \begin{itemize}[leftmargin=2em]
-  \item \textbf{推理占比三者趋同（34.9\%--36.5\%，差距 $<$ 2pp）}——
-        在 cs 一致、模型结构一致时，单次推理时延与场景视觉复杂度无关，
-        验证了"ACT 推理延迟由模型结构决定"的假设。
-  \item \textbf{推倒任务 wait 占比最高（45.2\%）}——
+  \item \textbf{推理占比三者趋同（34.9\%--36.5\%，差距 $<$ 2pp）}：
+        在 \texttt{chunk\_size} 一致、模型结构一致时，
+        单次推理时延与场景视觉复杂度无关，
+        验证了“ACT 推理延迟由模型结构决定”的假设。
+  \item \textbf{推倒任务 wait 占比最高（45.2\%）}：
         因推/压动作行程更大、执行时间更长，系统空等比例上升，
-        瓶颈出现在执行侧而非推理侧；优化方向为减小 cs（如 cs=50）以缩短每次 chunk 等待时长。
+        瓶颈出现在执行侧而非推理侧；优化方向为减小
+        \texttt{chunk\_size}（如 50）以缩短每次 chunk 等待时长。
   \item 早期初步实验中分类任务 inference\_pct 偏高（39.6\%）的现象，
         被定位为 \textbf{60 s 长 episode 导致树莓派 CPU 热降频}，
         在统一为 30 s 后该差异消失，与模型本身负载无关。
@@ -50,47 +214,73 @@ FPS 与 cs 呈非线性：cs 从 1$\to$10 增益巨大（0.8$\to$6），cs 从 5
 
 \src{实验数据/02\_三类任务工作负载对比/cs100\_task\_comparison.md}
 
-\subsubsection{算子级耗时分解}
-\newexp{torch.profiler op-level profiling，分解 ResNet18 / Transformer Encoder / Decoder / 前后处理占比}
+\subsubsection{单次 ACT 推理耗时分解实验设计}
+
+上面的 episode 级统计能够说明 \texttt{chunk\_size} 如何分摊推理开销，
+但还不能回答“一次完整 ACT 推理内部究竟慢在哪里”。
+因此需要单独设计一个离线 replay 实验，量化队列为空时一次完整
+\texttt{predict\_action()} 的耗时分布。
+实验固定使用树莓派 5、CPU 推理、两路 \(640\times360\) 相机观测、
+\texttt{chunk\_size=n\_action\_steps=100}、\(B=1\)，并固定同一个
+ACT checkpoint。为了避免真实机器人执行、相机等待和 episode 调度污染数据，
+实验使用单帧 observation replay：先从真实运行中保存一帧代表性 observation，
+随后在离线脚本中重复调用推理路径。
+
+实验流程为：预热 5 次完整推理，正式记录至少 50 次队列为空的完整推理；
+同时单独记录 50 次队列非空快速路径，作为“只取缓存动作”的对照。
+完整路径的计时边界按下表固定：
 
 \begin{center}
-\begin{tabular}{lcc}
+\small
+\begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}p{0.22\textwidth}
+  >{\raggedright\arraybackslash}p{0.28\textwidth}
+  >{\raggedright\arraybackslash}p{0.18\textwidth}
+  >{\raggedright\arraybackslash}X}
   \toprule
-  模块 & 耗时（ms） & 占推理比例（\%） \\
+  模块 & 计时边界 & 输出指标 & 说明 \\
   \midrule
-  ResNet18 特征提取 & \mytodo{} & \mytodo{} \\
-  CVAE Encoder（4层 Transformer） & \mytodo{} & \mytodo{} \\
-  Action Decoder（1层 Transformer） & \mytodo{} & \mytodo{} \\
-  前后处理（归一化、queue写入） & \mytodo{} & \mytodo{} \\
-  \midrule
-  合计 & \mytodo{} & 100\% \\
+  输入整理 &
+  numpy $\to$ Tensor，图像 \texttt{uint8}/255，HWC $\to$ CHW，batch 维 &
+  平均 ms / 标准差 / 占比 &
+  对应 \texttt{predict\_action()} 中进入 \texttt{preprocessor} 之前的循环 \\
+  \texttt{preprocessor} &
+  state 和 image 的 mean/std 归一化 &
+  平均 ms / 标准差 / 占比 &
+  归一化统计量来自 checkpoint，而不是 ImageNet 固定常量 \\
+  \texttt{ACT.forward} &
+  \texttt{predict\_action\_chunk()} 到模型输出 \((1,100,6)\) &
+  平均 ms / 标准差 / 占比 &
+  进一步拆分 ResNet18、视觉 token 构造、Encoder、Decoder、action head \\
+  队列与后处理 &
+  \texttt{\_action\_queue.extend/popleft}、\texttt{postprocessor}、\texttt{squeeze/to("cpu")} &
+  平均 ms / 标准差 / 占比 &
+  与队列非空快速路径对照，验证缓存动作帧的开销接近后处理本身 \\
   \bottomrule
-\end{tabular}
+\end{tabularx}
 \end{center}
 
+预期结果表固定为“模块、平均耗时 ms、标准差、占完整推理比例、说明”。
+若需要更细的算子级解释，可在 \texttt{ACT.forward} 内使用
+\texttt{torch.profiler} 或手动 \texttt{perf\_counter} 标记：
+两路 ResNet18 特征提取、2D 位置编码与 1$\times$1 投影、
+Transformer Encoder、Transformer Decoder 和 \texttt{action\_head}。
+论文正文只报告模块级比例，完整 profiler 结果保存在实验目录中。
+
 \subsubsection{PyTorch 线程行为}
-\begin{itemize}[leftmargin=2em]
-  \item futex 调用：\textbf{64,569 次 / 40 s episode}，总等待时间 3,252 s（27线程并行累计）；
-  \item op=0（FUTEX\_WAIT）占多数，op=9（FUTEX\_WAIT\_BITSET）用于 ATen 线程池；
-  \item ARM Cortex-A76 使用 OpenMP 并行，NEON SIMD 加速 GEMM，但计算量仍是瓶颈。
-\end{itemize}
-\src{futex最终结果.md，ACT推理.md}
-
-\subsubsection{ACT 推理完整调用链}
 
 \begin{itemize}[leftmargin=2em]
-  \item \textbf{Python 入口}：\texttt{select\_action()}（RecordRunner 类）
-  \item \textbf{ACT Policy}：\texttt{policy.select\_action(observation)} $\to$ \texttt{Model.forward(image, state)}
-  \item \textbf{ResNet18 特征提取}：\texttt{torchvision.models.resnet18()} $\to$ \texttt{Conv2d / BatchNorm / ReLU} 算子
-  \item \textbf{CVAE Encoder}：4层 Transformer Encoder $\to$ \texttt{torch.nn.functional.multi\_head\_attention}
-  \item \textbf{Action Decoder}：1层 Transformer Decoder $\to$ 动作分布采样
-  \item \textbf{PyTorch 运行时}：\texttt{torch::jit::Graph} $\to$ \texttt{ATen} $\to$ \texttt{OpenMP parallel\_for}
-  \item \textbf{GEMM 底层}：\texttt{OpenBLAS / NEON SIMD} 矩阵乘法（ARM Cortex-A76 优化）
-  \item \textbf{系统调用}：\texttt{futex()} 线程同步（64,569 次 / 40 s episode）
+  \item futex 调用：\textbf{64,569 次 / 40 s episode}，
+        总等待时间 3,252 s（27 线程并行累计）；
+  \item op=0（FUTEX\_WAIT）占多数，op=9（FUTEX\_WAIT\_BITSET）
+        用于 ATen 线程池；
+  \item ARM Cortex-A76 使用 OpenMP 并行，NEON SIMD 加速 GEMM，
+        但计算量仍是瓶颈。
 \end{itemize}
 
-\textbf{关键性能结论}：推理瓶颈在用户态 GEMM 计算（ARM CPU 矩阵乘法），
-与视觉输入复杂度无关；\texttt{futex} 系统调用本身开销极低（$<$1 $\mu$s），
-但 OpenMP 线程池内 27 线程并行累计等待时间达 3,252 s，说明线程同步竞争显著。
+\textbf{关键性能结论}：推理瓶颈在用户态 PyTorch/ATen 计算，
+尤其是 ResNet18 卷积和 Transformer 中的矩阵乘法。
+\texttt{futex} 系统调用本身开销极低（$<$1 $\mu$s），
+但 OpenMP 线程池内 27 线程并行累计等待时间达 3,252 s，
+说明多线程同步竞争在 ARM CPU 上不可忽略。
 
 \src{ACT推理.md，futex最终结果.md}

@@ -7,27 +7,21 @@
 640$\times$360；舵机状态来自 6 个 STS3215 舵机的
 \texttt{Present\_Position} 寄存器。
 
-从代码结构看，SO-101 follower 的 \texttt{get\_observation()} 先通过
-\texttt{self.bus.sync\_read("Present\_Position")} 同步读取 6 个舵机位置，
-随后遍历 \texttt{self.cameras}，对每路相机调用
-\texttt{cam.async\_read(timeout\_ms=3000)} 取得图像。
+从代码结构看，SO-101 follower 的观测函数先同步读取 6 个舵机位置，
+随后遍历两路相机，取回后台线程已经预取的图像。
 这意味着 obs 阶段并不是单一 I/O，而是“舵机同步读 + 两路相机异步取帧”的组合。
-舵机读取与执行阶段的 \texttt{sync\_write} 共用同一条
-\texttt{/dev/ttyACM0} 半双工总线，协议和内核路径高度重合，
+舵机读取与执行阶段共用同一条 \texttt{/dev/ttyACM0} 半双工总线，
+协议和内核路径高度重合，
 因此本节只点明其在 obs 中的位置，详细分析放在 \S\ref{sec:execution}。
 
 \subsubsection{摄像头异步读取机制}
 
 LeRobot 的 OpenCV 相机并不是在主线程里每次直接阻塞读取硬件帧。
-每个 \texttt{OpenCVCamera} 对象内部维护一个后台读线程，线程函数为
-\texttt{\_read\_loop()}。源码中它是一个以
-\texttt{stop\_event} 为退出条件的循环：只要没有收到停止信号，就反复通过
-OpenCV 同步读取摄像头，把最新图像放入 \texttt{latest\_frame}，再用
-\texttt{new\_frame\_event.set()} 告诉主线程“新帧已经准备好”。
+每个相机对象内部维护一个后台读线程：只要没有收到停止信号，
+它就循环调用 OpenCV 读取摄像头，把最新图像写入共享缓存，并设置帧就绪事件。
 主线程中的 \texttt{async\_read()} 不再直接面对摄像头设备，
-而是等待这个事件；事件到达后，它只需短暂获取 \texttt{frame\_lock}，
-从 \texttt{latest\_frame} 取走最近一帧，然后通过
-\texttt{new\_frame\_event.clear()} 复位事件标志，等待下一次更新。
+而是等待这个事件；事件到达后，它只需短暂获取锁，
+从共享缓存取走最近一帧，然后清除事件标志，等待下一次更新。
 这里不是两个线程互相通知：后台线程负责生产帧并设置事件，主线程负责等待事件并清除事件。
 
 \begin{figure}[htbp]
@@ -43,26 +37,26 @@ OpenCV 同步读取摄像头，把最新图像放入 \texttt{latest\_frame}，�
     note/.style={font=\scriptsize, text=gray!75}
   ]
     \node[lane] (bg) at (0, 2.1) {后台相机线程};
-    \node[proc, right=0.8cm of bg] (read) {OpenCV 同步取帧\\V4L2 / MJPEG 解码};
-    \node[shared, right=0.8cm of read] (cache) {更新 latest\_frame\\frame\_lock 保护};
-    \node[proc, right=0.8cm of cache] (event) {set new\_frame\_event};
+    \node[proc, right=0.8cm of bg] (read) {OpenCV 取帧\\MJPEG 解码};
+    \node[shared, right=0.8cm of read] (cache) {更新图像缓存\\短锁保护};
+    \node[proc, right=0.8cm of cache] (event) {设置帧就绪事件};
 
     \node[lane] (main) at (0, -0.35) {主线程 obs 阶段};
-    \node[proc, right=0.8cm of main] (wait) {async\_read 等待事件};
-    \node[shared, right=0.8cm of wait] (take) {读取 latest\_frame\\clear 事件标志};
-    \node[proc, right=0.8cm of take] (return) {返回 observation 图像};
+    \node[proc, right=0.8cm of main] (wait) {等待帧就绪事件};
+    \node[shared, right=0.8cm of wait] (take) {读取图像缓存\\清除事件标志};
+    \node[proc, right=0.8cm of take] (return) {返回图像};
 
     \draw[->, thick, blue!65] (bg) -- (read);
     \draw[->, thick, blue!65] (read) -- (cache);
     \draw[->, thick, blue!65] (cache) -- (event);
-    \draw[->, thick, red!65] (event.south) -- node[pos=0.55, right, note]{单向通知} (wait.north);
+    \draw[->, thick, red!65] (event.south) -- node[pos=0.30, above, note, fill=white, inner sep=0.8pt]{单向通知} (wait.north);
     \draw[->, thick, blue!65] (main) -- (wait);
-    \draw[->, thick, blue!65] (wait) -- (take);
+    \draw[->, thick, blue!65] (wait) -- node[pos=0.50, above, note, fill=white, inner sep=0.8pt]{加锁} (take);
     \draw[->, thick, blue!65] (take) -- (return);
     \draw[->, thick, blue!65, rounded corners=8pt]
-      (event.north) -- ++(0,0.55) -| node[pos=0.25, above, note]{未收到 stop\_event 时继续循环} (read.north);
-    \draw[->, dashed, thick, gray!70, rounded corners=6pt]
-      (take.north) -- ++(0,0.42) -| node[pos=0.32, below, note]{复位标志，不通知后台线程} (event.south);
+      (event.north) -- ++(0,0.55) -| node[pos=0.25, above, note]{未停止时继续循环} (read.north);
+    \draw[->, dashed, thick, gray!70]
+      (take.north) -- node[pos=0.45, right, note]{复位标志，不通知后台线程} (event.south);
   \end{tikzpicture}
   \caption{OpenCV 摄像头异步读取中的后台循环、单向事件通知与主线程取缓存关系}
   \label{fig:opencv-async-read}
@@ -121,50 +115,55 @@ OpenCV 同步读取摄像头，把最新图像放入 \texttt{latest\_frame}，�
   \begin{tikzpicture}[
     >=Stealth,
     box/.style={rectangle, draw=blue!60, fill=blue!7, rounded corners=2pt,
-      minimum width=2.65cm, minimum height=0.74cm, align=center, font=\scriptsize},
+      minimum width=2.20cm, minimum height=0.70cm, align=center, font=\scriptsize},
+    cvbox/.style={rectangle, draw=cyan!60!black, fill=cyan!8, rounded corners=2pt,
+      minimum width=2.20cm, minimum height=0.70cm, align=center, font=\scriptsize},
     waitbox/.style={rectangle, draw=orange!75, fill=orange!10, rounded corners=2pt,
-      minimum width=2.65cm, minimum height=0.74cm, align=center, font=\scriptsize},
+      minimum width=2.20cm, minimum height=0.70cm, align=center, font=\scriptsize},
     kbox/.style={rectangle, draw=green!55!black, fill=green!7, rounded corners=2pt,
-      minimum width=2.65cm, minimum height=0.74cm, align=center, font=\scriptsize},
+      minimum width=2.20cm, minimum height=0.70cm, align=center, font=\scriptsize},
     layer/.style={font=\scriptsize\bfseries, text=gray!80},
-    note/.style={font=\scriptsize, text=gray!75}
+    note/.style={font=\scriptsize, text=gray!75, fill=white, inner sep=0.8pt}
   ]
-    \node[layer] at (-1.45, 3.55) {Python / LeRobot};
-    \node[box] (loop) at (0.95, 3.55) {后台相机线程\\\texttt{\_read\_loop()}};
-    \node[box] (pyread) at (4.05, 3.55) {OpenCV Camera\\\texttt{read()}};
-    \node[box] (tryioctl) at (7.15, 3.55) {\texttt{grab()}\\\texttt{tryIoctl(DQBUF)}};
+    \node[layer] at (-1.55, 4.75) {LeRobot};
+    \node[box] (loop) at (0.95, 4.75) {后台读线程};
+    \node[box] (camread) at (3.45, 4.75) {相机 read};
 
-    \node[note] at (2.35, 2.62) {无完成帧：等待设备可读};
-    \node[note] at (7.15, 2.62) {已有完成帧：出队并解码};
+    \draw[dashed, gray!35] (-0.20, 4.05) -- (8.65, 4.05);
+    \node[layer] at (-1.55, 3.25) {OpenCV};
+    \node[cvbox] (vcap) at (2.00, 3.25) {VideoCapture\\read};
+    \node[cvbox] (grab) at (4.70, 3.25) {grab\\尝试 ioctl};
+    \node[cvbox] (retrieve) at (7.35, 3.25) {retrieve\\MJPEG 解码};
 
-    \node[layer] at (-1.45, 1.75) {glibc / syscall};
-    \node[waitbox] (select) at (2.35, 1.75) {\texttt{select()}\\等待 fd 可读};
-    \node[waitbox] (pselect) at (2.35, 0.65) {\texttt{pselect6}\\睡眠等待};
-    \node[waitbox] (ioctl) at (7.15, 1.75) {\texttt{ioctl}\\\texttt{VIDIOC\_DQBUF}};
+    \draw[dashed, gray!35] (-0.20, 2.48) -- (8.65, 2.48);
+    \node[layer] at (-1.55, 1.55) {glibc / syscall};
+    \node[waitbox] (select) at (2.00, 1.55) {select\\等待 fd 可读};
+    \node[waitbox] (ioctl) at (4.70, 1.55) {ioctl\\VIDIOC\_DQBUF};
+    \node[waitbox] (pselect) at (2.00, 0.45) {pselect6\\睡眠等待};
 
-    \node[layer] at (-1.45, -0.45) {Linux kernel};
-    \node[kbox] (v4l2) at (2.35, -0.45) {V4L2 / UVC\\设备驱动};
-    \node[kbox] (wq) at (2.35, -1.55) {\texttt{done\_wq}\\等待队列};
-    \node[kbox] (vb2) at (7.15, -0.45) {videobuf2\\完成队列};
-    \node[box] (decode) at (7.15, -1.55) {\texttt{retrieve()}\\MJPEG 解码};
+    \draw[dashed, gray!45] (-0.20, -0.20) -- (8.65, -0.20);
+    \node[note] at (7.75, -0.02) {系统调用边界};
 
-    \draw[->, thick, blue!65] (loop) -- (pyread);
-    \draw[->, thick, blue!65] (pyread) -- (tryioctl);
+    \node[layer] at (-1.55, -1.10) {Linux kernel};
+    \node[kbox] (v4l2) at (2.00, -1.10) {V4L2 / UVC\\设备驱动};
+    \node[kbox] (vb2) at (4.70, -1.10) {videobuf2\\完成队列};
+    \node[kbox] (wq) at (2.00, -2.18) {done\_wq\\等待队列};
 
-    \draw[->, thick, orange!75, rounded corners=6pt]
-      (tryioctl.south) -- ++(0,-0.38) -| node[pos=0.28, above, note]{无帧可取} (select.north);
+    \draw[->, thick, blue!65] (loop) -- (camread);
+    \draw[->, thick, blue!65, rounded corners=5pt]
+      (camread.south) -- ++(0,-0.35) -| (vcap.north);
+    \draw[->, thick, cyan!60!black] (vcap) -- (grab);
+    \draw[->, thick, cyan!60!black] (grab) -- (retrieve);
+
+    \draw[->, thick, green!55!black] (grab.south) -- node[pos=0.30, right, note]{已有完成帧} (ioctl.north);
+    \draw[->, thick, green!55!black] (ioctl) -- (vb2);
+
+    \draw[->, thick, orange!75]
+      (grab.south west) -- node[pos=0.52, left, note]{EAGAIN 时调用 select} (select.north east);
     \draw[->, thick, orange!75] (select) -- (pselect);
     \draw[->, thick, orange!75] (pselect) -- (v4l2);
     \draw[->, thick, orange!75] (v4l2) -- node[right, note]{新帧完成} (wq);
-    \node[note] at (2.35, -2.18) {唤醒后回到 DQBUF 重试};
-
-    \draw[->, thick, green!55!black] (tryioctl) -- node[right, note]{已有完成帧} (ioctl);
-    \draw[->, thick, green!55!black] (ioctl) -- (vb2);
-    \draw[->, thick, green!55!black] (vb2) -- node[right, note]{buffer 元数据} (decode);
-
-    \node[note] at (7.75, 3.03) {用户态};
-    \draw[dashed, gray!55] (-0.10,2.28) -- (8.55,2.28);
-    \node[note] at (7.60, 2.14) {系统调用边界};
+    \node[note] at (2.00, -2.85) {唤醒后重试 ioctl};
   \end{tikzpicture}
   \caption{OpenCV 摄像头后台线程从用户态到 V4L2 内核队列的关键路径}
   \label{fig:opencv-v4l2-callstack}
@@ -193,6 +192,9 @@ MJPEG 到 BGR 图像的解码仍然发生在用户态 OpenCV/libjpeg 中，
 在 ARM CPU 上属于摄像头链路的主要计算开销。
 由于 LeRobot 采用后台预取，主线程 obs 阶段看到的是“取缓存帧”的时间，
 而不是完整的摄像头端到端采集时间。
+因此，主线程通常不会被摄像头硬件读取、V4L2 等待或 MJPEG 解码直接阻塞；
+这些耗时主要由后台相机线程承担。主线程只有在请求图像时后台线程尚未准备好新帧，
+才会短暂等待 \texttt{new\_frame\_event}，随后只是持锁读取最近缓存帧。
 
 实测的逐层耗时分布与分层架构图见实验 06（摄像头感知层级耗时剖析，
 \texttt{robotdoc/实验/06\_摄像头感知层级耗时剖析/}）\label{exp:06}。

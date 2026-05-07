@@ -1,4 +1,4 @@
-# 实验 08 — 用 action 替代 observation.state 作为关节状态输入
+# 实验 05 — 用 action 替代 observation.state 作为关节状态输入
 
 > 灵感来源：实验 01（chunk_size 参数扫描）分析过程中的推论
 

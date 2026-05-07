@@ -773,155 +773,7 @@ cam_features = self.backbone(img)["feature_map"]
 ```
 
 ##### ResNet18 源码调用链
-
-```python
-# ── 入口 ─ vision/torchvision/models/resnet.py:684 ─ resnet18() ────────
-def resnet18(*, weights: Optional[ResNet18_Weights] = None,
-             progress: bool = True, **kwargs: Any) -> ResNet:
-    weights = ResNet18_Weights.verify(weights)
-    return _resnet(BasicBlock, [2, 2, 2, 2], weights, progress, **kwargs)
-    #                    ↑          ↑
-    #              残差块类型   layer1~4 各 2 个 block
-
-# ── 构建 ─ resnet.py:288 ─ _resnet() ─────────────────────────────────
-def _resnet(block: type[Union[BasicBlock, Bottleneck]],
-            layers: list[int], weights, progress, **kwargs) -> ResNet:
-    ...  # 权重参数预处理
-    model = ResNet(block, layers, **kwargs)  # norm_layer=FrozenBatchNorm2d 从 kwargs 传入
-    if weights is not None:                                              # ACT 传了 "IMAGENET1K_V1"
-        model.load_state_dict(
-            weights.get_state_dict(progress=progress, check_hash=True)   # 从 URL 下载 .pth → {参数名: Tensor}
-        )                                                                # 灌进 model 的 conv/BN，否则全是随机值，提不出有效特征
-    return model
-
-# ── 搭建各层 ─ resnet.py:166 ─ ResNet.__init__() ─────────────────────
-class ResNet(nn.Module):
-    def __init__(self, block, layers, num_classes=1000, ..., norm_layer=None):
-        ...  # 参数校验，默认值处理
-        # ↓ 以下只是搭建结构、分配权重空间，不执行计算
-        # 实际计算在推理时由 IntermediateLayerGetter.forward() 驱动（见下方）
-        self.inplanes = 64  # 当前通道数，每经过一个 _make_layer 会翻倍
-        self.conv1   = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False)
-        self.bn1     = norm_layer(self.inplanes)   # FrozenBatchNorm2d（ACT 传入）
-        self.relu    = nn.ReLU(inplace=True)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.layer1  = self._make_layer(block, 64,  layers[0])                          # 2×BasicBlock(64)
-        self.layer2  = self._make_layer(block, 128, layers[1], stride=2)                # 2×BasicBlock(128)
-        self.layer3  = self._make_layer(block, 256, layers[2], stride=2)                # 2×BasicBlock(256)
-        self.layer4  = self._make_layer(block, 512, layers[3], stride=2)                # 2×BasicBlock(512)
-        ...  # 权重初始化（kaiming 初始化 conv，zero-init 最后一个 BN）
-
-# ── 堆叠 BasicBlock ─ resnet.py:225 ─ ResNet._make_layer() ───────────
-def _make_layer(self, block, planes, blocks, stride=1, dilate=False) -> nn.Sequential:
-    norm_layer = self._norm_layer
-    downsample = None
-    ...  # dilation 处理
-    if stride != 1 or self.inplanes != planes * block.expansion:
-        downsample = nn.Sequential(
-            conv1x1(self.inplanes, planes * block.expansion, stride),  # 1×1 卷积对齐通道和空间
-            norm_layer(planes * block.expansion),
-        )
-    layers = []
-    layers.append(block(self.inplanes, planes, stride, downsample, ...))  # 第 1 个 block（可能带 downsample）
-    self.inplanes = planes * block.expansion
-    for _ in range(1, blocks):
-        layers.append(block(self.inplanes, planes, ...))  # 后续 block 不降采样
-    return nn.Sequential(*layers)
-
-# ── 残差块 ─ resnet.py:59 ─ BasicBlock ────────────────────────────────
-class BasicBlock(nn.Module):
-    expansion: int = 1
-
-    def __init__(self, inplanes, planes, stride=1, downsample=None, ..., norm_layer=None):
-        ...  # 参数校验
-        self.conv1 = conv3x3(inplanes, planes, stride)  # nn.Conv2d(in, out, 3, stride, 1, bias=False)
-        self.bn1   = norm_layer(planes)                  # FrozenBatchNorm2d
-        self.relu  = nn.ReLU(inplace=True)
-        self.conv2 = conv3x3(planes, planes)             # stride=1
-        self.bn2   = norm_layer(planes)
-        self.downsample = downsample  # 可选：1×1 conv + BN，对齐捷径尺寸
-
-    def forward(self, x: Tensor) -> Tensor:
-        identity = x
-        out = self.conv1(x)
-        out = self.bn1(out)       # → FrozenBatchNorm2d.forward()
-        out = self.relu(out)
-        out = self.conv2(out)
-        out = self.bn2(out)       # → FrozenBatchNorm2d.forward()
-        if self.downsample is not None:
-            identity = self.downsample(x)
-        out += identity           # 残差连接
-        out = self.relu(out)
-        return out
-
-# ── 冻结批归一化 ─ vision/torchvision/ops/misc.py:14 ─ FrozenBatchNorm2d ─
-class FrozenBatchNorm2d(torch.nn.Module):
-    def __init__(self, num_features, eps=1e-5):
-        ...  # 注册 4 个 buffer（不参与梯度）：weight(γ), bias(β), running_mean(μ), running_var(σ²)
-
-    def forward(self, x: Tensor) -> Tensor:
-        w  = self.weight.reshape(1, -1, 1, 1)       # γ: (1,C,1,1)
-        b  = self.bias.reshape(1, -1, 1, 1)         # β: (1,C,1,1)
-        rv = self.running_var.reshape(1, -1, 1, 1)   # σ²: (1,C,1,1)
-        rm = self.running_mean.reshape(1, -1, 1, 1)  # μ: (1,C,1,1)
-        scale = w * (rv + self.eps).rsqrt()          # γ / √(σ² + ε)
-        bias  = b - rm * scale                      # β - μ·scale
-        return x * scale + bias
-    # 等价于 y[c] = γ[c]·(x[c]-μ[c])/√(σ²[c]+ε) + β[c]，与普通 BN 唯一区别是 μ/σ² 冻结不更新
-
-# ── 截断包装 ─ vision/torchvision/models/_utils.py:13 ─ IntermediateLayerGetter ─
-# __init__ 里只把 layer4 及之前的子模块装进来，avgpool/fc 直接丢弃
-# 所以 ACT 推理时 ResNet 的 avgpool 和 fc 完全不存在，不会执行
-class IntermediateLayerGetter(nn.ModuleDict):
-    def __init__(self, model: nn.Module, return_layers: dict[str, str]) -> None:
-        layers = OrderedDict()
-        for name, module in model.named_children():  # conv1, bn1, relu, maxpool, layer1, ..., avgpool, fc
-            layers[name] = module
-            if name in return_layers:                # "layer4" 找到了
-                del return_layers[name]
-            if not return_layers:                    # return_layers 清空
-                break                                # ← 停！avgpool、fc 没装进来
-
-    def forward(self, x):
-        out = OrderedDict()
-        for name, module in self.items():            # 只遍历装进来的 8 个子模块
-            x = module(x)                            # 逐个执行
-            if name in self.return_layers:           # layer4 时捕获输出
-                out_name = self.return_layers[name]
-                out[out_name] = x
-        return out                                   # {"feature_map": Tensor(1,512,12,20)}
-
-# ── 前向流程 ─ resnet.py:266 ─ ResNet._forward_impl() ─────────────────
-# ACT 实际走的是 IntermediateLayerGetter.forward()，等效于下面的 _forward_impl 跑到 layer4 就停
-# 下面是 ResNet 原始完整逻辑，用来看数据流和形状变化
-def _forward_impl(self, x: Tensor) -> Tensor:
-    # ── 入口卷积 ─────────────────────────────────────────────────────────
-    x = self.conv1(x)       # nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
-                            # 64 个 7×7 滤波器扫 RGB 三通道，stride=2 空间÷2
-                            # (1,3,360,640) → (1,64,180,320)
-    x = self.bn1(x)         # FrozenBatchNorm2d(64)：逐通道 y=γ·(x-μ)/√(σ²+ε)+β，推理时 μ/σ/γ/β 全固定
-                            # 形状不变 (1,64,180,320)，但数值分布拉回 ≈N(0,1)
-    x = self.relu(x)        # max(0,x)，负数清零引入非线性，形状不变
-    x = self.maxpool(x)     # nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-                            # 3×3 窗口取最大值，stride=2 空间再÷2
-                            # (1,64,180,320) → (1,64,90,160)
-
-    # ── 4 个残差 stage ───────────────────────────────────────────────────
-    x = self.layer1(x)      # 2×BasicBlock(64), stride=1, 不降采样
-                            # (1,64,90,160) → (1,64,90,160)
-                            # 每个 BasicBlock: conv3×3 → BN → relu → conv3×3 → BN + shortcut → relu
-    x = self.layer2(x)      # 2×BasicBlock(128), 首个 block stride=2
-                            # (1,64,90,160) → (1,128,45,80)
-                            # 通道 64→128（滤波器翻倍），空间 90×160→45×80（÷2）
-    x = self.layer3(x)      # 2×BasicBlock(256), 首个 block stride=2
-                            # (1,128,45,80) → (1,256,23,40)
-    x = self.layer4(x)      # 2×BasicBlock(512), 首个 block stride=2
-                            # (1,256,23,40) → (1,512,12,20)
-                            # ← IntermediateLayerGetter 在这里截断并返回 feature_map
-                            # 总下采样 = 2^5 = 32（conv1×2 + maxpool×2 + layer2/3/4 各×2）
-                            # 360×640 / 32 = 12×20 = 240 个空间位置
-    return x
-```
+永龙你0040408
 
 **调用链**：
 
@@ -1030,12 +882,12 @@ $$
 
 每个 stage = `nn.Sequential(BasicBlock × 2)`，四层结构相同，区别只在通道数和 stride：
 
-| stage   | 输入形状            | 输出形状            | stride | 通道变化  |
-| ------- | ------------------- | ------------------- | ------ | --------- |
-| layer1  | (1, 64, 90, 160)    | (1, 64, 90, 160)    | 1      | 64→64     |
-| layer2  | (1, 64, 90, 160)    | (1, 128, 45, 80)    | 2      | 64→128    |
-| layer3  | (1, 128, 45, 80)    | (1, 256, 23, 40)    | 2      | 128→256   |
-| layer4  | (1, 256, 23, 40)    | (1, 512, 12, 20)    | 2      | 256→512   |
+| stage  | 输入形状         | 输出形状         | stride | 通道变化 |
+| ------ | ---------------- | ---------------- | ------ | -------- |
+| layer1 | (1, 64, 90, 160) | (1, 64, 90, 160) | 1      | 64→64    |
+| layer2 | (1, 64, 90, 160) | (1, 128, 45, 80) | 2      | 64→128   |
+| layer3 | (1, 128, 45, 80) | (1, 256, 23, 40) | 2      | 128→256  |
+| layer4 | (1, 256, 23, 40) | (1, 512, 12, 20) | 2      | 256→512  |
 
 每个 **BasicBlock** 的计算（`resnet.py:59-105`）：
 
@@ -2449,13 +2301,13 @@ record.py（控制循环）
 
 ### 涉及的源文件索引
 
-| 文件 | 职责 |
-|---|---|
-| [record.py](../../../lerobot/src/lerobot/record.py) | 控制循环入口 |
-| [control_utils.py](../../../lerobot/src/lerobot/utils/control_utils.py) | `predict_action` 包装层 |
-| [processor_act.py](../../../lerobot/src/lerobot/policies/act/processor_act.py) | 前/后处理流水线定义 |
-| [normalize_processor.py](../../../lerobot/src/lerobot/policies/act/normalize_processor.py) | 归一化 / 反归一化核心 |
-| [modeling_act.py](../../../lerobot/src/lerobot/policies/act/modeling_act.py) | ACTPolicy、ACT.forward、Encoder/Decoder 层、2D 位置编码 |
-| [configuration_act.py](../../../lerobot/src/lerobot/policies/act/configuration_act.py) | 超参数配置 |
-| torchvision ResNet18 | backbone（IntermediateLayerGetter + BasicBlock） |
+| 文件                                                                                       | 职责                                                    |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------- |
+| [record.py](../../../lerobot/src/lerobot/record.py)                                        | 控制循环入口                                            |
+| [control_utils.py](../../../lerobot/src/lerobot/utils/control_utils.py)                    | `predict_action` 包装层                                 |
+| [processor_act.py](../../../lerobot/src/lerobot/policies/act/processor_act.py)             | 前/后处理流水线定义                                     |
+| [normalize_processor.py](../../../lerobot/src/lerobot/policies/act/normalize_processor.py) | 归一化 / 反归一化核心                                   |
+| [modeling_act.py](../../../lerobot/src/lerobot/policies/act/modeling_act.py)               | ACTPolicy、ACT.forward、Encoder/Decoder 层、2D 位置编码 |
+| [configuration_act.py](../../../lerobot/src/lerobot/policies/act/configuration_act.py)     | 超参数配置                                              |
+| torchvision ResNet18                                                                       | backbone（IntermediateLayerGetter + BasicBlock）        |
 

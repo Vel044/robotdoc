@@ -1,4 +1,4 @@
-# 实验 06：摄像头感知层级耗时剖析
+# 实验 03：摄像头感知层级耗时剖析
 
 > 对应论文章节：第 3.1 节 感知阶段性能剖析（摄像头路径）
 > 状态：⬜ 待执行（设计已完成）
@@ -89,19 +89,19 @@ conda activate lerobot
 cd ~/Work/RobotOS/Lerobot
 
 # A 组（无 ftrace）
-python lerobot/analysis/06_camera_layer_profiling/profile_camera.py \
+python lerobot/analysis/03_camera_layer_profiling/profile_camera.py \
     --episodes 3 --frames 30 \
-    --out robotdoc/实验/06_摄像头感知层级耗时剖析/layer_timing.csv
+    --out robotdoc/实验/03_摄像头感知层级耗时剖析/layer_timing.csv
 
 # B 组（ftrace 启用）
-sudo ./lerobot/analysis/06_camera_layer_profiling/start_ftrace.sh
-python lerobot/analysis/06_camera_layer_profiling/profile_camera.py \
+sudo ./lerobot/analysis/03_camera_layer_profiling/start_ftrace.sh
+python lerobot/analysis/03_camera_layer_profiling/profile_camera.py \
     --episodes 3 --frames 30 --use-ftrace \
-    --out robotdoc/实验/06_摄像头感知层级耗时剖析/layer_timing_ftrace.csv
-sudo ./lerobot/analysis/06_camera_layer_profiling/stop_ftrace.sh
+    --out robotdoc/实验/03_摄像头感知层级耗时剖析/layer_timing_ftrace.csv
+sudo ./lerobot/analysis/03_camera_layer_profiling/stop_ftrace.sh
 
 # 出图
-python lerobot/analysis/06_camera_layer_profiling/plot_layer_timing.py \
-    --csv robotdoc/实验/06_摄像头感知层级耗时剖析/layer_timing.csv \
-    --out robotdoc/实验/06_摄像头感知层级耗时剖析/layer_timing.png
+python lerobot/analysis/03_camera_layer_profiling/plot_layer_timing.py \
+    --csv robotdoc/实验/03_摄像头感知层级耗时剖析/layer_timing.csv \
+    --out robotdoc/实验/03_摄像头感知层级耗时剖析/layer_timing.png
 ```

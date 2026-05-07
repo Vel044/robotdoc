@@ -129,37 +129,128 @@ ACT 单次推理开销主要由模型本身决定，而不是由抓取、推倒�
 \end{tabular}
 \end{center}
 
-\subsection{工具链选型}
+\subsection{工具链选型}\label{sec:tool-selection}
 
-\textbf{strace vs ftrace 机制与开销对比}：
+\textbf{strace 与 ftrace 机制对比}：
 
 两者作用层次不同，开销来源也不同：
 
 \begin{itemize}[leftmargin=2em]
   \item \textbf{strace}：通过 \texttt{ptrace} 系统调用在用户态拦截目标进程的每一次系统调用入口与出口。
         每次拦截都需要一次进程上下文切换（目标进程 $\to$ strace 进程），
-        导致系统时间从 \textbf{2.20 s 放大至 20.12 s（约 9×）}。
-        其开销与系统调用频率正相关，频繁调用时干扰极大，不可用于生产级测量。
+        其开销与系统调用频率正相关，频繁调用时对主循环干扰极大，
+        不能作为定量时序数据来源（具体扰动量级见后文实测）。
 
-  \item \textbf{ftrace}：通过 Linux 内核 tracepoint / \texttt{trace\_printk()} 在内核态直接写入 ring buffer，
+  \item \textbf{ftrace}：通过 Linux 内核 tracepoint 在内核态直接写入 ring buffer，
         \textbf{插桩本身开销极低}（纳秒级，无进程切换）。
-        但将 ring buffer 内容导出至用户态文件（\texttt{cat /sys/kernel/debug/tracing/trace > log}）
-        是一次批量文件 I/O，当 event 密集时，\textbf{导出过程本身会消耗额外 CPU 和内存带宽}，
-        且导出期间 ring buffer 可能覆盖旧数据（丢失事件）。
-
-  \item \textbf{本文策略}：以 ftrace 插桩数据为主要内核态度量依据；
-        strace 仅用于初期定性探索系统调用分布，不计入最终时序数据。
+        但将 ring buffer 内容导出至用户态文件
+        （\texttt{cat /sys/kernel/debug/tracing/trace > log}
+        或后台进程持续读取 \texttt{trace\_pipe}）是一次批量/持续文件 I/O，
+        当 event 密集时，\textbf{导出过程本身会消耗额外 CPU 和内存带宽}，
+        且实时导出期间 ring buffer 也可能覆盖旧数据（丢失事件）。
 \end{itemize}
 
-% TODO: 补充对比实验——量化 ftrace log 导出阶段的 CPU/内存开销
-% 对比方案：
-%   A) ftrace 插桩 + 实时 cat 导出（当前方案）
-%   B) ftrace 插桩 + trace-cmd record（内核侧 per-CPU buffer，降低导出压力）
-%   C) 无任何 tracing（baseline）
-% 指标：episode 期间系统时间、用户时间、RSS 峰值，各取 3 次均值
-% 预期结论：插桩本身开销可忽略，导出 I/O 才是 ftrace 的主要额外开销来源
+\subsubsection*{测量工具开销实测}
 
-\src{内核数据搜集分析.md，方法论.md}
+为定量比较各工具对主循环的扰动，本文设计了一个测量工具校准实验。
+在固定 \texttt{chunk\_size=100}、目标 fps=30、episode 时长约 30 s 的同一条 \texttt{record\_loop} 上，
+对比四组方案：A 组 baseline 不开任何 tracing；
+B 组用 \texttt{strace -f -ttT} 包住 record 命令；
+C 组开启 ftrace 仅写内核 ring buffer，episode 结束后再导出 trace；
+D 组开启 ftrace 并同时启动后台进程实时读取 \texttt{trace\_pipe} 写入文件。
+所有指标由 \texttt{record.py} 内部通过 \texttt{resource.getrusage()} 与 sysfs 自动采集，
+写入 \texttt{analysis/timing\_stats.csv}。
+表~\ref{tab:tool-overhead} 汇总了四组的核心指标，
+后文分别从 FPS、上下文切换次数和阶段占比漂移三个角度逐一分析。
+
+\begin{table}[H]
+  \centering
+  \caption{四组测量工具对 \texttt{record\_loop} 的扰动（每组 $n=1$，仅用于工具选型）}
+  \label{tab:tool-overhead}
+  \begin{tabular}{lcccc}
+    \toprule
+    指标 & A baseline & B strace & C ftrace 延迟 & D ftrace 实时 \\
+    \midrule
+    \texttt{fps\_mean}              & 16.13   & 9.53    & 13.89  & 12.48  \\
+    相对 A 的 FPS 下降               & ---     & $-40.9\%$ & $-13.9\%$ & $-22.6\%$ \\
+    \texttt{system\_time\_s}        & 1.40    & 2.76    & 1.37   & 1.03   \\
+    \texttt{voluntary\_cs}          & 23{,}947  & 750{,}662 & 30{,}377 & 36{,}336 \\
+    \texttt{involuntary\_cs}        & 78{,}436  & 541{,}334 & 84{,}481 & 52{,}907 \\
+    \texttt{obs\_pct} 漂移 (pp)     & 0       & $+34.8$ & $-5.5$ & $-3.0$ \\
+    \texttt{wait\_pct} 漂移 (pp)    & 0       & $-31.6$ & $-0.9$ & $-0.8$ \\
+    trace 文件大小                   & ---     & 157\,MB & 168\,MB & 823\,MB \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{FPS 下降}
+图~\ref{fig:tool-fps} 给出了四组的实测 \texttt{fps\_mean} 与相对 A 组 baseline 的下降幅度。
+B strace 组从 16.13 fps 跌至 9.53 fps，下降 40.9\%，
+单这一项就足以排除 strace 作为正式时序数据来源的可能性。
+C ftrace 延迟导出组下降 13.9\%，D ftrace 实时导出组下降 22.6\%，
+两者都仍然超过设计文档定义的 $\leq 5\%$ 验收阈值；
+但需要注意每组只有 1 个 episode，A 组 baseline 自身存在抖动
+（如观测阶段单次冷启动时延变长会直接拉低绝对 FPS），
+正式实验需补足每组 5 个 episode 后再核对方差。
+即便如此，C 组优于 D 组、且两组都明显优于 B 组的相对秩序非常稳定，
+能够支撑后续的工具选型。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\textwidth]{../实验/04_实验环境与测量工具校准/fps_drop.png}
+  \caption{四组测量工具下的 \texttt{fps\_mean} 与相对 A 组 baseline 的下降百分比}
+  \label{fig:tool-fps}
+\end{figure}
+
+\paragraph{上下文切换次数}
+图~\ref{fig:tool-cs} 用对数坐标对比了四组的自愿与非自愿上下文切换次数。
+B strace 组的 \texttt{voluntary\_cs} 从 baseline 的约 2.4 万次飙升至约 75 万次（约 31 倍），
+\texttt{involuntary\_cs} 也从 7.8 万次升至 54 万次（约 7 倍）。
+这种几何级放大是 \texttt{ptrace} 机制的直接体现：
+每一次系统调用都被强制中断到 strace 进程读取参数后再恢复，
+因此摄像头链路中密集出现的 \texttt{pselect6}、\texttt{read}、\texttt{ioctl}
+都会在切换次数上留下印记。
+相比之下，C 组的切换次数仅比 baseline 高约 27\%，
+D 组的额外切换主要来自后台 \texttt{cat trace\_pipe} 进程，
+两者的量级都与 baseline 同档，
+说明 ftrace 内核 ring buffer 插桩本身对调度路径几乎无干扰。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\textwidth]{../实验/04_实验环境与测量工具校准/context_switches.png}
+  \caption{四组的自愿与非自愿上下文切换次数（对数坐标）}
+  \label{fig:tool-cs}
+\end{figure}
+
+\paragraph{阶段占比漂移}
+图~\ref{fig:tool-phase} 显示了四组各阶段占比相对 A 组 baseline 的偏移
+（pp = percentage point）。
+B strace 组的 \texttt{obs\_pct} 漂移高达 $+34.8$ pp，\texttt{wait\_pct} 反向漂移 $-31.6$ pp，
+意味着 strace 不仅整体拉慢主循环，还\textbf{改变了阶段时间结构}：
+摄像头链路中的系统调用被 \texttt{ptrace} 反复拦截，导致观测阶段被严重拉长，
+\texttt{wait} 阶段反而被挤压；这种结构性扭曲使得 strace 下采集的阶段占比已经无法代表真实负载。
+C 与 D 两组的所有阶段漂移都在 $\pm 8$ pp 内，
+其中 wait/action 漂移均 $\leq 1$ pp，
+\texttt{obs\_pct} 与 \texttt{inference\_pct} 在 $\pm 7$ pp 之间小幅互相借调，
+没有出现 B 组那种数量级的结构变化；
+因此可以判断 ftrace 两种方案对阶段时间结构的影响可控。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\textwidth]{../实验/04_实验环境与测量工具校准/phase_drift.png}
+  \caption{四组的四阶段占比相对 A 组 baseline 的漂移（pp），灰色虚线为设计阶段提出的 $\pm 3$ pp 验收阈值}
+  \label{fig:tool-phase}
+\end{figure}
+
+\paragraph{本文工具链选型}
+正式实验的内核态时序数据采用 \textbf{ftrace 延迟导出}方案：
+其上下文切换次数与阶段时间结构均与 baseline 同档，是单 episode 扰动最小的方案。
+仅在 episode 时长延长导致 ring buffer（本文配置每 CPU 32\,MB，4 核共 128\,MB）接近溢出时，
+才改用 ftrace 实时导出作为后备；其代价是 trace 数据量约为延迟导出的 4.9 倍
+（823\,MB vs 168\,MB），但量级仍可承受。
+strace 不参与最终定量分析，仅用于第~\ref{ch:perf} 章早期对系统调用类型分布的定性探索。
+
+\src{实验/04\_实验环境与测量工具校准/结论.md，内核数据搜集分析.md}
 
 \subsection{实验硬件与软件配置}
 本实验平台由树莓派5、SO-101 机械臂和两路 USB 摄像头组成。

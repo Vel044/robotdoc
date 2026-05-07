@@ -311,7 +311,7 @@ cs10 (FPS≈6) / cs100 (FPS≈19) 推理频率高得多，每段动作（10 / 10
 - **原因 A（复位偏置）**：用 action 作为 state 后，模型看到的"当前状态"就是自己上一步的输出，与训练数据中"上一帧 action ≈ 下一帧 state"的分布更吻合。重规划时不再触发"先复位"偏置，因为状态已经是模型"认识"的命令空间
 - **原因 C（ResNet 状态混叠）**：ResNet 的问题不变，但关节状态输入更精确后可以部分弥补视觉判断的歧义
 
-→ 该思路已作为新实验立项，见 [实验 08 — 用 action 替代 observation.state](../08_用action替代state观测/README.md)
+→ 该思路已作为新实验立项，见 [实验 05 — 用 action 替代 observation.state](../05_用action替代state观测/README.md)
 
 ---
 
