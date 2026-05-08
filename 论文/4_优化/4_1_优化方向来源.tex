@@ -1,0 +1,51 @@
+\subsection{优化方向的来源：从瓶颈结构反推}\label{sec:opt-motivation}
+
+\subsubsection{第三章瓶颈结论回顾}\label{sec:opt-recap}
+
+第三章的逐阶段时序剖析得到一个清晰的结论：在树莓派 5 上，
+ACT 模型单次推理耗时 2000--4000 ms，占总循环时间的 99\% 以上；
+感知阶段（舵机 \texttt{sync\_read} 加图像采集）合计仅约 5 ms，
+执行阶段（舵机 \texttt{sync\_write}）约 1--3 ms，
+系统调用本身（\texttt{write}/\texttt{read}/\texttt{pselect6}/\texttt{futex}）
+最大量级在 38 $\mu$s。
+也就是说，瓶颈不在 I/O、不在内核路径，而在用户态 ARM CPU 的矩阵乘法（GEMM）计算。
+本论文将研究范围限定在该低算力嵌入式平台，不讨论 GPU/NPU 加速等
+跨硬件优化路径。
+
+\subsubsection{同步流水线下的 CPU 时间浪费}\label{sec:opt-idle-cpu}
+
+把第三章的耗时分布投影到时间轴上可以发现，
+当前 \texttt{record\_loop()} 是一条严格串行的同步流水线：
+``采观测 $\to$ 推理一次 $\to$ 执行 chunk 内所有动作 $\to$ 再采观测''。
+在 \texttt{chunk\_size=100}、目标 30 FPS 的设定下，
+执行 chunk 的 100 帧需要约 3.3 s，而单次推理只占用 CPU 约 2 s。
+也就是说，每一个``推理 + 执行''循环里有大约 3.3 s 的窗口
+\textbf{CPU 几乎完全闲置}（仅维持串口、相机后台线程和帧同步 sleep），
+其余 4 个 ARM Cortex-A76 核心都没有有效负载。
+
+这段 CPU 闲置时间是\textbf{异步化的物理基础}：如果能在执行 chunk 的同时
+让 CPU 提前推理下一帧 chunk，理论上吞吐可以从单循环受限于
+``$T_{\text{infer}} + N/F$''恢复到仅受执行速度 $N/F$ 约束，
+帧率有翻倍的潜在空间。
+
+\subsubsection{三个候选异步点}\label{sec:opt-three-candidates}
+
+把感知—推理—执行流水线展开来看，有三处理论上可以异步化的位置：
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{感知层——舵机异步读}：把 \texttt{sync\_read} 拆成
+        ``发请求''与``收回包''两阶段，让两次相邻读取在时间上重叠；
+  \item \textbf{执行层——舵机异步写}：把 \texttt{sync\_write} 改为
+        投递到后台队列，主线程立即返回；
+  \item \textbf{推理层——双进程异步推理}：将 \texttt{policy.predict\_action\_chunk()}
+        移出主进程，主进程在执行旧 chunk 的同时让推理进程预测新 chunk。
+\end{itemize}
+
+值得说明的是，\textbf{相机异步读}已经是 LeRobot 的默认实现：
+\texttt{OpenCVCamera.async\_read} 由后台线程持续 \texttt{cv2.VideoCapture.read()}，
+主线程取最新帧，本节不再讨论。
+
+接下来 4.2--4.4 节按``可行性递进筛选''的顺序逐一审视上述三个异步点：
+4.2 论证舵机异步写在硬件协议层就被排除，
+4.3 论证舵机异步读虽然可行但 ROI 为负，
+4.4 把笔墨集中到唯一值得做的推理异步化，
+4.5 设计实验验证它在当前条件下的真实收益边界。

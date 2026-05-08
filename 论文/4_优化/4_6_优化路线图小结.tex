@@ -1,0 +1,74 @@
+\subsection{优化路线图与本章小结}\label{sec:opt-roadmap}
+
+\subsubsection{优化方向矩阵}\label{sec:opt-matrix}
+
+综合 4.2--4.5 节的可行性分析与实验预期，将本章涉及的所有候选优化方向
+汇总如表所示。``可行性''按``结构是否允许''而非``是否值得''判断；
+``ROI''指当前 $T_{\text{infer}} \approx 2$ s 条件下的预期收益。
+
+\begin{center}
+\begin{tabular}{p{3.2cm}p{3.2cm}cccc}
+  \toprule
+  优化方向 & 主要收益 & 可行性 & 复杂度 & 当前 ROI & 推荐时机 \\
+  \midrule
+  舵机异步写        & 1--3 ms/帧
+                  & \textcolor{red}{$\times$}
+                  & ---       & 负 & --- \\
+  舵机异步读        & 1--2 ms/帧
+                  & $\bigcirc$
+                  & 中（改 SDK）& 边际 & 推理加速后 \\
+  推理异步（双进程） & 消除 CPU 闲置 & \checkmark
+                  & 高（gRPC + 双进程）
+                  & $\approx 0$（当前 $N$ 不满足不等式） & 推理加速后 \\
+  INT8/FP16 量化     & 推理 2--4$\times$ & \checkmark & 中 & 高 & \textbf{优先} \\
+  ONNX Runtime 后端  & 推理 1.5--2$\times$ & \checkmark & 低 & 高 & \textbf{优先} \\
+  MJPEG $\to$ YUYV   & 解码降至 0    & \checkmark & 低 & 中 & 可同步推进 \\
+  cs 加大重训        & 拓宽不等式余量 & \checkmark & 高（需重训） & 中 & 异步启用后 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+矩阵的核心信息有三条：
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{舵机异步写从结构上排除}，无需进一步评估；
+  \item \textbf{推理异步并非独立可拿的优化}，其 ROI 受不等式
+        $N \geq 2 T_{\text{infer}} F$ 约束，必须先把 $T_{\text{infer}}$ 降下来；
+  \item \textbf{真正应当优先的是推理本体加速}（INT8 / ONNX），
+        它既能直接削减主瓶颈，又能间接打开异步推理的可用窗口。
+\end{itemize}
+
+\subsubsection{三阶段优化路线}\label{sec:opt-three-phases}
+
+按上述判据，本论文为后续工程演进给出三阶段路线：
+
+\textbf{阶段一——推理本体加速}（短期，最高优先级）。
+目标是把 $T_{\text{infer}}$ 从 2 s 降到 1 s 以下。
+具体路径：ACT 模型 INT8 / FP16 量化、迁移到 ONNX Runtime
+（其 ARM 后端针对 Cortex-A76 的 NEON 指令做了专门优化）、
+评估是否需要进一步引入 GEMM 算子手工优化。
+本阶段单独即可把同步模式的实测 FPS 从 19 推高到 30+。
+
+\textbf{阶段二——启用推理异步}（中期，依赖阶段一完成）。
+当 $T_{\text{infer}} \leq N/(2F) \approx 1.67$ s 时，
+不等式 $N \geq 2 T_{\text{infer}} F$ 重新成立，
+此时启用 \texttt{robot\_client} + \texttt{policy\_server} 双进程架构
+才能带来真实的吞吐提升。本阶段还需要为 \texttt{policy\_server}
+配置 \texttt{taskset} 绑核策略，并验证 4.5 节实验中 $T_{\text{infer}}$
+的 CPU 争抢抬升量是否可接受。
+
+\textbf{阶段三——可选：模型重训以拓宽不等式余量}（长期）。
+如果阶段一加速后 $T_{\text{infer}}$ 仍接近临界值（例如 1.5 s），
+可以训练一个 \texttt{chunk\_size = 200} 的 ACT 模型，
+让不等式右侧从 $2 \times 1.5 \times 30 = 90$ 远小于 $N = 200$，
+异步推理获得充足余量。但 ACT 的 \texttt{chunk\_size} 在训练期固定，
+更大的 open-loop 范围有可能引入误差累积，需配合 temporal ensemble 权重重新调参。
+本阶段的工作量与不确定性最大，仅在阶段一与阶段二无法单独达到目标 FPS 时才启动。
+
+\subsubsection{与第五章的衔接}\label{sec:opt-link-to-ch5}
+
+本章的最终判据可以一句话表述：在树莓派 5 + ACT 的 LeRobot 用例下，
+\textbf{推理本体加速是唯一无条件的优化方向，
+其余优化项的 ROI 都依赖它先完成}。
+第五章``总结与展望''将沿此判据进一步展开，
+讨论本论文的研究边界、尚未实现的实验项以及面向更高算力嵌入式 NPU 平台
+（如 RK3588、Jetson Orin Nano）的迁移可能性。

@@ -1,0 +1,65 @@
+\subsection{舵机执行通路异步化的可行性分析}\label{sec:async-write}
+
+\subsubsection{半双工 TTL 总线的物理约束}\label{sec:async-write-bus}
+
+机械臂六个 STS-3215 舵机走的是 Feetech SCServo 协议，物理层是
+单根 TTL 半双工串行线（\texttt{/dev/ttyACM0}）。
+``半双工''意味着同一时刻总线上只能存在一个方向的传输：
+要么主机向某个 ID 写指令，要么某个舵机向主机回报状态。
+六个舵机和主机控制板共享这一根线，所有事务必须严格串行。
+
+这与摄像头的 USB 链路有本质区别。每台 USB 摄像头独占一条 USB 接口，
+后台 \texttt{async\_read} 线程不停 \texttt{read()} 不会影响其他设备；
+而舵机只要后台线程发起任何写入，就会和主线程的 \texttt{sync\_read}
+在物理总线上撞车，造成字节流交错、回包校验失败、整帧数据废掉。
+
+\subsubsection{异步写为什么不可行}\label{sec:async-write-why-not}
+
+把 \texttt{sync\_write} 改为后台队列异步执行，至少要面对四条独立的约束，
+任意一条都足以让该方案失败：
+
+\textbf{约束 A——总线竞争}：异步写线程和主线程的 \texttt{sync\_read}
+不可避免地会同时尝试占用总线。即使引入互斥锁让两者轮流持锁，
+锁竞争和上下文切换会把异步带来的并发收益完全吃掉，
+退化成纯串行加额外开销，等于没异步。
+
+\textbf{约束 B——安全限幅链断裂}：在
+\texttt{so101\_follower.py} 的 \texttt{send\_action()} 中，
+当用户配置了 \texttt{max\_relative\_target} 时存在如下读改写链：
+\begin{verbatim}
+goal_pos = parse(action)
+if max_relative_target is not None:
+    present_pos = bus.sync_read("Present_Position")
+    goal_pos = ensure_safe_goal_position(goal_pos, present_pos)
+bus.sync_write("Goal_Position", goal_pos)
+\end{verbatim}
+这条链严格要求``读到的当前位置''与``写出的目标位置''属于同一时刻，
+限幅基准才有意义。一旦写操作异步化，下一帧的 \texttt{sync\_read}
+可能读到上一帧目标尚未执行完的中间位置，
+\texttt{ensure\_safe\_goal\_position()} 的限幅基准变得不确定，
+最坏情况下机械臂可能在限幅阈值附近发生连续误判。
+
+\textbf{约束 C——错误暴露延迟}：当前 \texttt{\_sync\_write} 在
+通信失败时立即抛出 \texttt{ConnectionError}，调用方
+（\texttt{robot.send\_action()}）能在同一帧内感知到``指令没送达''，
+可以停机、重试或上报。如果改为异步：主线程已经返回成功，
+policy 继续向前推理，几十毫秒后后台线程才发现包掉了，
+此时机械臂可能已经卡在某个半执行姿态，policy 还在按
+``执行成功''的假设输出下一条指令。在机器人安全场景里，
+这种错误反馈的滞后是不可接受的。
+
+\textbf{约束 D——收益不在瓶颈上}：参考第三章的耗时分布，
+\texttt{sync\_write} 写一帧约 1--3 ms，而 ACT 推理一次约 2000 ms。
+即便假定异步写能完美隐藏掉这 1--3 ms 的阻塞，
+对总循环时间的削减也不到 0.1\%。在当前推理主导的负载下，
+任何 ROI 计算都会得到\textbf{接近零}的结果。
+
+\subsubsection{小结}\label{sec:async-write-conclusion}
+
+四条约束分别来自硬件协议（A）、应用层不变量（B）、
+安全工程实践（C）和工程 ROI（D），任何一条都构成独立的否决理由。
+更关键的是，约束 A 和 B 是\textbf{结构性的}：只要硬件保持半双工 TTL 总线，
+只要 \texttt{send\_action()} 还要做读改写式的安全限幅，
+异步写在本平台上都不存在落地空间。LeRobot 上游代码中既没有
+\texttt{\_async\_write()} 占位方法、也没有任何 TODO 注释，
+也是出于同样的判断。因此本论文不再把舵机异步写视为候选优化方向。
