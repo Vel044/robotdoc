@@ -1,0 +1,224 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="2119" height="742" viewBox="0 0 2119 742" role="img"
+     aria-labelledby="title desc">
+  <title id="title">三类典型工作负载示意图：抓取、推倒、分类</title>
+  <desc id="desc">矢量化展示三类机器人操作任务：单瓶抓取、指定目标推倒和三瓶顺序分类。</desc>
+
+  <defs>
+    <style>
+      .font { font-family: "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; }
+      .title { font-size: 50px; font-weight: 700; fill: #17202a; }
+      .subtitle { font-size: 28px; font-weight: 500; fill: #56616f; }
+      .badge-text { font-size: 30px; font-weight: 700; fill: #17202a; }
+      .label { font-size: 28px; font-weight: 600; fill: #3a4653; }
+      .label-soft { font-size: 24px; font-weight: 500; fill: #677282; }
+      .legend { font-size: 22px; font-weight: 500; fill: #6a7380; }
+      .panel-bg { fill: #fbfcfd; }
+      .panel-line { stroke: #d9dee5; stroke-width: 2.5; }
+      .callout { fill: #ffffff; stroke: #cbd3dc; stroke-width: 1.6; }
+      .shadow { fill: #1b1f24; opacity: 0.12; }
+      .rim { fill: #202427; stroke: #050607; stroke-width: 3; }
+      .basket-wall { fill: #16191c; stroke: #050607; stroke-width: 2.6; }
+      .mesh-fill { fill: url(#mesh); }
+      .table-top { fill: #f1dfc2; stroke: #1e242b; stroke-width: 2.4; }
+      .table-edge { fill: #d8c1a0; stroke: #1e242b; stroke-width: 2.2; }
+      .table-leg { fill: #b9bec3; stroke: #1e242b; stroke-width: 2.1; }
+      .wood-line { display: none; }
+      .arrow { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 4.6; opacity: 0.58; }
+      .leader { fill: none; stroke: #8792a0; stroke-width: 1.4; stroke-linecap: round; stroke-dasharray: 4 5; }
+      .order-dot { stroke: #ffffff; stroke-width: 3; }
+      .order-text { font-size: 24px; font-weight: 800; fill: #ffffff; }
+    </style>
+
+    <pattern id="mesh" width="16" height="16" patternUnits="userSpaceOnUse">
+      <rect width="16" height="16" fill="#111416"/>
+      <path d="M-4 16 L16 -4 M0 20 L20 0 M8 24 L24 8" stroke="#d9dde2" stroke-width="2.4" opacity="0.62"/>
+      <path d="M-4 0 L16 20 M0 -4 L20 16 M8 -8 L24 8" stroke="#d9dde2" stroke-width="2.4" opacity="0.62"/>
+    </pattern>
+
+    <marker id="arrow-blue" viewBox="0 0 12 12" refX="10.5" refY="6" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M1.5 1.2 L10.8 6 L1.5 10.8 Z" fill="#2b7fc3"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 12 12" refX="10.5" refY="6" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M1.5 1.2 L10.8 6 L1.5 10.8 Z" fill="#7a4fb1"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 12 12" refX="10.5" refY="6" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M1.5 1.2 L10.8 6 L1.5 10.8 Z" fill="#6e9d55"/>
+    </marker>
+    <marker id="arrow-gray" viewBox="0 0 12 12" refX="10.5" refY="6" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M1.5 1.2 L10.8 6 L1.5 10.8 Z" fill="#7e8792"/>
+    </marker>
+
+    <symbol id="work-table" viewBox="0 0 380 340">
+      <ellipse class="shadow" cx="192" cy="317" rx="160" ry="16"/>
+      <path class="table-leg" d="M44 248 h23 v82 q0 10 -11.5 10 q-11.5 0 -11.5 -10 Z"/>
+      <path class="table-leg" d="M316 248 h23 v82 q0 10 -11.5 10 q-11.5 0 -11.5 -10 Z"/>
+      <path class="table-edge" d="M28 245 H352 Q367 245 365 260 L360 281 Q358 293 344 293 H36 Q23 293 21 280 L16 260 Q14 245 28 245 Z"/>
+      <path class="table-top" d="M24 30 H344 Q356 30 358 42 L378 244 Q380 262 361 262 H38 Q21 262 19 246 L1 48 Q-1 30 24 30 Z"/>
+      <path class="wood-line" d="M43 74 C120 61 206 61 327 77"/>
+      <path class="wood-line" d="M32 132 C108 119 230 118 350 137"/>
+      <path class="wood-line" d="M49 193 C137 178 238 183 356 198"/>
+      <path class="wood-line" d="M83 44 C71 95 72 158 89 244"/>
+      <path class="wood-line" d="M238 40 C229 107 234 185 253 252"/>
+    </symbol>
+
+    <symbol id="basket" viewBox="0 0 330 255">
+      <ellipse class="shadow" cx="165" cy="238" rx="147" ry="15"/>
+      <rect class="basket-wall" x="13" y="55" width="304" height="178" rx="23"/>
+      <rect class="mesh-fill" x="44" y="96" width="242" height="86" rx="8"/>
+      <rect class="mesh-fill" x="47" y="185" width="235" height="33" rx="5" opacity="0.85"/>
+      <rect class="rim" x="2" y="33" width="326" height="82" rx="26"/>
+      <rect class="mesh-fill" x="44" y="54" width="242" height="36" rx="4"/>
+      <path d="M24 116 h282 v17 H24 Z" fill="#2c3034" stroke="#050607" stroke-width="2.4"/>
+      <path d="M30 221 h270" stroke="#070809" stroke-width="5" stroke-linecap="round"/>
+      <path d="M38 129 v84 M292 129 v84" stroke="#070809" stroke-width="4" opacity="0.75"/>
+    </symbol>
+
+    <symbol id="bottle-upright" viewBox="0 0 70 180">
+      <ellipse cx="35" cy="168" rx="30" ry="8" fill="#111820" opacity="0.14"/>
+      <path d="M15 48 C15 35 24 31 27 24 V19 H43 V24 C46 31 55 35 55 48 V133 C55 153 46 164 35 164 C24 164 15 153 15 133 Z"
+            fill="currentColor" opacity="0.56" stroke="#17202a" stroke-width="2.6"/>
+      <ellipse cx="35" cy="50" rx="20" ry="10" fill="#ffffff" opacity="0.30" stroke="#17202a" stroke-width="1.6"/>
+      <path d="M18 84 C27 96 43 96 52 84" fill="none" stroke="#17202a" stroke-width="1.5" opacity="0.35"/>
+      <path d="M20 134 C28 146 42 146 50 134" fill="none" stroke="#17202a" stroke-width="1.5" opacity="0.35"/>
+      <rect x="21" y="7" width="28" height="18" rx="7" fill="currentColor" opacity="0.88" stroke="#17202a" stroke-width="2.6"/>
+      <ellipse cx="35" cy="7" rx="14" ry="5" fill="#ffffff" opacity="0.26" stroke="#17202a" stroke-width="1.4"/>
+      <path d="M25 58 V145" stroke="#ffffff" stroke-width="3.3" opacity="0.48" stroke-linecap="round"/>
+      <path d="M46 58 V140" stroke="#ffffff" stroke-width="2" opacity="0.24" stroke-linecap="round"/>
+    </symbol>
+
+    <symbol id="bottle-ghost" viewBox="0 0 70 180">
+      <ellipse cx="35" cy="168" rx="30" ry="8" fill="currentColor" opacity="0.10"/>
+      <path d="M15 48 C15 35 24 31 27 24 V19 H43 V24 C46 31 55 35 55 48 V133 C55 153 46 164 35 164 C24 164 15 153 15 133 Z"
+            fill="currentColor" opacity="0.16" stroke="currentColor" stroke-width="3.2" stroke-dasharray="8 6"/>
+      <rect x="21" y="7" width="28" height="18" rx="7" fill="currentColor" opacity="0.16"
+            stroke="currentColor" stroke-width="3.2" stroke-dasharray="8 6"/>
+      <ellipse cx="35" cy="7" rx="14" ry="5" fill="#ffffff" opacity="0.42" stroke="currentColor" stroke-width="1.7"/>
+    </symbol>
+
+    <symbol id="bottle-side" viewBox="0 0 184 76">
+      <ellipse cx="92" cy="67" rx="70" ry="9" fill="#111820" opacity="0.14"/>
+      <path d="M35 12 H130 C149 12 165 27 165 38 C165 49 149 64 130 64 H35 C18 64 6 52 6 38 C6 24 18 12 35 12 Z"
+            fill="currentColor" opacity="0.56" stroke="#17202a" stroke-width="2.7"/>
+      <rect x="152" y="25" width="29" height="26" rx="11" fill="currentColor" opacity="0.88" stroke="#17202a" stroke-width="2.7"/>
+      <ellipse cx="38" cy="38" rx="30" ry="25" fill="#ffffff" opacity="0.20" stroke="#17202a" stroke-width="1.5"/>
+      <path d="M74 16 C65 28 64 48 74 61 M110 16 C101 28 100 48 110 61 M141 20 C133 30 133 46 141 56"
+            fill="none" stroke="#17202a" stroke-width="1.4" opacity="0.35"/>
+      <path d="M24 25 C65 15 114 18 146 30" fill="none" stroke="#ffffff" stroke-width="4" opacity="0.35" stroke-linecap="round"/>
+    </symbol>
+  </defs>
+
+  <rect width="2119" height="742" fill="#ffffff"/>
+  <rect class="panel-bg" x="0" y="0" width="706" height="742"/>
+  <rect class="panel-bg" x="706" y="0" width="706" height="742"/>
+  <rect class="panel-bg" x="1412" y="0" width="707" height="742"/>
+  <line class="panel-line" x1="706" y1="0" x2="706" y2="742"/>
+  <line class="panel-line" x1="1412" y1="0" x2="1412" y2="742"/>
+  <rect x="1.5" y="1.5" width="2116" height="739" fill="none" stroke="#d9dee5" stroke-width="3"/>
+
+  <g class="font" id="task-grasp">
+    <rect x="42" y="36" width="58" height="58" rx="13" fill="#e8f2fb" stroke="#b9d5ed" stroke-width="1.8"/>
+    <text class="badge-text" x="71" y="76" text-anchor="middle">低</text>
+    <text class="title" x="122" y="76">抓取 Grasp</text>
+    <text class="subtitle" x="122" y="116">单目标识别 / 固定动作路径</text>
+
+    <use href="#work-table" xlink:href="#work-table" x="335" y="236" width="335" height="300"/>
+    <use href="#basket" xlink:href="#basket" x="24" y="305" width="318" height="245"/>
+
+    <use href="#bottle-ghost" xlink:href="#bottle-ghost" x="500" y="170" width="72" height="184" style="color:#8f9aa8"/>
+    <path class="arrow" d="M535 270 C430 300 280 355 178 416" stroke="#7e8792" marker-end="url(#arrow-gray)"/>
+    <use href="#bottle-upright" xlink:href="#bottle-upright" x="126" y="316" width="76" height="194" style="color:#f2f6fa"/>
+
+    <g transform="translate(260 166)">
+      <rect class="callout" x="0" y="0" width="230" height="54" rx="10"/>
+      <text class="label" x="115" y="37" text-anchor="middle">桌面起始位姿</text>
+    </g>
+    <path class="leader" d="M169 511 C154 523 133 527 110 525"/>
+    <text class="label-soft" x="70" y="586">篮内结果</text>
+    <path class="leader" d="M540 355 C570 450 565 535 555 558"/>
+    <text class="label-soft" x="505" y="586">虚线白瓶</text>
+
+    <rect x="72" y="620" width="560" height="58" rx="12" fill="#ffffff" stroke="#d8dee6" stroke-width="1.4"/>
+    <text class="label" x="352" y="658" text-anchor="middle">目标唯一，动作路径稳定</text>
+  </g>
+
+  <g class="font" id="task-push">
+    <rect x="748" y="36" width="58" height="58" rx="13" fill="#f0eaf8" stroke="#d1bee8" stroke-width="1.8"/>
+    <text class="badge-text" x="777" y="76" text-anchor="middle">中</text>
+    <text class="title" x="828" y="76">推倒 Push</text>
+    <text class="subtitle" x="828" y="116">指定目标选择 / 姿态变化</text>
+
+    <use href="#work-table" xlink:href="#work-table" x="1014" y="236" width="335" height="300"/>
+    <use href="#basket" xlink:href="#basket" x="730" y="305" width="318" height="245"/>
+
+    <path class="arrow" d="M1164 281 C1110 324 1114 374 1192 400" stroke="#7e8792" marker-end="url(#arrow-gray)"/>
+    <use href="#bottle-ghost" xlink:href="#bottle-ghost" x="1127" y="150" width="72" height="184" style="color:#8f9aa8"/>
+    <use href="#bottle-side" xlink:href="#bottle-side" x="1148" y="344" width="163" height="72" style="color:#f2f6fa"/>
+    <use href="#bottle-upright" xlink:href="#bottle-upright" x="1280" y="203" width="72" height="184" style="color:#2b7fc3"/>
+
+    <g transform="translate(925 184)">
+      <rect class="callout" x="0" y="0" width="158" height="54" rx="10"/>
+      <text class="label" x="79" y="37" text-anchor="middle">推倒白瓶</text>
+    </g>
+    <path class="leader" d="M1220 422 C1190 480 1120 535 1100 558"/>
+    <text class="label-soft" x="1048" y="586">白瓶倒下</text>
+    <path class="leader" d="M1320 394 C1350 470 1325 540 1275 558"/>
+    <text class="label-soft" x="1220" y="586">蓝瓶直立</text>
+
+    <rect x="778" y="620" width="560" height="58" rx="12" fill="#ffffff" stroke="#d8dee6" stroke-width="1.4"/>
+    <text class="label" x="1058" y="658" text-anchor="middle">引入目标选择判断</text>
+  </g>
+
+  <g class="font" id="task-sort">
+    <rect x="1454" y="36" width="58" height="58" rx="13" fill="#edf5e9" stroke="#c7dfbc" stroke-width="1.8"/>
+    <text class="badge-text" x="1483" y="76" text-anchor="middle">高</text>
+    <text class="title" x="1534" y="76">分类 Sort</text>
+    <text class="subtitle" x="1534" y="116">多目标识别 / 长程序列操作</text>
+
+    <use href="#work-table" xlink:href="#work-table" x="1740" y="244" width="350" height="304"/>
+    <use href="#basket" xlink:href="#basket" x="1432" y="326" width="330" height="250"/>
+
+    <use href="#bottle-ghost" xlink:href="#bottle-ghost" x="1840" y="172" width="72" height="184" style="color:#8f9aa8"/>
+    <use href="#bottle-ghost" xlink:href="#bottle-ghost" x="1928" y="184" width="72" height="184" style="color:#2b7fc3"/>
+    <use href="#bottle-ghost" xlink:href="#bottle-ghost" x="2017" y="198" width="72" height="184" style="color:#6e9d55"/>
+
+    <path class="arrow" d="M1875 302 C1802 366 1701 417 1530 431" stroke="#7e8792" marker-end="url(#arrow-gray)"/>
+    <path class="arrow" d="M1963 316 C1894 388 1768 430 1603 428" stroke="#2b7fc3" marker-end="url(#arrow-blue)"/>
+    <path class="arrow" d="M2053 327 C1940 426 1680 438 1672 428" stroke="#6e9d55" marker-end="url(#arrow-green)"/>
+
+    <use href="#bottle-upright" xlink:href="#bottle-upright" x="1487" y="350" width="72" height="184" style="color:#f2f6fa"/>
+    <use href="#bottle-upright" xlink:href="#bottle-upright" x="1558" y="350" width="72" height="184" style="color:#2b7fc3"/>
+    <use href="#bottle-upright" xlink:href="#bottle-upright" x="1629" y="350" width="72" height="184" style="color:#78a85e"/>
+
+    <g transform="translate(1595 206)">
+      <rect class="callout" x="0" y="0" width="222" height="54" rx="10"/>
+      <text class="label" x="111" y="37" text-anchor="middle">按序移入篮子</text>
+    </g>
+
+    <circle class="order-dot" cx="1768" cy="367" r="20" fill="#f2f6fa" stroke="#7e8792"/>
+    <text x="1768" y="376" text-anchor="middle" font-size="24" font-weight="800" fill="#17202a">1</text>
+    <circle class="order-dot" cx="1848" cy="407" r="20" fill="#2b7fc3"/>
+    <text class="order-text" x="1848" y="416" text-anchor="middle">2</text>
+    <circle class="order-dot" cx="1990" cy="373" r="20" fill="#6e9d55"/>
+    <text class="order-text" x="1990" y="382" text-anchor="middle">3</text>
+
+    <path class="leader" d="M1534 544 C1530 568 1510 584 1485 592"/>
+    <text class="label-soft" x="1448" y="606">分类料框</text>
+    <path class="leader" d="M1978 376 C2040 455 2020 540 1975 558"/>
+    <text class="label-soft" x="1932" y="586">初始位姿</text>
+
+    <rect x="1484" y="620" width="560" height="58" rx="12" fill="#ffffff" stroke="#d8dee6" stroke-width="1.4"/>
+    <text class="label" x="1764" y="658" text-anchor="middle">多步序列，需要长程规划</text>
+  </g>
+
+  <g class="font" id="legend">
+    <line x1="770" y1="713" x2="815" y2="713" stroke="#7e8792" stroke-width="4" stroke-linecap="round" marker-end="url(#arrow-gray)"/>
+    <text class="legend" x="830" y="720">动作方向</text>
+    <rect x="950" y="701" width="30" height="24" rx="9" fill="#2b7fc3" opacity="0.18" stroke="#2b7fc3" stroke-width="2" stroke-dasharray="5 4"/>
+    <text class="legend" x="995" y="720">参考位姿</text>
+    <rect x="1130" y="701" width="30" height="24" rx="9" fill="#2b7fc3" opacity="0.28" stroke="#17202a" stroke-width="1.6"/>
+    <text class="legend" x="1175" y="720">当前/结果</text>
+  </g>
+</svg>

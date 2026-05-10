@@ -9,8 +9,8 @@
 \subsubsection{LeRobot 执行路径软件栈}\label{sec:execution-software-stack}
 
 图~\ref{fig:execution-callstack-software} 展示了执行阶段从
-\texttt{record.py} 的 \texttt{record\_loop()} 到 \texttt{scservo\_sdk} 的
-完整 Python 软件栈。
+\texttt{record.py} 触发 \texttt{send\_action()} 到 \texttt{scservo\_sdk} 的
+关键类关系与调用关系。
 
 \texttt{get\_observation()} 和 \texttt{send\_action()} 分别对应
 读取舵机当前位置（sync\_read）和写入目标位置（sync\_write）的两条路径，
@@ -21,7 +21,7 @@
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\textwidth]{3_性能分析/image/execution_callstack_software.png}
-  \caption{LeRobot 执行阶段 Python 软件栈调用链}
+  \caption{LeRobot 执行阶段关键类关系与调用关系}
   \label{fig:execution-callstack-software}
 \end{figure}
 
@@ -80,18 +80,16 @@
   \label{fig:sync-read-chain}
 \end{figure}
 
-\subsubsection{关键性能结论}\label{sec:execution-conclusion}
-
-\textbf{关键性能结论}（融合 sync\_read 与 sync\_write 两条路径的共性）：
-
-\begin{itemize}[leftmargin=2em]
-  \item \textbf{系统调用本身开销可忽略}：\texttt{write} 系统调用耗时仅 38 $\mu$s，
-        \texttt{read} 类似量级，二者组合（sync\_read）约 1.2 ms，单 \texttt{write}（sync\_write）约 1--3 ms；
-  \item \textbf{瓶颈在物理层而非软件路径}：1 Mbps 波特率下，
-        Sync Read 帧 14--15 字节、Sync Write 帧约 26 字节（6 ID × 4 字节位置 + 包头 + 校验），
-        总线传输时间是耗时主体；
-  \item \textbf{半双工约束是异步化的根本障碍}：同一时刻总线仅能容纳一个方向的传输，
-        异步并发会导致总线冲突、指令帧损坏，且 \texttt{send\_action()} 中
-        read-modify-write 的安全限幅链路依赖同步读返回的实时位置，
-        异步化将破坏这一不变量（详见 \S\ref{sec:async-feasibility}）。
-\end{itemize}
+\textbf{关键性能结论}\label{sec:execution-conclusion}：
+综合 \texttt{sync\_read} 与 \texttt{sync\_write} 两条路径可以看出，
+执行阶段的主要耗时并不来自 Linux 系统调用本身。\texttt{write} 系统调用仅约
+38 $\mu$s，\texttt{read} 也处于类似量级；实际观测到的 \texttt{sync\_read}
+约 1.2 ms、\texttt{sync\_write} 约 1--3 ms，主要由 1 Mbps 波特率下的
+SCServo 总线传输决定。具体来说，Sync Read 指令帧约 14--15 字节，
+Sync Write 指令帧约 26 字节（6 ID $\times$ 4 字节位置数据，加上包头与校验），
+串口物理传输时间构成耗时主体。因此，执行阶段瓶颈位于半双工舵机总线和协议物理层，
+而不是 Python、SDK 封装或系统调用路径。进一步地，同一时刻总线只能容纳一个方向的传输，
+若将读写简单异步并发，反而可能造成总线竞争和指令帧损坏；同时，
+\texttt{send\_action()} 中 read-modify-write 的安全限幅链路依赖同步读返回的实时位置，
+异步化会破坏这一控制不变量。因此，舵机读写不适合作为本文主要异步优化方向
+（详见 \S\ref{sec:async-feasibility}）。

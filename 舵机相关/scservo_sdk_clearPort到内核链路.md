@@ -6,6 +6,30 @@
 
 ---
 
+## 图：ioctl(TCSBRK, 1) syscall 到内核边界的分层路径
+
+```
+ioctl(fd, TCSBRK, 1)                    # glibc tcdrain() 把 tcdrain 转成这个 ioctl
+  │
+  ▼
+VFS: do_vfs_ioctl()                     # 为什么：所有设备的 ioctl 都经过 VFS 分发
+  │  通用命令集不处理 TCSBRK，返回 -ENOIOCTLCMD
+  ▼
+TTY ioctl: tty_ioctl()                  # 收到 TCSBRK 后调 tty_wait_until_sent(tty, 0)
+  │  为什么走 TTY：因为 fd 是 /dev/ttyACM0，对应 tty_fops
+  ▼
+tty_wait_until_sent()                  # 睡在 tty->write_wait，直到输出缓冲排空
+  │  为什么需要等待：确保之前 write 的 URB 已经真正发出去，再发下一帧
+  ▼
+tty_chars_in_buffer(tty)                # 查询驱动还有多少字节没发完
+  │  为什么调用驱动：因为只有驱动知道 USB URB 队列状态
+  ▼
+acm_tty_chars_in_buffer()              # CDC ACM 驱动计算正在使用的写缓冲数 × writesize
+========== kernel boundary ==========
+```
+
+---
+
 ## 1. scservo_sdk 入口
 
 `clearPort()` 在 `protocol_packet_handler.txPacket()` 中，每次真正 `writePort()` 之前调用：
@@ -43,6 +67,8 @@ def clearPort(self):                      # self 是 PortHandler，内部持有 
 ---
 
 ## 2. 完整调用栈
+
+`clearPort()` 的链路很特殊：它不传输数据，只发一个 `ioctl` 命令来等待输出完成。内核外是 pyserial → CPython termios → glibc 的层层转换；内核内是 VFS → TTY ioctl → `tty_wait_until_sent()` → CDC ACM 查询路径。本节展示从 Python 到内核的完整调用栈。
 
 ### 2.1 内核外调用栈
 
@@ -111,6 +137,8 @@ static const struct tty_operations acm_ops = {
 
 ## 3. pyserial 与 CPython 层
 
+`clearPort()` 在 Python 侧只做了两件事：`pyserial.Serial.flush()` 把语义转给 `termios.tcdrain()`，CPython 的 termios 模块释放 GIL 后调用 glibc 的 `tcdrain()`。glibc 再把 `tcdrain` 包装成 `ioctl(fd, TCSBRK, 1)`。本节解释 Python 到 glibc 的转换过程。
+
 ### 3.1 pyserial `flush()`
 
 ```python
@@ -169,6 +197,8 @@ weak_alias (__libc_tcdrain, tcdrain)             // tcdrain 是 __libc_tcdrain �
 
 ## 4. Linux ioctl 入口
 
+`ioctl` 是 Linux 中设备驱动的"万能"系统调用。`TCSBRK` 不是 VFS 通用命令，所以 `do_vfs_ioctl()` 不认识它，会返回 `-ENOIOCTLCMD`，再由 `vfs_ioctl()` 通过 `tty_fops.unlocked_ioctl` 分发给 `tty_ioctl()`。本节解释 `ioctl` 从 VFS 到 TTY 层的分发路径。
+
 ### 4.1 系统调用入口
 
 ```c
@@ -221,6 +251,8 @@ static const struct file_operations tty_fops = {
 ---
 
 ## 5. TTY 层如何处理 TCSBRK
+
+glibc 把 `tcdrain` 转成 `ioctl(fd, TCSBRK, 1)` 传入内核。TTY 层的 `tty_ioctl()` 收到 `TCSBRK` 后，需要区分是"发送 break"还是"等待输出完成"。由于 `arg=1`，内核不会发送 break，而是调用 `tty_wait_until_sent()` 进入等待，直到驱动报告输出队列已空。本节解释 TTY 层如何解析 `TCSBRK` 命令，并把等待请求转发给具体驱动。
 
 ### 5.1 `tty_ioctl()` 的 `TCSBRK` 分支
 
@@ -297,6 +329,8 @@ unsigned int tty_chars_in_buffer(struct tty_struct *tty)
 ---
 
 ## 6. CDC ACM 驱动如何判断发送完成
+
+`tty_wait_until_sent()` 反复调用 `tty_chars_in_buffer()` 查询还有多少输出字节未完成。对 `/dev/ttyACM0`，这个查询最终落到 CDC ACM 驱动的 `acm_tty_chars_in_buffer()`。本节解释 CDC ACM 如何根据正在使用的写缓冲估算剩余字节，以及写完成回调如何通过 `tty_port_tty_wakeup()` 唤醒阻塞在 `write_wait` 上的进程。
 
 ### 6.1 `tty_operations` 绑定
 

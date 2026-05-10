@@ -42,5 +42,5 @@ PyTorch 则提供 TorchScript 与 CPU 优化，是 LeRobot\cite{lerobot} 等机�
 迄今仍缺乏系统性的跨层次联合剖析。
 本文的研究方向正是\textbf{跨层次联合延迟分析}：
 建立覆盖 AI 推理框架层、Python 运行时层、OS 内核层与硬件 I/O 层的四层性能模型，
-通过 torch.profiler、ftrace、perf 等工具联合剖析，
+通过ftrace等工具联合剖析，
 端到端定位 ARM 嵌入式平台上机器人推理主循环的真实瓶颈所在。

@@ -1,4 +1,4 @@
-\subsection{三类典型工作负载特征}
+\subsection{实验任务与数据集}
 
 本文采用"遥操作采集—服务器训练—边缘推理"的标准流程构建实验数据集。
 数据采集阶段，操作者手持 leader 臂进行示教，SO-101 follower 臂实时同步复现动作，
@@ -21,6 +21,15 @@ LeRobot 同步记录所有关节角度与两路摄像头图像，形成结构化
   \bottomrule
 \end{tabular}
 \end{center}
+
+三类任务的场景布置与目标动作如图~\ref{fig:three-tasks-overview} 所示。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{2_实验环境构建/image/three_tasks_overview.pdf}
+  \caption{三类典型工作负载示意图：抓取、推倒、分类}
+  \label{fig:three-tasks-overview}
+\end{figure}
 
 三类任务统一使用树莓派5、ACT（\texttt{chunk\_size=100}）、目标帧率 30\,fps，
 每类任务取 $n=50$ 个 episode 的统计结果作为基准画像，

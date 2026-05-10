@@ -21,7 +21,8 @@
 │   └── plot_cs100_comparison.py     # 绘图脚本
 ├── 03_摄像头感知层级耗时剖析/        # 摄像头 9 层（pselect6→to_device）耗时分布 ⬜
 ├── 04_实验环境与测量工具校准/        # strace/ftrace/trace-cmd 扰动校准 ✅
-└── 05_用action替代state观测/        # 用 action_{t-1} 替代 observation.state（设计中）⬜
+├── 05_用action替代state观测/        # 用 action_{t-1} 替代 observation.state（设计中）⬜
+└── 08_异步推理阈值参数扫描/          # 扫描 chunk_size_threshold (hold) 对 FPS 和动作质量的影响 ✅
 ```
 
 ## 实验状态
@@ -33,6 +34,7 @@
 | 03 | 摄像头感知层级耗时剖析 | ⬜ 设计已完成，待执行 | 第3.1节 感知阶段性能剖析 |
 | 04 | 实验环境与测量工具校准 | ✅ 已完成（A/B/C/D 四组扰动校准） | 第2.4--2.6节 实验方法与工具链 |
 | 05 | 用 action 替代 observation.state | ⬜ 立项中（依赖重新采集训练数据） | 第4章 优化 |
+| 08 | 异步推理阈值参数扫描（hold 扫描） | ✅ 已完成（hold=0.3~0.9，各 60s；推荐 hold=0.8） | 第4.3节 异步推理实验验证 |
 
 ## 关键数据速查（实验01）
 

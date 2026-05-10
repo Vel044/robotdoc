@@ -9,6 +9,40 @@
 
 ---
 
+## 图：read() syscall 到内核边界的分层路径
+
+```
+read(fd, buf, count)                    # Python/Pytooth 调用入口
+  │
+  ▼
+VFS: vfs_read()                         # 同 write，权限检查后分发到 tty_fops.read_iter
+  │
+  ▼
+TTY: tty_read() + N_TTY                   # 终端设备管理层 + 默认行规程；raw 模式下 N_TTY 从 read_buf 消费已到达的字节
+  ▼
+copy_to_user()                          # 把内核 read_buf 字节复制到用户态 Python bytes
+========== kernel / hardware boundary ==========
+
+--- 以下是数据到达的后台异步路径（不经过 read syscall）---
+
+xHCI Hardware: DMA receive               # USB 控制器 DMA 接收字节到 URB transfer_buffer
+  │
+  ▼
+xHCI driver: completion                  # xHCI 产生完成中断，调度 URB 完成回调
+  │
+  ▼
+USB core: urb->complete()               # USB core 调用驱动注册的回调函数
+  │
+  ▼
+CDC ACM: acm_read_bulk_callback()        # 把 URB 数据交给 TTY 层
+  │
+  ▼
+TTY flip buffer + N_TTY receive_buf     # 数据进入 N_TTY read_buf，之后 n_tty_poll() 才返回 EPOLLIN
+========== 后台异步路径边界 ==========
+```
+
+---
+
 ## 1. scservo_sdk 入口
 
 `readPort()` 在 `protocol_packet_handler.rxPacket()` 的循环中被反复调用：
@@ -35,6 +69,8 @@ def readPort(self, length):                  # length 是本次最多希望读�
 ---
 
 ## 2. 完整调用栈
+
+读链路分三个阶段：先通过 `select` 检查 fd 是否可读（就绪检查），再通过 `read` 把数据从内核复制到用户态（数据读取），最后还要理解 USB 回包是如何从硬件进入内核缓冲区的（接收路径）。内核外是 SDK → pyserial → CPython → glibc；内核内是 VFS → TTY → N_TTY → CDC ACM → USB core → xHCI。本节用五张调用栈图展示完整路径。
 
 ### 2.1 就绪检查阶段：内核外调用栈
 
@@ -144,6 +180,8 @@ Linux SYSCALL_DEFINE3(read, fd, buf, count)
 ---
 
 ## 3. pyserial 与 select 阶段
+
+pyserial 的读逻辑是"先 poll 再 read"：先用 `select` 检查 `/dev/ttyACM0` 是否有数据，确认可读后再调用 `os.read()` 取数据。`timeout=0` 时 `select` 只做一次立即轮询，不会阻塞。本节解释 pyserial 的读循环、CPython 的 `select` 实现，以及 glibc 如何把 `select` 转成 `pselect6` 系统调用。
 
 ### 3.1 pyserial `read()`
 
@@ -264,6 +302,8 @@ sig  = NULL
 ---
 
 ## 4. Linux pselect6 与 TTY poll
+
+`pselect6` 进入内核后，VFS 遍历所有被监视的 fd，调用每个文件的 `poll` 方法。对 `/dev/ttyACM0`，最终调用的是 `n_tty_poll()`，它检查 N_TTY 的 `read_buf` 是否有数据。本节解释 Linux select 核心机制，以及 TTY 层如何判断串口 fd 是否可读。
 
 ### 4.1 `pselect6` 入口
 
@@ -418,6 +458,8 @@ static __poll_t n_tty_poll(struct tty_struct *tty, struct file *file,
 
 ## 5. USB CDC ACM 接收路径
 
+与 write 不同，读 URB 是在串口打开时就预提交给 USB core 的。舵机回包到达 USB bulk IN endpoint 后，xHCI 完成 URB，触发 CDC ACM 驱动的完成回调。回调把数据推入 TTY flip buffer，再经 N_TTY 行规程放入 `read_buf`。只有数据进入 `read_buf` 后，上层的 `select` 和 `read` 才能看到它。本节解释数据从 USB 线到内核缓冲区的完整路径。
+
 ### 5.1 打开 tty 时预提交读 URB
 
 ```c
@@ -521,6 +563,8 @@ static void acm_process_read_urb(struct acm *acm, struct urb *urb)
 ---
 
 ## 6. read 系统调用取数据
+
+pyserial 先用 `select` 确认 fd 可读，然后调用 `os.read()` 把数据从内核取回 Python。本章追踪 `read` 系统调用从 CPython 到 glibc、再到 Linux VFS、TTY 层、N_TTY 行规程的完整路径，解释内核如何把已经到达 `read_buf` 的字节复制到用户态。
 
 ### 6.1 CPython 与 glibc
 
