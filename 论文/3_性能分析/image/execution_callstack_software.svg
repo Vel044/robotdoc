@@ -1,16 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="620" viewBox="0 0 1600 620">
   <defs>
     <style>
-      .title { font: 700 34px "Songti SC", "Noto Serif CJK SC", serif; fill: #1f2933; }
-      .small { font: 22px "Songti SC", "Noto Serif CJK SC", serif; fill: #52616b; }
-      .code { font: 700 27px "Menlo", "Consolas", monospace; fill: #17212b; }
-      .method { font: 23px "Menlo", "Consolas", monospace; fill: #24313b; }
+      .title { font: 700 44px "Songti SC", "Noto Serif CJK SC", serif; fill: #1f2933; }
+      .small { font: 31px "Songti SC", "Noto Serif CJK SC", serif; fill: #52616b; }
+      .code { font: 700 36px "Menlo", "Consolas", monospace; fill: #17212b; }
+      .method { font: 34px "Menlo", "Consolas", monospace; fill: #24313b; }
       .box { fill: #ffffff; stroke: #7f95a5; stroke-width: 2.5; rx: 14; }
       .main { fill: #eef7ff; stroke: #2378b9; stroke-width: 3; rx: 14; }
       .base { fill: #f6f8fa; stroke: #8a9aa8; stroke-width: 2.5; rx: 14; }
       .sdk { fill: #fff7ed; stroke: #d97706; stroke-width: 3; rx: 14; }
       .line { stroke: #d0dae2; stroke-width: 2; }
-      .legend { font: 20px "Songti SC", "Noto Serif CJK SC", serif; fill: #52616b; }
+      .legend { font: 28px "Songti SC", "Noto Serif CJK SC", serif; fill: #52616b; }
       .call { stroke: #1f78bd; stroke-width: 3.2; fill: none; marker-end: url(#arrow); }
       .inherit { stroke: #52616b; stroke-width: 2.8; fill: none; marker-end: url(#tri); }
     </style>

@@ -1,0 +1,9 @@
+# Abstract
+
+In order to study the system-level performance bottlenecks of the online control loop of the ACT policy in the LeRobot framework on an SO-101 six-degree-of-freedom robotic arm, this work uses Raspberry Pi 5 as the edge platform and builds a four-layer profiling model covering the inference framework, runtime, kernel, and hardware I/O. Using ftrace, strace, and custom kernel instrumentation, the end-to-end latency and module-level time distribution are quantitatively analyzed.
+
+The results show that, under a 30FPS target configuration, the synchronous system reaches only about 18.7FPS. Tool-calibration experiments show that deferred ftrace causes a 13.9% FPS drop, much smaller than the 40.9% drop caused by strace, and is therefore suitable for later quantitative analysis. ACT forward inference is identified as the dominant bottleneck, with an average latency of about 1925ms per full pass, while the visual encoder and Transformer account for most of the cost. After asynchronous camera prefetching, perception overhead on the main thread becomes small, and the servo write syscall remains at the microsecond level; the execution stage is mainly constrained by the 1Mbps baud rate and the half-duplex bus. To address the inference bottleneck, this work designs and validates an asynchronous inference scheme. In the current single-run sweep, setting the asynchronous inference trigger threshold to 0.30 yields an effective control rate of 27.42FPS, a 70.0% improvement over the synchronous baseline. The results show that system-level layered profiling can effectively locate the real bottlenecks of edge robotic online control, and that asynchronous inference can significantly improve control frequency without changing the model structure.
+
+## Keywords
+
+fundamental software; Linux kernel; system-level performance profiling; asynchronous inference; robotic control; ACT policy; LeRobot

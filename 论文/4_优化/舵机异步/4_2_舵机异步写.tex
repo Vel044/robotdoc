@@ -41,7 +41,7 @@ bus.sync_write("Goal_Position", goal_pos)
 
 \textbf{约束 C——错误暴露延迟}：当前 \texttt{\_sync\_write} 在
 通信失败时立即抛出 \texttt{ConnectionError}，调用方
-（\texttt{robot.send\_action()}）能在同一帧内感知到``指令没送达''，
+（\texttt{robot.send\_action()}）能在同一帧内检测到``指令没送达''，
 可以停机、重试或上报。如果改为异步：主线程已经返回成功，
 policy 继续向前推理，几十毫秒后后台线程才发现包掉了，
 此时机械臂可能已经卡在某个半执行姿态，policy 还在按

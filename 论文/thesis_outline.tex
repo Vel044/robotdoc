@@ -174,15 +174,15 @@
 
 \vspace{1em}
 \zihao{-4}\songti
-本文以树莓派 5（ARM Cortex-A76，4 核，4\,GB LPDDR4X，无 GPU）为边缘推理平台，对 HuggingFace LeRobot 框架下的 ACT 策略在 SO-101 六自由度机械臂上的在线感知—推理—执行循环进行系统级性能剖析。
-针对现有研究多聚焦单一层次、缺乏跨层次联合分析的不足，尤其是主流优化往往集中于模型压缩、模型结构改进或硬件通信链路调优，而相对忽略推理运行时、操作系统调度与设备 I/O 栈等基础软件因素的影响，本文提出覆盖 AI 推理框架层、Python 运行时层、Linux 内核层与硬件 I/O 层的四层性能分析模型，联合使用 ftrace、strace，并在 \texttt{pselect6} 与 \texttt{futex} 路径上加入自定义 \texttt{trace\_printk} 内核插桩，端到端量化三阶段的时间分布，定位主要瓶颈并系统梳理可行的优化路径。
+\parindent=2em
+本文面向LeRobot框架下ACT策略在SO-101六自由度机械臂上的在线控制任务，研究树莓派5这类无GPU ARM边缘平台中观测、推理与执行流程的系统级性能瓶颈。随着端到端机器人学习框架逐渐进入低成本硬件平台，系统能否稳定达到目标控制频率，不仅取决于模型规模和硬件配置，也受到Python运行时、深度学习框架线程行为、Linux内核调度以及设备I/O路径的共同影响。针对现有研究多关注模型压缩或通信优化、较少分析运行时和操作系统路径的问题，本文从机器人基础软件角度出发，对在线控制闭环进行跨层次剖析。
 
-工具链校准实验表明，strace 使主循环 FPS 下降 40.9\%、上下文切换次数放大约一个数量级，不能用于定量时序分析；ftrace 延迟导出方案 FPS 仅下降 13.9\%，被选为正式实验的内核态工具。在 chunk\_size=100、目标 30 FPS 配置下，系统实测帧率仅约 18.7 FPS，距目标存在约 38\% 缺口。逐模块剖析显示，单次 ACT 前向推理耗时约 1925 ms，其中 ResNet18 视觉特征提取占 66.6\%、Transformer Encoder 占 29.6\%，是绝对主瓶颈；摄像头采用后台异步预取，主线程感知耗时仅毫秒级，V4L2 阻塞与 MJPEG 解码主要由后台线程承担；舵机 sync\_read 约 1.2 ms、sync\_write 约 1--3 ms，而 \texttt{write} 系统调用本身仅约 38 \(\mu\)s，执行瓶颈在于 1 Mbps 波特率与半双工总线的物理约束，而非软件或系统调用路径。
+本文以LeRobot核心控制循环\texttt{record.py}为切入点，构建覆盖推理框架层、运行时层、内核层和硬件I/O层的四层性能分析模型。实验平台由树莓派5、SO-101机械臂、两路USB摄像头和ACT策略模型组成，围绕观测阶段的摄像头与舵机读取、推理阶段的ACT前向计算、执行阶段的舵机写入以及等待阶段的帧率控制记录时间开销。方法上，本文结合Python阶段计时、ftrace、strace和内核插桩，对系统端到端时延、模块级时间分布、系统调用阻塞和工具自身扰动进行量化分析，从而区分真实瓶颈与测量工具引入的额外开销。
 
-针对 ACT 推理这一主瓶颈，本文进一步推导出异步推理稳态无 stall 的可行性不等式 \(T_{\text{infer}}F \leq \min(hN,\;N/2)\)，并建立 FPS 随 hold 在临界点前上升、临界点后饱和到 30 FPS 的分段模型。通过 hold 参数 0.10--0.60 的扫描实验，本文在动作质量可接受前提下确定 hold=0.30 为推荐默认值，系统有效控制频率达 27.42 FPS，相比同步基线 16.13 FPS 提升 70.0\%。结果表明，异步调度能够显著回收动作执行期间的空窗；实测 episode 平均值未完全达到 30 FPS，主要来自启动空队列等待和树莓派 5 单机部署下的 CPU 资源争抢。未来仍需结合 INT8 量化、ONNX Runtime 等手段降低有效返回时延，并通过调度隔离减少资源争抢，才能从根本上稳定到达 30 FPS 控制目标。
+实验结果表明，在30 FPS目标配置下，系统同步执行时实测帧率约为18.7 FPS，与目标仍存在明显差距。工具校准实验显示，延迟导出的ftrace使帧率下降13.9\%，明显小于strace的40.9\%，更适合后续定量分析。进一步分析发现，ACT前向推理是主要瓶颈，单次完整推理平均耗时约1925 ms，其中ResNet18视觉编码与Transformer模块占主要比例；摄像头异步预取后主线程观测开销较低，舵机写入系统调用仅为微秒级，执行阶段主要受1 Mbps波特率和半双工总线限制。针对推理瓶颈，本文设计并验证了异步推理方案。在当前平台的单轮扫描实验中，当异步推理触发阈值取0.30时，系统有效控制频率达到27.42 FPS，相比同步基线提升70.0\%。结果表明，系统级分层剖析能够有效定位边缘机器人在线控制的真实性能瓶颈，异步推理能够在不改变模型结构的条件下显著提升控制频率。
 
 \vspace{1.5em}
-{\zihao{-4}\heiti\bfseries 关键词：}{\zihao{-4}\songti LeRobot；ACT 策略；性能剖析；ARM 推理；ftrace；chunk\_size；推理异步化}
+{\zihao{-4}\heiti\bfseries 关键词：}{\zihao{-4}\songti 基础软件；Linux内核；系统级性能剖析；异步推理；机器人控制；ACT策略；LeRobot}
 
 \clearpage
 
@@ -199,40 +199,13 @@
 
 \vspace{1em}
 \zihao{-4}\rmfamily
-This paper presents a system-level performance analysis of the ACT (Action Chunking with Transformers)
-policy running online on a Raspberry Pi 5 (ARM Cortex-A76, 4 cores, 4\,GB LPDDR4X, no GPU) within
-HuggingFace's LeRobot framework, controlling an SO-101 6-DoF arm. Prior optimization efforts often
-focus on model compression, architecture changes, or hardware communication links, while underestimating
-the impact of inference runtimes, OS scheduling, and device I/O stacks. To address this lack of
-cross-layer joint analysis, we propose a four-layer profiling model spanning the AI inference framework,
-Python runtime, Linux kernel, and hardware I/O layers, and combine Python logging, torch.profiler,
-ftrace, strace, and custom \texttt{trace\_printk} instrumentation in the kernel \texttt{pselect6} and
-\texttt{futex} paths to quantify the end-to-end time distribution across perception, inference, and
-execution, locate the dominant bottleneck, and systematically review feasible optimization paths.
+In order to study the system-level performance bottlenecks of the online control loop of the ACT policy in the LeRobot framework on an SO-101 six-degree-of-freedom robotic arm, this work uses Raspberry Pi 5 as the edge platform and builds a four-layer profiling model covering the inference framework, runtime, kernel, and hardware I/O. Using ftrace, strace, and custom kernel instrumentation, the end-to-end latency and module-level time distribution are quantitatively analyzed.
 
-A tool-calibration experiment shows that strace amplifies context switches by roughly an order of
-magnitude and reduces FPS by 40.9\%, ruling it out for quantitative use; ftrace with deferred dump
-incurs only a 13.9\% FPS drop and is adopted as the kernel-side tool. At \texttt{chunk\_size=100} with
-a 30\,FPS target, the system reaches only $\approx$18.7\,FPS, leaving a 38\% gap. Per-module breakdown
-shows that a single ACT forward pass takes about 1925\,ms, with ResNet18 visual feature extraction
-accounting for 66.6\% and the Transformer encoder for 29.6\% --- the absolute bottleneck.
-Camera frames are prefetched in a background thread, so perception cost on the main thread is in the
-millisecond range; servo \texttt{sync\_read} costs $\approx$1.2\,ms and \texttt{sync\_write} 1--3\,ms,
-while the underlying \texttt{write} syscall itself takes only $\approx$38\,$\mu$s, indicating that the
-execution bottleneck lies in the 1\,Mbps half-duplex bus rather than software or syscall paths.
-
-To recover idle CPU windows during inference, we derive a feasibility inequality for asynchronous
-inference, $T_{\text{infer}}F \leq \min(hN,\,N/2)$, and model the FPS--hold curve as rising before
-a critical hold and saturating at 30\,FPS afterwards. A hold sweep from 0.10 to 0.60 shows that,
-with acceptable action quality, hold = 0.30 is recommended as the default and yields an effective
-control rate of 27.42\,FPS, a 70.0\% improvement over the synchronous 16.13\,FPS baseline. The
-remaining gap to 30\,FPS mainly comes from startup queue starvation and CPU contention between
-the client, server, camera, and serial paths on Raspberry Pi 5. Future work on INT8 quantization,
-ONNX Runtime, and scheduling isolation is needed to fully achieve a stable 30\,FPS control target.
+The results show that, under a 30\,FPS target configuration, the synchronous system reaches only about 18.7\,FPS. Tool-calibration experiments show that deferred ftrace causes a 13.9\% FPS drop, much smaller than the 40.9\% drop caused by strace, and is therefore suitable for later quantitative analysis. ACT forward inference is identified as the dominant bottleneck, with an average latency of about 1925\,ms per full pass, while the visual encoder and Transformer account for most of the cost. After asynchronous camera prefetching, observation overhead on the main thread becomes small, and the servo \texttt{write} syscall remains at the microsecond level; the execution stage is mainly constrained by the 1\,Mbps baud rate and the half-duplex bus. To address the inference bottleneck, this work designs and validates an asynchronous inference scheme. In the current single-run sweep, setting the asynchronous inference trigger threshold to 0.30 yields an effective control rate of 27.42\,FPS, a 70.0\% improvement over the synchronous baseline. The results show that system-level layered profiling can effectively locate the real bottlenecks of edge robotic online control, and that asynchronous inference can significantly improve control frequency without changing the model structure.
 
 \vspace{1.5em}
 \noindent{\zihao{-4}\rmfamily\bfseries Key Words: }{\zihao{-4}\rmfamily%
-LeRobot; ACT policy; performance profiling; ARM inference; ftrace; chunk\_size; asynchronous inference}
+fundamental software; Linux kernel; system-level performance profiling; asynchronous inference; robotic control; ACT policy; LeRobot}
 
 \clearpage
 
@@ -271,8 +244,13 @@ LeRobot; ACT policy; performance profiling; ARM inference; ftrace; chunk\_size; 
 \input{4_优化/优化.tex}
 
 %% ══════════════════════════════════════════════════════════
-\section{总结与展望}\label{ch:summary}
+\section{研究局限性与未来工作}\label{ch:future}
 \input{5_总结与展望/总结与展望.tex}
+
+%% ══════════════════════════════════════════════════════════
+\clearpage
+\section{结论}\label{ch:conclusion}
+\input{6_结论/结论.tex}
 
 %% ══════════════════════════════════════════════════════════
 \clearpage

@@ -7,10 +7,13 @@
 有效 FPS 只能由两者的总耗时决定，在本平台上约为 19 FPS。
 如果能把下一次推理重叠到当前动作块的执行阶段内，
 就有机会把系统吞吐恢复到更接近目标控制频率的水平。这就是推理异步化的核心设计动机。
+Real-Time Chunking\cite{realtimechunking} 工作同样指出，对于输出 action chunk 的策略，
+可以采用``执行当前 chunk 的同时生成下一段动作''的方式，
+以降低高延迟策略模型对实时控制频率的影响。
 
 与舵机读写不同的是：推理过程纯粹是 Python+PyTorch
 计算，不与任何半双工硬件资源耦合，理论上具备真正并行的物理基础；
-LeRobot 上游也已为此提供了完整的双进程实现，无需自行从零开发。
+LeRobot 上游也已为此提供了完整的双进程实现\cite{smolvla}，无需自行从零开发。
 因此本节的工作不再是``评估能不能做''，而是``评估在树莓派 5 + 当前 ACT 模型
 的具体参数下，做了能不能带来实际收益''。
 
@@ -22,14 +25,14 @@ LeRobot 上游也已为此提供了完整的双进程实现，无需自行从零
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=0.92\textwidth]{4_优化/images/async_inference_arch.pdf}
-  \caption{异步推理架构：Robot Client 与 Policy Server 是两个独立进程。前者负责硬件连接、观测采集、控制循环与动作执行，后者负责加载模型、完成推理并返回动作序列；二者通过 gRPC 交换带时间戳和步号的观测与动作序列。}
+  \caption{异步推理架构：Robot Client 与 Policy Server 是两个独立进程。前者负责硬件连接、观测阶段、控制循环与动作执行，后者负责加载模型、完成推理并返回动作序列；二者通过 gRPC 交换带时间戳和步号的观测与动作序列。}
   \label{fig:async-inf-arch}
 \end{figure}
 
-其中，\texttt{robot\_client.py} 进程负责连接相机和舵机、维持控制循环，并将当前观测发送给
-\texttt{policy\_server.py} 进程；
-\texttt{policy\_server.py} 进程负责加载 ACT 模型，在收到观测后完成一次动作序列预测，
-再将结果返回给 \texttt{robot\_client.py} 进程。这样，动作执行仍由本地控制循环逐帧推进，
+其中，\texttt{robot\_client} 进程负责连接相机和舵机、维持控制循环，并将当前观测发送给
+\texttt{policy\_server} 进程；
+\texttt{policy\_server} 进程负责加载 ACT 模型，在收到观测后完成一次动作序列预测，
+再将结果返回给 \texttt{robot\_client} 进程。这样，动作执行仍由本地控制循环逐帧推进，
 而下一段动作的生成可以在另一进程中提前进行。
 
 跨进程传输的数据对象包含时间戳和步号两个关键信息。
@@ -37,8 +40,8 @@ LeRobot 上游也已为此提供了完整的双进程实现，无需自行从零
 后者用于判断一段动作序列对应的是哪一时刻的控制状态，
 从而在异步回包到达时完成帧级对齐。
 
-在 \texttt{robot\_client.py} 进程内部，主线程持续执行控制循环，
-后台接收线程则专门等待 \texttt{policy\_server.py} 进程返回结果。
+在 \texttt{robot\_client} 进程内部，主线程持续执行控制循环，
+后台接收线程则专门等待 \texttt{policy\_server} 进程返回结果。
 二者通过一个带互斥保护的动作队列共享数据。
 控制循环一方面从队列头部取出当前应执行的动作，另一方面持续监测队列剩余长度，
 以决定何时触发下一次推理请求。与此同时，系统还维护最近一次已执行动作的步号、
@@ -46,30 +49,30 @@ LeRobot 上游也已为此提供了完整的双进程实现，无需自行从零
 
 基于上述结构，异步推理的运行机制可以归纳为三个动作队列上的规则。
 \textbf{第一是提前触发}：
-\texttt{robot\_client.py} 进程不会等当前动作块完全耗尽后再请求下一次推理，
+\texttt{robot\_client} 进程不会等当前动作块完全耗尽后再请求下一次推理，
 而是在剩余动作下降到一定比例时提前发出新观测。
 LeRobot 默认将这一比例设为 0.5，即动作块尚余一半时就启动下一次推理。
 这样做的目的，是让新动作块尽可能在旧动作块执行完之前返回，从而把推理时间隐藏在执行阶段内部。
 
 \textbf{第二是时序对齐与融合}：
-新动作块返回后，\texttt{robot\_client.py} 进程不会简单覆盖旧队列，
+新动作块返回后，\texttt{robot\_client} 进程不会简单覆盖旧队列，
 而是依据步号与当前执行位置进行对齐。
 已经过时的动作会被直接丢弃，尚未执行但与旧动作块覆盖到同一未来时刻的部分则进行融合，
 只把最终有效的未来动作重新写入队列。这样可以缓解动作块切换时的突变，
 也是 temporal ensemble 在异步控制场景中的具体落地方式。
 
 \textbf{第三是空队列兜底}：
-若推理速度不足，导致动作队列接近耗尽，\texttt{robot\_client.py} 进程会附带发送一个强制触发标记，
-要求 \texttt{policy\_server.py} 进程立即处理当前观测，而不再等待常规去重或合并逻辑。
+若推理速度不足，导致动作队列接近耗尽，\texttt{robot\_client} 进程会附带发送一个强制触发标记，
+要求 \texttt{policy\_server} 进程立即处理当前观测，而不再等待常规去重或合并逻辑。
 这条路径本质上是异常兜底，用来避免队列彻底清空后控制循环停顿。
 因此，强制触发出现得越频繁，越说明当前异步流水线离稳定工作区越远，
 它也就成为后续实验中判断系统健康度的重要观测量。
 
-\subsubsection{可行性不等式与 hold 参数}\label{sec:async-inf-inequality}
+\subsubsection{可行性不等式与异步推理触发阈值}\label{sec:async-inf-inequality}
 
 异步推理的稳态行为受四个参数控制：chunk\_size $N$、
 单次推理耗时 $T_{\text{infer}}$、目标执行频率 $F$、
-以及提前触发阈值 $h$（即 \texttt{chunk\_size\_threshold}）。
+以及异步推理触发阈值 $h$（记为hold，即 \texttt{chunk\_size\_threshold}）。
 在 LeRobot 当前实现中，触发条件为
 \texttt{action\_queue.qsize() / action\_chunk\_size <= h}，
 因此 \textbf{$h$ 越大，触发越早；$h$ 越小，触发越晚}。
@@ -95,8 +98,8 @@ $T_{\text{infer}}$ 近似这一时延，网络、序列化和队列调度开销�
 这只是``本次请求来得及赶上当前队列''的条件。
 
 第二，新 chunk 到货后并不会完整进入队列。
-\texttt{policy\_server.py} 返回的动作步号从观测步号开始递增，
-而 \texttt{robot\_client.py} 会丢弃所有
+\texttt{policy\_server} 返回的动作步号从观测步号开始递增，
+而 \texttt{robot\_client} 会丢弃所有
 \texttt{timestep <= latest\_action} 的动作。
 若返回前没有 stall，推理期间已经执行了约 $D$ 帧，
 因此新 chunk 中真正能进入未来队列的帧数约为
@@ -145,21 +148,21 @@ $h$ 仍需作为调度参数单独扫描，但它不能替代对 $T_{\text{infer
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{../推理相关/async_inference_A.png}
+  \includegraphics[width=\linewidth]{4_优化/images/async_inference_A.png}
   \caption{情况 A：$T_{\text{infer}}=30$ 帧，不等式满足，稳态 30 FPS}
   \label{fig:async-case-a}
 \end{figure}
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{../推理相关/async_inference_B.png}
+  \includegraphics[width=\linewidth]{4_优化/images/async_inference_B.png}
   \caption{情况 B：$T_{\text{infer}}=50$ 帧，恰好处于临界点}
   \label{fig:async-case-b}
 \end{figure}
 
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\linewidth]{../推理相关/async_inference_C.png}
+  \includegraphics[width=\linewidth]{4_优化/images/async_inference_C.png}
   \caption{情况 C：$T_{\text{infer}}=70$ 帧，不等式不满足，出现周期性 stall}
   \label{fig:async-inf-three-cases}
 \end{figure}
@@ -198,30 +201,30 @@ $N_{\text{eff}}=N-D$ 来估算有效 FPS。队列耗尽后机器人停止执行�
 这与后文异步实验中 25 FPS 左右的有效控制频率处在同一量级，
 也明显高于同步模式的实测约 16--19 FPS。
 
-从 hold 扫描的角度看，更关键的是找到实际临界点：
-当 hold 小于临界值时，触发太晚，stall 周期性出现；
-当 hold 越过临界值后，新 chunk 能在旧队列耗尽前到达，
+从异步推理触发阈值扫描的角度看，更关键的是找到实际临界点：
+当异步推理触发阈值小于临界值时，触发太晚，stall 周期性出现；
+当异步推理触发阈值越过临界值后，新 chunk 能在旧队列耗尽前到达，
 理想稳态就应恢复到 30 FPS。
 因此问题从``异步推理是否可用''进一步细化为：
-\textbf{在动作质量仍可接受的前提下，实际临界 hold 在哪里，
+\textbf{在动作质量仍可接受的前提下，实际临界异步推理触发阈值在哪里，
 以及推理本体还需降到多快才能给该临界点留下足够余量}。
 4.3 节即围绕该参数展开实验扫描。
 
 需要指出的是，上述不等式是在``每次触发都会立即启动一次新推理''的理想假设下推导的。
-在 LeRobot 的实际实现中，\texttt{policy\_server.py} 还会对观测做帧号去重和相似性过滤；
+在 LeRobot 的实际实现中，\texttt{policy\_server} 还会对观测做帧号去重和相似性过滤；
 同时，\texttt{robot\_client}、\texttt{policy\_server}、相机线程和串口通信在树莓派 5
 上竞争同一组 CPU 核心。因此，实验中真正起作用的不是纯粹的模型前向耗时，
 而是从触发观测到新动作 chunk 合并进队列的有效返回时延。
 下文把这些实现细节统一吸收到 $T_{\text{rt}}$ 中，
 再用 4.3 节的实测数据确定实际临界点。
 
-\subsubsection{FPS 与 hold 的定量关系}\label{sec:async-inf-fps-hold}
+\subsubsection{FPS 与异步推理触发阈值的定量关系}\label{sec:async-inf-fps-hold}
 
 4.2.3 节的不等式只给出了稳定无 stall 的边界，却没有回答一个更具体的问题：
 在到达该边界之前，也就是确定会发生 stall 的前段区间，
-有效 FPS 应该如何随 hold 变化？
+有效 FPS 应该如何随异步推理触发阈值变化？
 为避免把代码实现中的抖动误写成理论规律，本节只分析理想调度下的主导关系：
-\textbf{临界点之前 FPS 随 hold 上升，临界点之后饱和到目标帧率 30 FPS}。
+\textbf{临界点之前 FPS 随异步推理触发阈值上升，临界点之后饱和到目标帧率 30 FPS}。
 以下推导只针对临界点之前的 stall 段，即
 $h<h_{\text{crit}}$ 且 $T_{\text{rt}}>hN/F$。
 实验中的 $h=0.60$ 仅作为偏早触发的参考点，不纳入该段公式。
@@ -271,14 +274,14 @@ $hN/F$。在本节讨论的前段区间中，返回时延一定更长，
   h_{\text{crit}} = \frac{T_{\text{rt}}F}{N}
 \end{equation}
 时，$T_{\text{stall}}=0$，有效 FPS 就达到目标值 $F$；
-继续增大 hold 就离开本节计算的 stall 段。
+继续增大异步推理触发阈值就离开本节计算的 stall 段。
 在理想模型中，临界点之后不再有 stall，有效 FPS 饱和为 30 FPS。
 
-因此，FPS--hold 曲线的理论形态很简单：
-临界点前，hold 增大主要是在缩短 stall，FPS 随之上升；
+因此，FPS--异步推理触发阈值曲线的理论形态很简单：
+临界点前，异步推理触发阈值增大主要是在缩短 stall，FPS 随之上升；
 临界点后，stall 被消除，FPS 饱和到 30。
 4.3 节中的实验扫描只需要确定实际部署下的 $h_{\text{crit}}$：
-若某个 hold 之后的稳态阶段几乎不再出现 stall，
+若某个异步推理触发阈值之后的稳态阶段几乎不再出现 stall，
 则说明它已经越过临界点；若 episode 平均 FPS 仍低于 30 FPS，
 应优先从启动阶段 stall、CPU 资源竞争和调度抖动解释，
 而不是把它理解为理论曲线在临界点后的必然下降。

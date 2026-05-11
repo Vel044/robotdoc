@@ -1,6 +1,6 @@
 \subsection{推理阶段性能剖析}\label{sec:inference}
 
-本节专门分析 SO-101 在线控制循环中的 ACT 策略推理阶段。
+本节专门分析 SO-101 在线控制循环中的 ACT 推理阶段。
 这里的“推理阶段”并不只是一次 \texttt{ACT.forward()}，
 而是从 \texttt{predict\_action()} 收到 observation 开始，
 经过动作缓存判断、必要时的观测预处理、ACT 模型前向、动作队列写入、
@@ -79,7 +79,8 @@ Decoder 使用 100 个可学习 query，最终通过线性层输出
 再单独看 FPS 的增长曲线，最后用代表性数值表汇总。
 
 \paragraph{阶段时间占比随 \texttt{chunk\_size} 的演化}
-图~\ref{fig:chunk-size-time-pct} 给出了 obs/inference/action/wait 四阶段
+图~\ref{fig:chunk-size-time-pct} 给出了 Observation/Inference/Execution/Wait
+（\texttt{obs}/\texttt{inference}/\texttt{action}/\texttt{wait}）四阶段
 平均占比（20 episode 均值）随 \texttt{chunk\_size} 的变化曲线。
 \texttt{inference\_pct} 从 cs=1 时的 97.6\% 单调下降到 cs=100 时的 36.5\%，
 对应 \texttt{wait\_pct} 从 0\% 单调上升到 43.3\%；
@@ -103,7 +104,7 @@ Decoder 使用 100 个可学习 query，最终通过线性层输出
 FPS 从 cs=1 的 0.8 上升到 cs=100 的 18.7，但增长曲线高度非线性：
 cs=1$\to$10 时 FPS 提升约 6.6 倍（0.8$\to$5.3），cs=10$\to$50 时再提升约 2.9 倍，
 而 cs=50$\to$100 时增益仅约 1.2 倍（15.4$\to$18.7），呈现典型的边际递减。
-原因是单次完整 ACT 推理的绝对耗时接近恒定（$\approx$1--1.5\,s/次），
+原因是单次完整 ACT 推理的绝对耗时接近恒定（约 1.5--2.0\,s/次，均值约 1.9\,s），
 分块机制只是把这一次重推理在时间上摊薄到更多控制帧上，
 而不是降低 \texttt{ACT.forward()} 本身的计算量；
 当 cs 增大到推理被摊薄到接近 fps 目标时，

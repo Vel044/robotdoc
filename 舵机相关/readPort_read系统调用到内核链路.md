@@ -1,45 +1,39 @@
-# scservo_sdk readPort 到 Linux 内核链路
+# readPort：read 系统调用到 Linux 内核链路
 
-本文从 `scservo_sdk/port_handler.py` 的 `PortHandler.readPort(length)` 开始，解释一次舵机回包如何从 USB CDC ACM 设备进入内核缓冲区，再被 pyserial 通过 `select + read` 取回 Python。
+本文从 `scservo_sdk/port_handler.py` 的 `PortHandler.readPort(length)` 开始，重点解释它触发的 `read()` 系统调用：一次舵机回包如何从 USB CDC ACM 设备进入内核缓冲区，再被 pyserial 通过 `select + read` 取回 Python。
 
-读路径有两个系统调用阶段：
+读路径可以分成一个后台接收阶段和两个用户态系统调用阶段：
 
-1. `select.select([fd, pipe], [], [], 0)`：检查 `/dev/ttyACM0` 是否已有数据可读，内核路径是 `pselect6 -> do_select -> vfs_poll -> tty_poll -> n_tty_poll`。
-2. `os.read(fd, size)`：真正把数据从 N_TTY 缓冲区复制到用户态，内核路径是 `read -> ksys_read -> vfs_read -> tty_read -> n_tty_read`。
+1. USB 后台接收：CDC ACM 驱动提前提交 bulk IN URB，xHCI 收到舵机回包后通过 DMA 写入 URB 缓冲，完成回调再把数据推入 TTY/N_TTY 接收缓冲。
+2. `select.select([fd, pipe], [], [], 0)`：检查 `/dev/ttyACM0` 是否已有数据可读，内核路径是 `pselect6 -> do_select -> vfs_poll -> tty_poll -> n_tty_poll`。
+3. `os.read(fd, size)`：真正把数据从 N_TTY 缓冲区复制到用户态，内核路径是 `read -> ksys_read -> vfs_read -> tty_read -> n_tty_read -> copy_to_iter`。
+
+其中 `select()` 在 Linux 内核中通常表现为 `pselect6`，它只是 `read()` 之前的可读性检查；协议字节真正返回用户态发生在后面的 `read()` 中。`pselect6` 的公共链路单独见 [pyserial_select_pselect6到内核链路.md](pyserial_select_pselect6到内核链路.md)。
 
 ---
 
-## 图：read() syscall 到内核边界的分层路径
+## 图：read() syscall 调用路径
 
 ```
-read(fd, buf, count)                    # Python/Pytooth 调用入口
+read(fd, buf, count)                    # Python/CPython 调用入口
   │
   ▼
-VFS: vfs_read()                         # 同 write，权限检查后分发到 tty_fops.read_iter
+VFS: vfs_read()                         # 权限检查后分发到 tty_fops.read_iter
   │
   ▼
-TTY: tty_read() + N_TTY                   # 终端设备管理层 + 默认行规程；raw 模式下 N_TTY 从 read_buf 消费已到达的字节
-  ▼
-copy_to_user()                          # 把内核 read_buf 字节复制到用户态 Python bytes
-========== kernel / hardware boundary ==========
-
---- 以下是数据到达的后台异步路径（不经过 read syscall）---
-
-xHCI Hardware: DMA receive               # USB 控制器 DMA 接收字节到 URB transfer_buffer
+TTY: tty_read()                         # TTY 读入口，获取当前 line discipline
   │
   ▼
-xHCI driver: completion                  # xHCI 产生完成中断，调度 URB 完成回调
+N_TTY: n_tty_read()                     # 从 ldata->read_buf 消费已经到达的字节
   │
   ▼
-USB core: urb->complete()               # USB core 调用驱动注册的回调函数
+copy_from_read_buf()                    # 从 N_TTY 环形 read_buf 拷到 TTY 内核临时缓冲
   │
   ▼
-CDC ACM: acm_read_bulk_callback()        # 把 URB 数据交给 TTY 层
-  │
-  ▼
-TTY flip buffer + N_TTY receive_buf     # 数据进入 N_TTY read_buf，之后 n_tty_poll() 才返回 EPOLLIN
-========== 后台异步路径边界 ==========
+copy_to_iter()                          # 再复制到 CPython 分配的用户态 bytes 缓冲
 ```
+
+上面这张图只保留 `read syscall` 的同步调用路径，不再把 USB 回包进入 `read_buf` 的后台异步接收链路画进同一张图里；异步接收过程单独放在后文的“USB 回包进入内核缓冲区”一节说明。
 
 ---
 
@@ -70,7 +64,7 @@ def readPort(self, length):                  # length 是本次最多希望读�
 
 ## 2. 完整调用栈
 
-读链路分三个阶段：先通过 `select` 检查 fd 是否可读（就绪检查），再通过 `read` 把数据从内核复制到用户态（数据读取），最后还要理解 USB 回包是如何从硬件进入内核缓冲区的（接收路径）。内核外是 SDK → pyserial → CPython → glibc；内核内是 VFS → TTY → N_TTY → CDC ACM → USB core → xHCI。本节用五张调用栈图展示完整路径。
+读链路分三个阶段：USB 回包先通过预提交的 bulk IN URB 异步进入内核接收缓冲；随后 pyserial 通过 `select` 检查 fd 是否可读；最后通过 `read` 把已经到达 N_TTY 缓冲区的字节复制回用户态。内核外是 SDK → pyserial → CPython → glibc；`read syscall` 的同步调用主链是 VFS → TTY → N_TTY → `copy_from_read_buf` → `copy_to_iter`。异步接收链则是 xHCI → USB core → CDC ACM → TTY flip buffer → N_TTY read_buf。本节用五张调用栈图展示完整路径。
 
 ### 2.1 就绪检查阶段：内核外调用栈
 
@@ -139,21 +133,23 @@ select 返回 fd 可读
 Linux SYSCALL_DEFINE3(read, fd, buf, count)
 │  内核 syscall 入口：接收 fd、用户态目标 buf、期望读取 count。
 └── ksys_read(fd, buf, count)
-    │  fd 表查找：把 int fd 转成 struct file。
+    │  fdget_pos() + file_ppos()：把 int fd 转成 struct file；TTY 是 stream，通常没有文件偏移。
     └── vfs_read(file, buf, count, pos)
-        │  VFS 读入口：检查权限和用户态地址，分发到 tty_fops.read_iter。
+        │  access_ok() + rw_verify_area()：检查用户态目标地址、读权限和读取范围。
         └── new_sync_read(file, buf, count, pos)
-            │  把用户态目标缓冲包装成 kiocb + iov_iter。
-            └── tty_read(iocb, iter)
-                │  TTY read 入口：获取 tty_struct 和 N_TTY 行规程。
-                └── iterate_tty_read(ld, tty, file, iter)
-                    │  调用行规程 read，并负责把内核临时缓冲复制到用户 iov_iter。
-                    └── n_tty_read(tty, file, kbuf, nr, cookie, offset)
-                        │  从 N_TTY read_buf 消费已经到达的串口字节。
-                        └── copy_from_read_buf()
-                            │  从环形 read_buf 复制到内核临时缓冲。
-                            └── copy_to_user()
-                                │  把字节复制到 CPython 分配的用户态 bytes 缓冲。
+            │  init_sync_kiocb() + iov_iter_ubuf()：把用户态目标缓冲包装成 kiocb + iov_iter。
+            └── filp->f_op->read_iter(iocb, iter)
+                │  /dev/ttyACM0 对应 tty_fops.read_iter。
+                └── tty_read(iocb, iter)
+                    │  TTY read 入口：获取 tty_struct 和当前 N_TTY 行规程。
+                    └── iterate_tty_read(ld, tty, file, iter)
+                        │  准备 64 字节 kernel_buf，调用行规程 read。
+                        └── n_tty_read(tty, file, kernel_buf, nr, cookie, offset)
+                            │  从 N_TTY read_buf 消费已经到达的串口字节。
+                            └── copy_from_read_buf()
+                                │  memcpy()：从 N_TTY 环形 read_buf 复制到 kernel_buf。
+                                └── copy_to_iter(kernel_buf, size, iter)
+                                    │  把 kernel_buf 中的字节复制到 CPython 分配的用户态 bytes 缓冲。
 ```
 
 ### 2.5 USB 回包进入内核缓冲区
@@ -173,8 +169,12 @@ Linux SYSCALL_DEFINE3(read, fd, buf, count)
                 │   │  复制 urb->transfer_buffer 中的 actual_length 字节到 TTY flip buffer。
                 └── tty_flip_buffer_push(&acm->port)
                     │  通知 TTY core 有新输入，调度 line discipline 消费 flip buffer。
-                    └── N_TTY receive_buf 把字节放入 ldata->read_buf
-                        │  N_TTY 将串口字节放入 read_buf，之后 n_tty_poll() 会看到 EPOLLIN。
+                    └── flush_to_ldisc()
+                        │  workqueue 中把 flip buffer 交给当前行规程。
+                        └── n_tty_receive_buf_common()
+                            │  原始模式下基本不解释字节，复制/写入 N_TTY read_buf。
+                            └── wake_up_interruptible_poll(&tty->read_wait, EPOLLIN)
+                                │  唤醒等待读者；之后 n_tty_poll() 会看到 EPOLLIN。
 ```
 
 ---
@@ -458,7 +458,7 @@ static __poll_t n_tty_poll(struct tty_struct *tty, struct file *file,
 
 ## 5. USB CDC ACM 接收路径
 
-与 write 不同，读 URB 是在串口打开时就预提交给 USB core 的。舵机回包到达 USB bulk IN endpoint 后，xHCI 完成 URB，触发 CDC ACM 驱动的完成回调。回调把数据推入 TTY flip buffer，再经 N_TTY 行规程放入 `read_buf`。只有数据进入 `read_buf` 后，上层的 `select` 和 `read` 才能看到它。本节解释数据从 USB 线到内核缓冲区的完整路径。
+与 write 不同，读 URB 是在串口打开时就预提交给 USB core 的。舵机回包到达 USB bulk IN endpoint 后，xHCI 通过 DMA 把收到的数据写入 URB 接收缓冲，并触发 CDC ACM 驱动的完成回调。回调把数据推入 TTY flip buffer，再经 N_TTY 行规程放入 `read_buf`。只有数据进入 `read_buf` 后，上层的 `select` 和 `read` 才能看到它。本节解释数据从 USB 线到内核缓冲区的完整路径。
 
 ### 5.1 打开 tty 时预提交读 URB
 
@@ -510,6 +510,17 @@ static int acm_submit_read_urbs(struct acm *acm, gfp_t mem_flags)
 
 CDC ACM 的读不是用户调用 `read()` 时才向 USB 设备要数据，而是驱动提前把 bulk IN URB 提交给 USB core。舵机回包到达时，USB 主控把数据填进 URB 的 `transfer_buffer`。
 
+这些接收 URB 的缓冲区在设备初始化时已经通过 `usb_alloc_coherent()` 分配，并设置了 `URB_NO_TRANSFER_DMA_MAP`。因此 USB core 提交读 URB 时主要处理 DMA 访问关系，不会再额外分配一块普通缓冲来复制舵机回包。
+
+```c
+// linux/drivers/usb/class/cdc-acm.c
+rb->base = usb_alloc_coherent(acm->dev, readsize, GFP_KERNEL, &rb->dma);
+urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
+urb->transfer_dma = rb->dma;
+usb_fill_bulk_urb(urb, acm->dev, acm->in, rb->base,
+                  acm->readsize, acm_read_bulk_callback, rb);
+```
+
 ### 5.3 URB 完成回调
 
 ```c
@@ -559,6 +570,57 @@ static void acm_process_read_urb(struct acm *acm, struct urb *urb)
 ```
 
 这一步把 USB 层收到的舵机状态包变成 TTY 层可读数据。后续 N_TTY 的 receive buffer 有数据，`n_tty_poll()` 才会返回 `EPOLLIN`。
+
+### 5.5 从 flip buffer 到 N_TTY read_buf
+
+`tty_flip_buffer_push()` 不是直接让用户态 `read()` 读取 URB 缓冲，而是把 TTY flip buffer 的处理工作放到 workqueue。`flush_to_ldisc()` 之后会把 flip buffer 中的数据交给当前行规程；本项目通常仍使用 N_TTY 行规程，并处于原始模式，因此 N_TTY 基本不解释舵机字节，只把它们写入自己的 `read_buf`，随后唤醒等待在 `read_wait` 上的读者。
+
+```c
+// linux/drivers/tty/tty_buffer.c
+void tty_flip_buffer_push(struct tty_port *port)
+{
+    struct tty_bufhead *buf = &port->buf;
+
+    tty_flip_buffer_commit(buf->tail);             // 提交 flip buffer 中的新字节
+    queue_work(system_unbound_wq, &buf->work);     // 调度 flush_to_ldisc()
+}
+
+static void flush_to_ldisc(struct work_struct *work)
+{
+    struct tty_port *port = container_of(work, struct tty_port, buf.work);
+    struct tty_buffer *head = port->buf.head;
+    size_t count = smp_load_acquire(&head->commit) - head->read;
+
+    receive_buf(port, head, count);                // 把 flip buffer 交给 line discipline
+}
+
+static size_t tty_ldisc_receive_buf(struct tty_ldisc *ld, const u8 *p,
+                                    const u8 *f, size_t count)
+{
+    if (ld->ops->receive_buf2)
+        count = ld->ops->receive_buf2(ld->tty, p, f, count); // N_TTY receive_buf2
+    return count;
+}
+```
+
+```c
+// linux/drivers/tty/n_tty.c
+static size_t n_tty_receive_buf_common(struct tty_struct *tty, const u8 *cp,
+                                       const u8 *fp, size_t count, bool flow)
+{
+    struct n_tty_data *ldata = tty->disc_data;
+
+    down_read(&tty->termios_rwsem);                // 读取 termios 配置
+    __receive_buf(tty, cp, fp, count);             // 原始模式下把字节写入 read_buf
+    smp_store_release(&ldata->commit_head, ldata->read_head); // 发布给 read/poll 侧
+    wake_up_interruptible_poll(&tty->read_wait, EPOLLIN | EPOLLRDNORM);
+    up_read(&tty->termios_rwsem);
+
+    return count;
+}
+```
+
+这一段会引入从 TTY flip buffer 到 N_TTY `read_buf` 的内核内复制或逐字节入队。它发生在 USB 完成回调之后、用户态 `select()` 看到可读之前。
 
 ---
 
@@ -641,12 +703,24 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
     if (unlikely(!access_ok(buf, count)))         // 用户态目标地址不合法
         return -EFAULT;                           // 返回坏地址
 
+    ret = rw_verify_area(READ, file, pos, count); // 检查读范围和权限
+    if (ret)
+        return ret;
+    if (count > MAX_RW_COUNT)                     // 限制单次读写最大长度
+        count = MAX_RW_COUNT;
+
     if (file->f_op->read)                         // 老式 read
         ret = file->f_op->read(file, buf, count, pos); // 调 read
     else if (file->f_op->read_iter)               // tty_fops 使用 read_iter
         ret = new_sync_read(file, buf, count, pos); // 包装成 iov_iter
     else                                          // 没有读方法
         ret = -EINVAL;                            // 不支持
+
+    if (ret > 0) {                                // 成功读取
+        fsnotify_access(file);                    // 文件访问通知
+        add_rchar(current, ret);                  // 统计当前任务读取字节数
+    }
+    inc_syscr(current);                           // 统计 read 系统调用次数
 
     return ret;                                   // 返回实际字节数
 }
@@ -675,6 +749,44 @@ static ssize_t tty_read(struct kiocb *iocb, struct iov_iter *to)
     tty_ldisc_deref(ld);                          // 释放行规程引用
 
     return ret;                                   // 返回读到字节数
+}
+```
+
+`tty_read()` 本身不直接把数据复制到用户态，而是调用 `iterate_tty_read()`。这里有一个固定的 64 字节 `kernel_buf`：N_TTY 先把 `read_buf` 中的数据复制到这个内核临时缓冲，TTY core 再用 `copy_to_iter()` 把数据复制到用户态 `bytes` 缓冲。
+
+```c
+// linux/drivers/tty/tty_io.c
+static ssize_t iterate_tty_read(struct tty_ldisc *ld, struct tty_struct *tty,
+                                struct file *file, struct iov_iter *to)
+{
+    void *cookie = NULL;                           // N_TTY 跨次继续读的状态
+    unsigned long offset = 0;                      // 已复制到用户态的偏移
+    size_t copied, count = iov_iter_count(to);     // 用户本次请求读取的字节数
+    u8 kernel_buf[64];                             // TTY core 的内核临时缓冲
+    ssize_t retval = 0;
+
+    do {
+        ssize_t size = min(count, sizeof(kernel_buf));
+
+        size = ld->ops->read(tty, file, kernel_buf, size, &cookie, offset);
+        if (!size)
+            break;
+        if (size < 0) {
+            retval = retval ? retval : size;
+            break;
+        }
+
+        copied = copy_to_iter(kernel_buf, size, to); // 从内核临时缓冲复制到用户态 iov_iter
+        offset += copied;
+        count -= copied;
+        if (unlikely(copied != size)) {
+            count = 0;
+            retval = -EFAULT;
+        }
+    } while (cookie);
+
+    memzero_explicit(kernel_buf, sizeof(kernel_buf));
+    return offset ? offset : retval;
 }
 ```
 
@@ -723,7 +835,30 @@ static ssize_t n_tty_read(struct tty_struct *tty, struct file *file, u8 *kbuf,
 }
 ```
 
-在 `readPort(length)` 中，pyserial 已经用 `select()` 确认 fd 可读，因此正常情况下 `n_tty_read()` 会直接从 `ldata->read_buf` 复制数据并返回，不会睡眠。
+`copy_from_read_buf()` 内部通过 `memcpy()` 从 N_TTY 的环形 `read_buf` 复制到 `iterate_tty_read()` 提供的 `kernel_buf`。因此，同步 `read()` 路径中 CPU 参与的主要复制是 `read_buf -> kernel_buf -> 用户态 bytes`。
+
+```c
+// linux/drivers/tty/n_tty.c
+static bool copy_from_read_buf(const struct tty_struct *tty, u8 **kbp,
+                               size_t *nr)
+{
+    struct n_tty_data *ldata = tty->disc_data;
+    size_t head = smp_load_acquire(&ldata->commit_head);
+    size_t tail = MASK(ldata->read_tail);
+    size_t n = min3(head - ldata->read_tail, N_TTY_BUF_SIZE - tail, *nr);
+    u8 *from = read_buf_addr(ldata, tail);
+
+    memcpy(*kbp, from, n);                         // N_TTY read_buf -> kernel_buf
+    zero_buffer(tty, from, n);                     // 清掉已消费区域
+    smp_store_release(&ldata->read_tail, ldata->read_tail + n);
+    *kbp += n;
+    *nr -= n;
+
+    return head != ldata->read_tail;
+}
+```
+
+在 `readPort(length)` 中，pyserial 已经用 `select()` 确认 fd 可读，因此正常情况下 `n_tty_read()` 会直接从 `ldata->read_buf` 复制数据并返回，不会睡眠。如果 select 之后数据被其他线程抢走或设备断开，非阻塞 read 可能返回 `EAGAIN` 或空读。
 
 ---
 
@@ -753,6 +888,18 @@ static ssize_t n_tty_read(struct tty_struct *tty, struct file *file, u8 *kbuf,
 5. pyserial 先用 `pselect6` 立即检查 fd 是否可读。
 6. 如果可读，再用 `read(fd, buf, count)` 把数据复制回 Python。
 7. SDK 的 `rxPacket()` 把这些 bytes 拼成 Feetech 状态包并校验。
+
+从“舵机回包进入主机”到“Python 拿到 bytes”，数据搬运可以分为下面几步：
+
+| 阶段 | 源地址 | 目标地址 | 代码位置 | 说明 |
+| --- | --- | --- | --- | --- |
+| USB 接收 | USB 总线数据 | CDC ACM 读 URB 的 `transfer_buffer` | xHCI DMA | 硬件 DMA 写入，不是 CPU `memcpy()` |
+| CDC ACM 到 TTY | URB `transfer_buffer` | TTY flip buffer | `tty_insert_flip_string()` | CPU 复制收到的舵机回包字节 |
+| TTY 到 N_TTY | TTY flip buffer | N_TTY `read_buf` | `flush_to_ldisc()` / `n_tty_receive_buf_common()` | 原始模式下基本不解释协议，只放入行规程读缓冲 |
+| N_TTY 到 TTY 临时缓冲 | N_TTY `read_buf` | `iterate_tty_read()` 的 `kernel_buf` | `copy_from_read_buf()` | `read()` 同步路径中的第一次 CPU 复制 |
+| 内核到用户态 | `kernel_buf` | CPython `bytes` 缓冲 | `copy_to_iter()` | `read()` 同步路径中的第二次 CPU 复制 |
+
+`select()` 阶段也会复制 fd 位图等控制信息，但它不搬运舵机回包内容；真正把状态包字节带回 Python 的是后面的 `read()`。
 
 本链路最终涉及的系统调用参数是：
 

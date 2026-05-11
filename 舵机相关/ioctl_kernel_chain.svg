@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="260" viewBox="0 0 1320 260" role="img" aria-labelledby="title desc">
+  <title id="title">ioctl kernel chain</title>
+  <desc id="desc">Horizontal ioctl path for tcdrain on /dev/ttyACM0.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#111111"/>
+    </marker>
+    <style>
+      .node {
+        fill: #ffffff;
+        stroke: #111111;
+        stroke-width: 2;
+      }
+      .user-bg {
+        fill: #eef5ff;
+      }
+      .kernel-bg {
+        fill: #f7f7f7;
+      }
+      .label {
+        fill: #111111;
+        font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+        font-size: 22px;
+        font-weight: 700;
+        text-anchor: middle;
+        dominant-baseline: middle;
+      }
+      .sub {
+        fill: #333333;
+        font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+        font-size: 18px;
+        font-weight: 500;
+        text-anchor: middle;
+        dominant-baseline: middle;
+      }
+      .region {
+        fill: #555555;
+        font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+        font-size: 21px;
+        font-weight: 600;
+        text-anchor: middle;
+        dominant-baseline: middle;
+      }
+      .arrow {
+        stroke: #111111;
+        stroke-width: 2.4;
+        fill: none;
+        marker-end: url(#arrow);
+      }
+      .boundary {
+        stroke: #4a6f9f;
+        stroke-width: 2;
+        stroke-dasharray: 8 7;
+      }
+    </style>
+  </defs>
+
+  <rect width="1320" height="260" fill="#ffffff"/>
+  <rect class="user-bg" x="18" y="42" width="218" height="168" rx="6"/>
+  <rect class="kernel-bg" x="246" y="42" width="1056" height="168" rx="6"/>
+
+  <text class="region" x="127" y="58">glibc / 用户态</text>
+  <text class="region" x="774" y="58">kernel / 内核态</text>
+
+  <rect class="node" x="35" y="78" width="185" height="92" rx="4"/>
+  <text class="label" x="127.5" y="111">tcdrain()</text>
+  <text class="sub" x="127.5" y="143">发 ioctl(TCSBRK,1)</text>
+
+  <line class="boundary" x1="241" y1="42" x2="241" y2="210"/>
+  <line class="arrow" x1="220" y1="124" x2="260" y2="124"/>
+
+  <rect class="node" x="260" y="78" width="185" height="92" rx="4"/>
+  <text class="label" x="352.5" y="111">ioctl() / VFS</text>
+  <text class="sub" x="352.5" y="143">设备控制分发</text>
+
+  <line class="arrow" x1="445" y1="124" x2="490" y2="124"/>
+
+  <rect class="node" x="490" y="78" width="180" height="92" rx="4"/>
+  <text class="label" x="580" y="111">TTY ioctl</text>
+  <text class="sub" x="580" y="143">解析 TCSBRK</text>
+
+  <line class="arrow" x1="670" y1="124" x2="710" y2="124"/>
+
+  <rect class="node" x="710" y="78" width="220" height="92" rx="4"/>
+  <text class="label" x="820" y="111">tty_wait_until_sent()</text>
+  <text class="sub" x="820" y="143">等待输出队列排空</text>
+
+  <line class="arrow" x1="930" y1="124" x2="975" y2="124"/>
+
+  <rect class="node" x="975" y="78" width="225" height="92" rx="4"/>
+  <text class="label" x="1087.5" y="111">CDC ACM</text>
+  <text class="sub" x="1087.5" y="143">查询待发送 URB</text>
+</svg>

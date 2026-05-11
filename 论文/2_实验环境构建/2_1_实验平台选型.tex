@@ -1,9 +1,9 @@
 \subsection{实验平台选型}\label{sec:hw-platforms}
 
 本文选用 LeRobot\cite{lerobot}——HuggingFace 推出的开源机器人学习库，
-官方定位为"Making AI for Robotics more accessible with end-to-end learning"，
+官方定位为“通过端到端学习让机器人 AI 更易获取”，
 提供从数据采集、模型训练到在线部署的完整工具链，支持 ACT、Diffusion Policy 等模仿学习策略。
-LeRobot 以单进程 Python 脚本串行执行感知—推理—执行三阶段，无分布式依赖；
+LeRobot 以单进程 Python 脚本串行执行观测—推理—执行三阶段，无分布式依赖；
 相比之下，基于 ROS2\cite{ros2} 的方案以 DDS 为底层通信中间件，
 单次跨节点消息传递引入 1–5\,ms 延迟，DDS 守护进程还额外占用 CPU 与内存\cite{ros2composition}；
 第\ref{ch:perf}章的剖析将表明通信开销远低于推理开销，引入 ROS2 只会带来不必要的测量干扰。

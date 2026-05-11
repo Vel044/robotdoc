@@ -1,6 +1,8 @@
-# scservo_sdk writePort 到 Linux 内核链路
+# writePort：write 系统调用到 Linux 内核链路
 
-本文从 `scservo_sdk/port_handler.py` 的 `PortHandler.writePort(packet)` 开始，追踪一帧 Feetech 协议数据如何从 Python 写入 `/dev/ttyACM0`，进入 Linux TTY 层、CDC ACM 驱动、USB core，最后提交给 xHCI 主控。
+本文从 `scservo_sdk/port_handler.py` 的 `PortHandler.writePort(packet)` 开始，重点追踪它触发的 `write()` 系统调用：一帧 Feetech 协议数据如何从 Python 写入 `/dev/ttyACM0`，进入 Linux TTY 层、CDC ACM 驱动、USB core，最后提交给 xHCI 主控。
+
+说明：pyserial 的阻塞写路径在 `os.write()` 之后还可能调用 `select()`，因此 strace/ftrace 里会看到 `pselect6`。这个调用只负责检查可写/取消等待，不是舵机协议字节的数据提交主链路，单独见 [pyserial_select_pselect6到内核链路.md](pyserial_select_pselect6到内核链路.md)。
 
 这里以两个典型包为例：
 
@@ -9,30 +11,30 @@
 
 ---
 
-## 图：write() syscall 到内核边界的分层路径
+## 图：`write()` 在内核中的主链路
 
 ```
-write(fd, buf, count)                    # Python/Pytooth 调用入口
-  │
+VFS
+  │  `vfs_write()` 分发到 tty file_operations
   ▼
-VFS: vfs_write()                         # 为什么：Linux 一切皆文件，VFS 是通用抽象层
-  │  统一权限检查、用户地址校验、file_operations 分发
+TTY / N_TTY
+  │  `tty_write()` -> `n_tty_write()`
   ▼
-TTY: tty_write() + N_TTY                   # 什么：终端设备管理层 + 默认行规程；为什么：分离设备管理和数据透传
-  │  tty_write() 找到 tty_struct 和当前行规程 N_TTY；raw 模式下 N_TTY 透传字节，不做任何转换
+CDC ACM
+  │  `acm_tty_write()` 把字节写入 URB 缓冲
   ▼
-CDC ACM: acm_tty_write()                 # 什么：USB CDC ACM 驱动，把 /dev/ttyACM0 映射到 USB bulk OUT
-  │  为什么：USB 设备不是真 UART，需要驱动把 TTY 字节打包成 USB URB
+USB core
+  │  `usb_submit_urb()`
   ▼
-USB core: usb_submit_urb()               # 什么：统一 URB 生命周期管理；为什么：所有 USB 设备共用这一套框架
-  │  校验 URB、endpoint、做 DMA 映射、交给 HCD
+xHCI driver
+  │  `xhci_queue_bulk_tx()` 组 TRB 并写入 transfer ring
+  │  `xhci_ring_ep_doorbell()` 通知硬件取 TRB
   ▼
-xHCI driver: xhci_queue_bulk_tx()        # 什么：xHCI 主机控制器驱动；为什么：树莓派5 USB 主控走 xHCI
-  │  把 URB 转换成 Transfer Ring Buffer (TRB)，放进 transfer ring
-  ▼
-xHCI Hardware: DMA + USB transmit        # 什么：xHCI 控制器硬件直接 DMA 读内存发 USB 包
-========== kernel / hardware boundary ==========
+xHCI hardware
+  │  DMA 读缓冲并发出 USB bulk OUT
 ```
+
+说明：这张图只画 `write()` 进入内核后的主数据路径。`write(fd, buf, count)` 本身是系统调用入口，不单独作为一层；如果只想表达 `/dev/ttyACM0` 的写链路，用 `VFS -> TTY/N_TTY -> CDC ACM -> USB core -> xHCI driver -> xHCI hardware` 就够了。
 
 ---
 
@@ -48,10 +50,10 @@ def writePort(self, packet):             # packet 是 list[int] 或 bytearray，
 
 进入系统调用时的关键参数：
 
-| 场景 | `fd` | `buf` | `count` |
-|------|------|-------|---------|
-| Sync Read 请求 | `/dev/ttyACM0` 文件描述符 | 14 字节协议帧 | 14 |
-| Sync Write 请求 | `/dev/ttyACM0` 文件描述符 | 26 字节协议帧 | 26 |
+| 场景            | `fd`                      | `buf`         | `count` |
+| --------------- | ------------------------- | ------------- | ------- |
+| Sync Read 请求  | `/dev/ttyACM0` 文件描述符 | 14 字节协议帧 | 14      |
+| Sync Write 请求 | `/dev/ttyACM0` 文件描述符 | 26 字节协议帧 | 26      |
 
 注意：`writePort()` 返回的是内核接受写入的字节数。对于 CDC ACM，它通常表示数据已经复制进驱动写缓冲并提交 USB URB，不等价于舵机已经执行动作。
 
@@ -88,35 +90,47 @@ protocol_packet_handler.txPacket()
 Linux SYSCALL_DEFINE3(write, fd, buf, count)
 │  内核 syscall 入口：接收用户态 fd、用户态 buf 指针和 count。
 └── ksys_write(fd, buf, count)
-    │  fd 表查找：把 int fd 转成 struct file，并处理文件偏移语义。
+    │  fdget_pos() + file_ppos()：把 int fd 转成 struct file，并处理文件偏移语义。
     └── vfs_write(file, buf, count, pos)
-        │  VFS 写入口：检查权限和用户地址，然后分发到 file_operations。
+        │  access_ok() + rw_verify_area()：检查用户地址、写权限和写入范围。
+        │  file_start_write()：标记一次文件写入开始；返回路径会执行 file_end_write()。
         └── new_sync_write(file, buf, count, pos)
-            │  把用户缓冲包装成 kiocb + iov_iter，调用 tty_fops.write_iter。
-            └── tty_write(iocb, iter)
-                │  TTY file_operations 写入口：转入 file_tty_write。
-                └── file_tty_write(file, iocb, iter)
-                    │  找到 tty_struct 和当前行规程 N_TTY，准备按行规程写。
-                    └── iterate_tty_write(ld, tty, file, iter)
-                        │  从用户态 iov_iter 分块复制到内核缓冲，再调用行规程 write。
-                        └── n_tty_write(tty, file, kbuf, nr)
-                            │  N_TTY 写路径：原始模式下基本不改字节，直接交给底层驱动。
-                            └── tty->ops->write(tty, b, nr)
-                                │  tty_operations 分发：/dev/ttyACM0 对应 acm_ops.write。
-                                └── acm_tty_write(tty, buf, count)
-                                    │  CDC ACM 驱动：分配 acm_wb，复制协议帧到 USB 写缓冲。
-                                    └── acm_start_wb(acm, wb)
-                                        │  填 URB 的 transfer_buffer、DMA 地址、transfer_buffer_length 和 USB 设备。
-                                        └── usb_submit_urb(wb->urb, GFP_ATOMIC)
-                                            │  USB core：校验 URB、endpoint、方向和长度，标记传输进行中。
-                                            └── usb_hcd_submit_urb(urb, GFP_ATOMIC)
-                                                │  USB HCD core：做 DMA 映射，把 URB 交给具体主机控制器驱动。
-                                                └── hcd->driver->urb_enqueue()
-                                                    │  HCD 分发表：树莓派 5 USB 主控走 xHCI 的 urb_enqueue。
-                                                    └── xhci_urb_enqueue()
-                                                        │  xHCI 驱动：分配 urb_priv，检查 slot/endpoint 状态，选择传输类型。
-                                                        └── xhci_queue_bulk_tx()
-                                                            │  把 bulk OUT 数据描述成 TRB，放入 xHCI transfer ring，通知硬件发送。
+            │  init_sync_kiocb() + iov_iter_ubuf()：把用户缓冲包装成 kiocb + iov_iter。
+            └── filp->f_op->write_iter(iocb, iter)
+                │  /dev/ttyACM0 对应 tty_fops.write_iter。
+                └── tty_write(iocb, iter)
+                    │  TTY file_operations 写入口：转入 file_tty_write。
+                    └── file_tty_write(file, iocb, iter)
+                        │  tty_ldisc_ref_wait()：找到 tty_struct 和当前行规程 N_TTY。
+                        └── iterate_tty_write(ld, tty, file, iter)
+                            │  tty_write_lock()：串行化同一个 TTY 的写入。
+                            │  copy_from_iter()：从用户态 iov_iter 分块复制到 tty->write_buf。
+                            └── ld->ops->write(tty, file, kbuf, nr)
+                                │  N_TTY 行规程 write。
+                                └── n_tty_write(tty, file, kbuf, nr)
+                                    │  termios_rwsem + output_lock；原始模式下基本不改字节。
+                                    └── tty->ops->write(tty, b, nr)
+                                        │  tty_operations 分发：/dev/ttyACM0 对应 acm_ops.write。
+                                        └── acm_tty_write(tty, buf, count)
+                                            │  acm_wb_alloc()：取空闲写缓冲。
+                                            │  memcpy()：把协议帧复制到 CDC ACM 的 USB 写缓冲。
+                                            │  usb_autopm_get_interface_async()：增加 USB runtime PM 引用。
+                                            └── acm_start_wb(acm, wb)
+                                                │  填 URB 的 transfer_buffer、DMA 地址、transfer_buffer_length 和 USB 设备。
+                                                └── usb_submit_urb(wb->urb, GFP_ATOMIC)
+                                                    │  USB core：校验 URB、endpoint、方向和长度，标记传输进行中。
+                                                    └── usb_hcd_submit_urb(urb, GFP_ATOMIC)
+                                                        │  map_urb_for_dma()：处理 DMA 访问关系。
+                                                        └── hcd->driver->urb_enqueue()
+                                                            │  HCD 分发表：树莓派 5 USB 主控走 xHCI 的 urb_enqueue。
+                                                            └── xhci_urb_enqueue()
+                                                                │  分配 urb_priv，检查 slot/endpoint 状态，选择传输类型。
+                                                                └── xhci_queue_bulk_tx()
+                                                                    │  queue_trb()：把 bulk OUT 数据描述成 TRB，放入 transfer ring。
+                                                                    └── giveback_first_trb()
+                                                                        │  交出首个 TRB 的 cycle bit。
+                                                                        └── xhci_ring_ep_doorbell()
+                                                                            │  写 doorbell 寄存器，通知硬件开始取 TRB。
 ```
 
 对 `/dev/ttyACM0`，具体硬件驱动是 `linux/drivers/usb/class/cdc-acm.c`。
@@ -342,7 +356,58 @@ static ssize_t file_tty_write(struct file *file, struct kiocb *iocb, struct iov_
 
 `struct tty_ldisc` 是 TTY 行规程。pyserial 会把串口配置成原始模式，通常仍使用默认的 `N_TTY` 行规程，但关闭输出后处理。
 
-### 5.2 `n_tty_write()`
+### 5.2 `iterate_tty_write()`
+
+`iterate_tty_write()` 是本次 `write()` 路径里第一次真正的数据复制位置。VFS 传下来的 `iov_iter` 仍然指向用户态缓冲，TTY core 不能把用户态指针直接交给底层驱动，所以先把用户缓冲里的协议帧复制到 `tty->write_buf` 这个内核临时缓冲，再调用行规程的 `ld->ops->write()`。
+
+```c
+// linux/drivers/tty/tty_io.c
+static ssize_t iterate_tty_write(struct tty_ldisc *ld, struct tty_struct *tty,
+                                 struct file *file, struct iov_iter *from)
+{
+    size_t chunk, count = iov_iter_count(from);      // 用户态本次要写的字节数
+    ssize_t ret, written = 0;                        // 返回值和累计写入数
+
+    ret = tty_write_lock(tty, file->f_flags & O_NDELAY); // 串行化同一 TTY 写入
+    if (ret < 0)
+        return ret;
+
+    chunk = 2048;                                    // TTY 默认分块大小
+    if (count < chunk)
+        chunk = count;
+
+    if (tty->write_cnt < chunk) {                    // 内核临时写缓冲不够大
+        u8 *buf_chunk = kvmalloc(chunk, GFP_KERNEL | __GFP_RETRY_MAYFAIL);
+        kvfree(tty->write_buf);
+        tty->write_cnt = chunk;
+        tty->write_buf = buf_chunk;
+    }
+
+    for (;;) {
+        size_t size = min(chunk, count);
+
+        // 第一次 CPU 参与的数据复制：
+        // 从用户态 buf 指向的协议帧，复制到 TTY 的内核临时缓冲 tty->write_buf。
+        if (copy_from_iter(tty->write_buf, size, from) != size)
+            break;
+
+        ret = ld->ops->write(tty, file, tty->write_buf, size); // 调 N_TTY 的 write
+        if (ret <= 0)
+            break;
+        written += ret;
+        count -= ret;
+        if (!count)
+            break;
+    }
+
+    tty_write_unlock(tty);                           // 释放 TTY 写锁
+    return written ? written : ret;
+}
+```
+
+这里的 `copy_from_iter()` 可以理解为面向 `iov_iter` 的用户态拷贝接口，本质作用等价于“从用户态 `buf` 把字节安全复制进内核”。对于本项目的舵机包，它复制的就是 14 字节 Sync Read 请求或 26 字节 Sync Write 请求。
+
+### 5.3 `n_tty_write()`
 
 `n_tty_write()` 是 N_TTY 行规程的写方法，也是 TTY 层真正处理数据的地方。对于 pyserial 配置的原始模式（`O_OPOST` 关闭），它不做换行转换等输出后处理，直接把字节原样交给底层驱动的 `tty->ops->write()`。如果驱动暂时没空间（`num == 0`），它会睡眠在 `write_wait` 上，等 `acm_write_bulk()` 完成回调唤醒。
 
@@ -492,11 +557,11 @@ static ssize_t acm_tty_write(struct tty_struct *tty, const u8 *buf,
 
 关键结构：
 
-| 结构 | 本链路中的作用 |
-|------|----------------|
-| `struct acm` | 一个 CDC ACM 设备实例，连接 TTY 层和 USB 层 |
-| `struct acm_wb` | 写缓冲，包含 `buf`、`len`、`urb`、`use` 等 |
-| `struct urb` | USB Request Block，一次 USB 传输请求 |
+| 结构            | 本链路中的作用                              |
+| --------------- | ------------------------------------------- |
+| `struct acm`    | 一个 CDC ACM 设备实例，连接 TTY 层和 USB 层 |
+| `struct acm_wb` | 写缓冲，包含 `buf`、`len`、`urb`、`use` 等  |
+| `struct urb`    | USB Request Block，一次 USB 传输请求        |
 
 ### 6.2 `acm_start_wb()`
 
@@ -525,9 +590,11 @@ static int acm_start_wb(struct acm *acm, struct acm_wb *wb)
 
 此时，Feetech 协议帧已经在 `urb->transfer_buffer` 里。对于 14 字节 Sync Read 请求，`transfer_buffer_length=14`；对于 26 字节 Sync Write 请求，`transfer_buffer_length=26`。
 
+CDC ACM 在创建写 URB 时已经设置了 `URB_NO_TRANSFER_DMA_MAP`，因为 `wb->buf` 来自 `usb_alloc_coherent()`，同时 `wb->dmah` 已经保存了 DMA 地址。因此后面的 USB core 虽然仍会走到 `map_urb_for_dma()`，但这一步不会再把协议帧复制到另一块普通 DMA 缓冲。
+
 ### 6.3 USB core 与 xHCI
 
-`usb_submit_urb()` 是 USB core 的入口。USB core 负责校验 URB 合法性、做 DMA 映射，然后把 URB 交给具体的主机控制器驱动（HCD）。树莓派 5 的 USB 主控走 xHCI，所以最终进入 `xhci_urb_enqueue()`，由 xHCI 驱动把 URB 转成硬件可执行的 Transfer Ring Buffer（TRB）。
+`usb_submit_urb()` 是 USB core 的入口。USB core 负责校验 URB 合法性、处理 DMA 访问关系，然后把 URB 交给具体的主机控制器驱动（HCD）。树莓派 5 的 USB 主控走 xHCI，所以最终进入 `xhci_urb_enqueue()`，由 xHCI 驱动把 URB 转成硬件可执行的 Transfer Request Block（TRB）。这里的 TRB 是 xHCI 规范里的传输请求描述符，多个 TRB 串在一起组成 transfer ring。
 
 ```c
 // linux/drivers/usb/core/urb.c
@@ -557,7 +624,7 @@ int usb_submit_urb(struct urb *urb, gfp_t mem_flags)
 }
 ```
 
-`usb_hcd_submit_urb()` 是 USB core 和主机控制器驱动（HCD）之间的桥梁。它先增加 URB 引用计数防止过早释放，然后调用 `map_urb_for_dma()` 做 DMA 映射，最后把 URB 交给具体 HCD 的 `urb_enqueue`。对树莓派 5 来说，这个 HCD 就是 xHCI。
+`usb_hcd_submit_urb()` 是 USB core 和主机控制器驱动（HCD）之间的桥梁。它先增加 URB 引用计数防止过早释放，然后调用 `map_urb_for_dma()` 处理 DMA 访问关系，最后把 URB 交给具体 HCD 的 `urb_enqueue`。对树莓派 5 来说，这个 HCD 就是 xHCI。注意，对 CDC ACM 写 URB 来说，数据缓冲已设置 `URB_NO_TRANSFER_DMA_MAP`，因此这里不是第三次协议帧复制。
 
 ```c
 // linux/drivers/usb/core/hcd.c
@@ -570,8 +637,8 @@ int usb_hcd_submit_urb(struct urb *urb, gfp_t mem_flags)
     atomic_inc(&urb->use_count);                  // 标记 URB 正在使用
     atomic_inc(&urb->dev->urbnum);                // 设备活跃 URB 数加一
 
-    status = map_urb_for_dma(hcd, urb, mem_flags); // 为 DMA 做映射
-    if (likely(status == 0)) {                    // DMA 映射成功
+    status = map_urb_for_dma(hcd, urb, mem_flags); // 处理 DMA 访问关系
+    if (likely(status == 0)) {                    // DMA 访问关系处理成功
         status = hcd->driver->urb_enqueue(hcd, urb, mem_flags); // 调 xHCI enqueue
         if (unlikely(status))                     // 如果 HCD 拒绝
             unmap_urb_for_dma(hcd, urb);          // 回滚 DMA 映射
@@ -581,7 +648,7 @@ int usb_hcd_submit_urb(struct urb *urb, gfp_t mem_flags)
 }
 ```
 
-`xhci_urb_enqueue()` 是 xHCI 驱动的入口。它为 URB 分配 `urb_priv` 跟踪结构，按 endpoint 类型分发到不同的传输队列。CDC ACM 的数据端点是 bulk，所以进入 `xhci_queue_bulk_tx()`，由它把 URB 数据转换成 xHCI 硬件能理解的 Transfer Ring Buffer（TRB）。
+`xhci_urb_enqueue()` 是 xHCI 驱动的入口。它为 URB 分配 `urb_priv` 跟踪结构，按 endpoint 类型分发到不同的传输队列。CDC ACM 的数据端点是 bulk，所以进入 `xhci_queue_bulk_tx()`，由它把 URB 数据转换成 xHCI 硬件能理解的 Transfer Request Block（TRB）。
 
 ```c
 // linux/drivers/usb/host/xhci.c
@@ -608,7 +675,113 @@ static int xhci_urb_enqueue(struct usb_hcd *hcd, struct urb *urb, gfp_t mem_flag
 }
 ```
 
-`xhci_queue_bulk_tx()` 会把 URB 数据描述成 TRB，放入 xHCI transfer ring，并敲门铃通知硬件开始传输。到这里，内核已经把串口协议帧交给 USB 主机控制器。
+`xhci_queue_bulk_tx()` 会把 URB 数据描述成 TRB，并把这些 TRB 放入 endpoint 对应的 xHCI transfer ring。对普通 bulk OUT 来说，它在循环中计算本段数据的 DMA 地址、长度字段和控制字段，然后调用 `queue_trb()` 写入当前 ring 槽位。
+
+```c
+// linux/drivers/usb/host/xhci-ring.c
+int xhci_queue_bulk_tx(struct xhci_hcd *xhci, gfp_t mem_flags,
+        struct urb *urb, int slot_id, unsigned int ep_index)
+{
+    ...
+    addr = (u64) urb->transfer_dma;              // URB 数据缓冲的 DMA 地址
+    ...
+    length_field = TRB_LEN(trb_buff_len) |       // 本段传输长度
+        TRB_TD_SIZE(remainder) |                 // TD 剩余大小提示
+        TRB_INTR_TARGET(0);                      // 完成事件送到 interrupter 0
+
+    queue_trb(xhci, ring, more_trbs_coming | need_zero_pkt,
+            lower_32_bits(send_addr),            // TRB field[0]：buffer DMA 地址低 32 位
+            upper_32_bits(send_addr),            // TRB field[1]：buffer DMA 地址高 32 位
+            length_field,                        // TRB field[2]：长度和中断目标
+            field);                              // TRB field[3]：类型、cycle、IOC、CHAIN 等
+    ...
+    giveback_first_trb(xhci, slot_id, ep_index, urb->stream_id,
+            start_cycle, start_trb);             // 所有 TRB 写完后，把首个 TRB 交给硬件并敲 doorbell
+    return 0;                                    // xHCI 排队完成，沿 write 调用栈返回
+}
+```
+
+`queue_trb()` 是真正把 TRB 写进 transfer ring 的函数。`ring->enqueue` 指向当前可写的 TRB 槽位，CPU 依次写入四个 32-bit 字段；最后调用 `inc_enq()` 推进 ring 的 enqueue 指针。
+
+```c
+// linux/drivers/usb/host/xhci-ring.c
+static void queue_trb(struct xhci_hcd *xhci, struct xhci_ring *ring,
+        bool more_trbs_coming,
+        u32 field1, u32 field2, u32 field3, u32 field4)
+{
+    struct xhci_generic_trb *trb;
+
+    trb = &ring->enqueue->generic;               // 当前 transfer ring 的写入槽位
+    trb->field[0] = cpu_to_le32(field1);         // 数据 buffer DMA 地址低 32 位
+    trb->field[1] = cpu_to_le32(field2);         // 数据 buffer DMA 地址高 32 位
+    trb->field[2] = cpu_to_le32(field3);         // 长度、TD size、interrupter
+    /* make sure TRB is fully written before giving it to the controller */
+    wmb();                                      // 保证前三个字段先写完
+    trb->field[3] = cpu_to_le32(field4);         // 类型、cycle bit、IOC、CHAIN 等控制位
+
+    trace_xhci_queue_trb(ring, trb);
+    inc_enq(xhci, ring, more_trbs_coming);       // 推进 enqueue 指针
+}
+```
+
+TRB 入环本身还不等于硬件已经开始取任务。`xhci_queue_bulk_tx()` 会在所有 TRB 都写完后调用 `giveback_first_trb()`：这个函数先通过首个 TRB 的 cycle bit 把整串 TRB 一次性交给硬件，再写 doorbell 通知 xHCI 控制器开始处理这个 endpoint 的 transfer ring。
+
+```c
+// linux/drivers/usb/host/xhci-ring.c
+static void giveback_first_trb(struct xhci_hcd *xhci, int slot_id,
+        unsigned int ep_index, unsigned int stream_id, int start_cycle,
+        struct xhci_generic_trb *start_trb)
+{
+    /*
+     * Pass all the TRBs to the hardware at once and make sure this write
+     * isn't reordered.
+     */
+    wmb();                                      // 保证前面写入的 TRB 先对硬件可见
+    if (start_cycle)
+        start_trb->field[3] |= cpu_to_le32(start_cycle); // 交出第一个 TRB 的 cycle bit
+    else
+        start_trb->field[3] &= cpu_to_le32(~TRB_CYCLE);
+    xhci_ring_ep_doorbell(xhci, slot_id, ep_index, stream_id); // 通知硬件取 ring
+}
+```
+
+真正的“敲门铃”发生在 `xhci_ring_ep_doorbell()`。它先定位当前 USB 设备 slot 对应的 doorbell 寄存器，再把 endpoint 编号和 stream id 编成 doorbell value 写进去。这个 `writel()` 是通知 xHCI 硬件的关键动作：告诉主控“这个 slot 的这个 endpoint 有新的 TRB 可以处理”。
+
+```c
+// linux/drivers/usb/host/xhci-ring.c
+void xhci_ring_ep_doorbell(struct xhci_hcd *xhci,
+        unsigned int slot_id,
+        unsigned int ep_index,
+        unsigned int stream_id)
+{
+    __le32 __iomem *db_addr = &xhci->dba->doorbell[slot_id]; // 当前设备 slot 的 doorbell
+
+    readl(db_addr);                              // Pi 4/5 这类非一致性 DMA 平台上做一次序列化
+    writel(DB_VALUE(ep_index, stream_id), db_addr); // 写 doorbell 寄存器，通知 xHCI 硬件
+    readl(db_addr);                              // flush doorbell write
+}
+```
+
+```c
+// linux/drivers/usb/host/xhci.h
+struct xhci_doorbell_array {
+    __le32 doorbell[256];                        // doorbell[0] 是命令环，doorbell[slot_id] 是设备 endpoint
+};
+
+#define DB_VALUE(ep, stream) ((((ep) + 1) & 0xff) | ((stream) << 16))
+```
+
+因此，xHCI 写链路更精确的最后几步是：
+
+```text
+xhci_queue_bulk_tx()
+  -> queue_trb()                      # 把 URB buffer 地址、长度、标志写成 TRB
+  -> giveback_first_trb()             # 通过 cycle bit 把首个 TRB 交给硬件
+  -> xhci_ring_ep_doorbell()          # 写 doorbell[slot_id]
+  -> xHCI hardware DMA 读取 TRB 和数据缓冲，发出 USB bulk OUT
+```
+
+到这里，内核已经把串口协议帧交给 USB 主机控制器，后续由 xHCI 硬件通过 DMA 读取数据缓冲并完成 USB 包发送。
 
 ---
 
@@ -646,6 +819,15 @@ static void acm_write_bulk(struct urb *urb)
 3. CDC ACM 分配 `acm_wb`，复制到 USB 写缓冲。
 4. 构造并提交 USB bulk OUT URB。
 5. xHCI 把 URB 转成硬件可执行的 bulk transfer。
+
+从 `write()` 系统调用进入内核开始，本次路径里 CPU 参与的数据复制主要有两次：
+
+| 次数 | 源地址 | 目标地址 | 代码位置 | 作用 |
+| --- | --- | --- | --- | --- |
+| 1 | 用户态 `buf`，也就是 pyserial 传给 `write()` 的协议帧 | TTY core 的 `tty->write_buf` | `copy_from_iter(tty->write_buf, size, from)` | 把用户态字节安全搬进内核临时缓冲 |
+| 2 | N_TTY 传下来的 `buf`，实际指向 `tty->write_buf` | CDC ACM 的 `wb->buf` DMA 安全写缓冲 | `memcpy(wb->buf, buf, count)` | 把协议帧放进 USB bulk OUT URB 使用的数据缓冲 |
+
+`map_urb_for_dma()` 和 xHCI 入队主要是在建立 DMA 访问关系、写 TRB 和敲 doorbell，不是再把 14 或 26 字节协议帧做一次普通 CPU `memcpy()`。随后真正把数据送到 USB 总线的是 xHCI 硬件通过 DMA 读取 `wb->buf`。
 
 最终系统调用参数是：
 

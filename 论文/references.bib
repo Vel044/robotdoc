@@ -45,6 +45,35 @@
   year      = {2023},
 }
 
+% SmolVLA: HuggingFace/LeRobot 生态中的小型 VLA，提出异步推理栈以提升 chunked action 的控制频率
+@article{smolvla,
+  author  = {Shukor, Mustafa and Aubakirova, Dana and Capuano, Francesco and Kooijmans, Pepijn and others},
+  title   = {{SmolVLA}: A Vision-Language-Action Model for Affordable and Efficient Robotics},
+  journal = {arXiv preprint arXiv:2506.01844},
+  year    = {2025},
+  doi     = {10.48550/arXiv.2506.01844},
+}
+
+% Real-Time Chunking: 在执行当前 action chunk 的同时生成下一段 chunk，用于缓解推理延迟和 chunk 边界停顿
+@article{realtimechunking,
+  author  = {Black, Kevin and Galliker, Manuel Y. and Levine, Sergey},
+  title   = {Real-Time Execution of Action Chunking Flow Policies},
+  journal = {arXiv preprint arXiv:2506.07339},
+  year    = {2025},
+  note    = {NeurIPS 2025},
+  doi     = {10.48550/arXiv.2506.07339},
+}
+
+% REMAC: 讨论异步推理中 action chunk 与当前感知错位导致的 intra-chunk inconsistency
+@article{remac,
+  author  = {Wang, Haoxuan and Zhang, Gengyu and Yan, Yan and Shang, Yuzhang and Kompella, Ramana Rao and Liu, Gaowen},
+  title   = {Real-Time Robot Execution with Masked Action Chunking},
+  journal = {arXiv preprint arXiv:2601.20130},
+  year    = {2026},
+  note    = {ICLR 2026},
+  doi     = {10.48550/arXiv.2601.20130},
+}
+
 % π0: Physical Intelligence 的通用机器人策略模型，基于流匹配，动作生成能力强
 @misc{pi0,
   author = {Physical Intelligence},
@@ -161,6 +190,14 @@
   title  = {{TensorFlow Lite}},
   year   = {2024},
   url    = {https://www.tensorflow.org/lite},
+}
+
+% PyTorch: 主流深度学习与推理框架，本文运行时与线程行为分析的重要背景
+@article{pytorch,
+  author = {PyTorch},
+  title  = {{PyTorch}},
+  year   = {2024},
+  url    = {https://pytorch.org/},
 }
 
 % PyTorch Mobile: Meta 移动端推理框架，本文 PyTorch 生态的延伸
