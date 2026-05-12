@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="520" viewBox="0 0 1100 520">
+  <defs>
+    <marker id="arrow-right" markerWidth="12" markerHeight="8" refX="11" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L12,4 L0,8 Z" fill="#4b5563"/>
+    </marker>
+    <marker id="arrow-left" markerWidth="12" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M12,0 L0,4 L12,8 Z" fill="#4b5563"/>
+    </marker>
+    <style>
+      .title { font: 700 27px "PingFang SC", "Heiti SC", "Microsoft YaHei", Arial, sans-serif; }
+      .task { font: 500 22px "PingFang SC", "Heiti SC", "Microsoft YaHei", Arial, sans-serif; }
+      .label { font: 600 18px "PingFang SC", "Heiti SC", "Microsoft YaHei", Arial, sans-serif; }
+      .caption { font: 500 15px "PingFang SC", "Heiti SC", "Microsoft YaHei", Arial, sans-serif; }
+      .footer { font: 600 20px "PingFang SC", "Heiti SC", "Microsoft YaHei", Arial, sans-serif; }
+    </style>
+  </defs>
+
+  <rect width="1100" height="520" fill="#ffffff"/>
+
+  <rect x="70" y="72" width="360" height="350" rx="12" fill="#eef8f0" stroke="#2f855a" stroke-width="3"/>
+  <text x="250" y="135" class="title" fill="#22543d" text-anchor="middle">Robot Client 进程</text>
+  <line x1="106" y1="174" x2="394" y2="174" stroke="#9ae6b4" stroke-width="2"/>
+
+  <text x="125" y="222" class="task" fill="#1f2937">连接相机与舵机</text>
+  <text x="125" y="272" class="task" fill="#1f2937">采集并发送观测</text>
+  <text x="125" y="322" class="task" fill="#1f2937">维护控制循环与动作队列</text>
+  <text x="125" y="372" class="task" fill="#1f2937">执行动作、对齐返回结果</text>
+
+  <circle cx="104" cy="214" r="5" fill="#38a169"/>
+  <circle cx="104" cy="264" r="5" fill="#38a169"/>
+  <circle cx="104" cy="314" r="5" fill="#38a169"/>
+  <circle cx="104" cy="364" r="5" fill="#38a169"/>
+
+  <rect x="670" y="72" width="360" height="350" rx="12" fill="#eef5ff" stroke="#2b6cb0" stroke-width="3"/>
+  <text x="850" y="135" class="title" fill="#1a365d" text-anchor="middle">Policy Server 进程</text>
+  <line x1="706" y1="174" x2="994" y2="174" stroke="#90cdf4" stroke-width="2"/>
+
+  <text x="725" y="242" class="task" fill="#1f2937">加载模型</text>
+  <text x="725" y="302" class="task" fill="#1f2937">推理</text>
+  <text x="725" y="362" class="task" fill="#1f2937">返回序列</text>
+
+  <circle cx="704" cy="234" r="5" fill="#3182ce"/>
+  <circle cx="704" cy="294" r="5" fill="#3182ce"/>
+  <circle cx="704" cy="354" r="5" fill="#3182ce"/>
+
+  <path d="M670,220 C620,220 480,220 430,220" fill="none" stroke="#4b5563" stroke-width="3" marker-end="url(#arrow-right)"/>
+  <rect x="440" y="156" width="220" height="50" rx="25" fill="#ffffff" stroke="#9ca3af" stroke-width="1.5"/>
+  <text x="550" y="178" class="label" fill="#111827" text-anchor="middle">动作序列 Action Chunk</text>
+  <text x="550" y="197" class="caption" fill="#4b5563" text-anchor="middle">时间戳 + 步号</text>
+
+  <path d="M430,292 C480,292 620,292 670,292" fill="none" stroke="#4b5563" stroke-width="3" marker-end="url(#arrow-right)"/>
+  <rect x="440" y="300" width="220" height="50" rx="25" fill="#ffffff" stroke="#9ca3af" stroke-width="1.5"/>
+  <text x="550" y="322" class="label" fill="#111827" text-anchor="middle">观测 Observation</text>
+  <text x="550" y="341" class="caption" fill="#4b5563" text-anchor="middle">时间戳 + 步号</text>
+
+  <text x="550" y="468" class="footer" fill="#6b7280" text-anchor="middle">gRPC 通信：Robot Client 发送观测，Policy Server 返回动作序列</text>
+</svg>

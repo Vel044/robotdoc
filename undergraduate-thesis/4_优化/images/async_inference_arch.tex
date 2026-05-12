@@ -1,0 +1,108 @@
+\begingroup
+\definecolor{asyncClientFill}{HTML}{EEF8F0}
+\definecolor{asyncClientStroke}{HTML}{2F855A}
+\definecolor{asyncClientText}{HTML}{22543D}
+\definecolor{asyncServerFill}{HTML}{EEF5FF}
+\definecolor{asyncServerStroke}{HTML}{2B6CB0}
+\definecolor{asyncServerText}{HTML}{1A365D}
+\definecolor{asyncDarkText}{HTML}{1F2937}
+\definecolor{asyncMutedText}{HTML}{4B5563}
+\definecolor{asyncLine}{HTML}{4B5563}
+\definecolor{asyncGray}{HTML}{9CA3AF}
+\definecolor{asyncFooter}{HTML}{6B7280}
+\resizebox{0.92\textwidth}{!}{%
+\begin{tikzpicture}[
+  x=1pt,
+  y=-1pt,
+  >=Triangle,
+  process/.style={
+    rounded corners=12pt,
+    line width=3pt,
+  },
+  comm/.style={
+    draw=asyncLine,
+    line width=3pt,
+    -{Triangle[length=16pt,width=18pt]},
+  },
+  pill/.style={
+    rounded corners=25pt,
+    draw=asyncGray,
+    line width=1.5pt,
+    fill=white,
+  },
+]
+  \path[use as bounding box] (0,0) rectangle (1100,520);
+  \fill[white] (0,0) rectangle (1100,520);
+
+  \draw[process, fill=asyncClientFill, draw=asyncClientStroke]
+    (70,72) rectangle (430,422);
+  \node[
+    font=\sffamily\bfseries\fontsize{34}{41}\selectfont,
+    text=asyncClientText,
+  ] at (250,135) {Robot Client 进程};
+  \draw[asyncClientStroke!35, line width=2pt] (106,174) -- (394,174);
+
+  \foreach \y/\txt in {
+    222/{连接相机与舵机},
+    272/{采集并发送观测},
+    322/{维护控制循环与动作队列},
+    372/{执行动作、对齐返回结果}
+  } {
+    \fill[asyncClientStroke!90] (104,\y-8) circle[radius=5pt];
+    \node[
+      anchor=west,
+      font=\sffamily\fontsize{27}{34}\selectfont,
+      text=asyncDarkText,
+    ] at (125,\y) {\txt};
+  }
+
+  \draw[process, fill=asyncServerFill, draw=asyncServerStroke]
+    (670,72) rectangle (1030,422);
+  \node[
+    font=\sffamily\bfseries\fontsize{34}{41}\selectfont,
+    text=asyncServerText,
+  ] at (850,135) {Policy Server 进程};
+  \draw[asyncServerStroke!35, line width=2pt] (706,174) -- (994,174);
+
+  \foreach \y/\txt in {
+    242/{加载模型},
+    302/{完成推理},
+    362/{返回动作序列}
+  } {
+    \fill[asyncServerStroke!90] (704,\y-8) circle[radius=5pt];
+    \node[
+      anchor=west,
+      font=\sffamily\fontsize{29}{36}\selectfont,
+      text=asyncDarkText,
+    ] at (725,\y) {\txt};
+  }
+
+  \draw[comm] (670,220) .. controls (620,220) and (480,220) .. (430,220);
+  \draw[pill] (440,130) rectangle (660,204);
+  \node[
+    font=\sffamily\bfseries\fontsize{23}{28}\selectfont,
+    text=asyncDarkText,
+  ] at (550,156) {动作序列};
+  \node[
+    font=\sffamily\bfseries\fontsize{21}{26}\selectfont,
+    text=asyncMutedText,
+  ] at (550,187) {Action Chunk};
+
+  \draw[comm] (430,292) .. controls (480,292) and (620,292) .. (670,292);
+  \draw[pill] (440,304) rectangle (660,378);
+  \node[
+    font=\sffamily\bfseries\fontsize{23}{28}\selectfont,
+    text=asyncDarkText,
+  ] at (550,330) {观测结果};
+  \node[
+    font=\sffamily\bfseries\fontsize{21}{26}\selectfont,
+    text=asyncMutedText,
+  ] at (550,361) {Observation Result};
+
+  \node[
+    font=\sffamily\bfseries\fontsize{23}{30}\selectfont,
+    text=asyncFooter,
+  ] at (550,468) {gRPC 通信：Robot Client 发送观测，Policy Server 返回动作序列};
+\end{tikzpicture}%
+}
+\endgroup

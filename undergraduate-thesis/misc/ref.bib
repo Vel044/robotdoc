@@ -1,0 +1,332 @@
+%% ══════════════════════════════════════════════════════════════
+%% 参考文献数据库（GB/T 7714—2015 格式，biblatex 管理）
+%% ══════════════════════════════════════════════════════════════
+
+%% ── 第1章 绪论 ──────────────────────────────────────────────
+
+% RT-2: 谷歌 RT 系列的第二代视觉-语言-动作模型，证明 VLA 范式在机器人控制中的有效性
+@article{rt2,
+  author  = {Brohan, Anthony and Brown, Noah and Carbajal, Justice and others},
+  title   = {{RT-2}: Vision-Language-Action Models Transfer Web Knowledge to Robotic Control},
+  journal = {arXiv preprint arXiv:2307.15818},
+  year    = {2023},
+}
+
+% OpenVLA: 开源 VLA 模型，HuggingFace 支持，作为 LeRobot 对比基线之一
+@article{openvla,
+  author  = {Kim, Moo Jin and Pumacay, Karl and Jatavallabhula, Krishna Murthy and others},
+  title   = {{OpenVLA}: An Open-Source Vision-Language-Action Model},
+  journal = {arXiv preprint arXiv:2406.09246},
+  year    = {2024},
+}
+
+% LeRobot: HuggingFace 机器人学习框架，本文的核心实验平台
+@misc{lerobot,
+  author = {Remi Cadene and Simon Alibert and others},
+  title  = {{LeRobot}},
+  year   = {2024},
+  url    = {https://github.com/huggingface/lerobot},
+  note   = {HuggingFace},
+}
+
+% ACT: Action Chunking with Transformers，本文研究的策略网络
+@inproceedings{act,
+  author    = {Zhao, Tony Z. and Kumar, Vikash and Levine, Sergey and Finn, Chelsea},
+  title     = {Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware},
+  booktitle = {Proceedings of Robotics: Science and Systems (RSS)},
+  year      = {2023},
+}
+
+% Diffusion Policy: 另一种主流模仿学习策略，LeRobot 也集成，用于相关工作对比
+@inproceedings{diffusionpolicy,
+  author    = {Chi, Cheng and Feng, Siyuan and Du, Yilun and others},
+  title     = {Diffusion Policy: Visuomotor Policy Learning via Action Diffusion},
+  booktitle = {Proceedings of Robotics: Science and Systems (RSS)},
+  year      = {2023},
+}
+
+% SmolVLA: HuggingFace/LeRobot 生态中的小型 VLA，提出异步推理栈以提升 chunked action 的控制频率
+@article{smolvla,
+  author  = {Shukor, Mustafa and Aubakirova, Dana and Capuano, Francesco and Kooijmans, Pepijn and others},
+  title   = {{SmolVLA}: A Vision-Language-Action Model for Affordable and Efficient Robotics},
+  journal = {arXiv preprint arXiv:2506.01844},
+  year    = {2025},
+  doi     = {10.48550/arXiv.2506.01844},
+}
+
+% Real-Time Chunking: 在执行当前 action chunk 的同时生成下一段 chunk，用于缓解推理延迟和 chunk 边界停顿
+@article{realtimechunking,
+  author  = {Black, Kevin and Galliker, Manuel Y. and Levine, Sergey},
+  title   = {Real-Time Execution of Action Chunking Flow Policies},
+  journal = {arXiv preprint arXiv:2506.07339},
+  year    = {2025},
+  note    = {NeurIPS 2025},
+  doi     = {10.48550/arXiv.2506.07339},
+}
+
+% REMAC: 讨论异步推理中 action chunk 与当前感知错位导致的 intra-chunk inconsistency
+@article{remac,
+  author  = {Wang, Haoxuan and Zhang, Gengyu and Yan, Yan and Shang, Yuzhang and Kompella, Ramana Rao and Liu, Gaowen},
+  title   = {Real-Time Robot Execution with Masked Action Chunking},
+  journal = {arXiv preprint arXiv:2601.20130},
+  year    = {2026},
+  note    = {ICLR 2026},
+  doi     = {10.48550/arXiv.2601.20130},
+}
+
+% π0: Physical Intelligence 的通用机器人策略模型，基于流匹配，动作生成能力强
+@misc{pi0,
+  author = {Physical Intelligence},
+  title  = {{\\pi0}: A Generalist Robot Policy},
+  year   = {2024},
+  url    = {https://www.physicalintelligence.com/},
+}
+
+% Mobile ALOHA: 仿生移动机械臂平台，低成本硬件 + 模仿学习，数据采集方便
+@inproceedings{mobilealoha,
+  author    = {Zhan, Tony and others},
+  title     = {Mobile ALOHA: Bimanual Mobile Manipulation with Low-Cost Whole-Body Teleoperation},
+  booktitle = {IEEE International Conference on Robotics and Automation (ICRA)},
+  year      = {2024},
+}
+
+%% ── 机器人基础软件相关工作 ──────────────────────────────────
+
+% AMS: 将OS原语（action context/exception/replay）引入VLA推理管理，成功率提升7-24x
+@article{ams,
+  author  = {Zheng, Wenxin and Li, Boyang and Xu, Bin and Feng, Erhu and Gu, Jinyu and Chen, Haibo},
+  title   = {Leveraging {OS}-Level Primitives for Robotic Action Management},
+  journal = {arXiv preprint arXiv:2508.10259},
+  year    = {2025},
+}
+
+% Real-time Linux comms for robotics: PREEMPT-RT+ARM实测，CPU隔离是关键
+@article{rtlinux,
+  author  = {Gutiérrez, Carlos San Vicente and Juan, Lander Usategui San and Ugarte, Irati Zamalloa and Vilches, Victor Mayoral},
+  title   = {Real-time {Linux} Communications: An Evaluation of the {Linux} Communication Stack for Real-Time Robotic Applications},
+  journal = {arXiv preprint arXiv:1808.10821},
+  year    = {2018},
+}
+
+% ROS2实时性评估（ARM平台）：证明firm/soft实时以太网可行
+@article{ros2realtime,
+  author  = {Maruyama, Yuya and Kato, Shinpei and Azumi, Takuya},
+  title   = {Exploring the Performance of {ROS2}},
+  journal = {arXiv preprint arXiv:1809.02595},
+  year    = {2018},
+}
+
+% ROS2节点组合对ARM嵌入式CPU/延迟的影响
+@article{ros2composition,
+  author  = {Soken-Huberty, Emmet and others},
+  title   = {Impact of {ROS} 2 Node Composition in Robotic Systems},
+  journal = {arXiv preprint arXiv:2305.09933},
+  year    = {2023},
+}
+
+% ros2_tracing: 低开销LTTng-based ROS2追踪框架
+@article{ros2tracing,
+  author  = {Bédard, Christophe and Lütkebohle, Ingo and Dagenais, Michel},
+  title   = {{ros2\_tracing}: Multipurpose Low-Overhead Framework for Real-Time Tracing of {ROS} 2},
+  journal = {arXiv preprint arXiv:2201.00393},
+  year    = {2022},
+}
+
+% ROS2-DDS在树莓派上的中间件性能评测，发现Linux网络栈是实时瓶颈
+@article{ros2ddsrpi,
+  author  = {Aswani, Pranav and others},
+  title   = {Performance Evaluation of {ROS2}-{DDS} Middleware Implementations Facilitating Cooperative Driving in Autonomous Vehicle},
+  journal = {arXiv preprint arXiv:2412.07485},
+  year    = {2024},
+}
+
+% ROS2实时性支持综述（2026）
+@article{ros2rtsurvey,
+  author  = {others},
+  title   = {A Survey of Real-Time Support, Analysis, and Advancements in {ROS} 2},
+  journal = {arXiv preprint arXiv:2601.10722},
+  year    = {2026},
+}
+
+% 中文机器人系统论文：ROS用于焊接机器人仿真与系统开发
+@mastersthesis{houguowei2023weldingrobot,
+  author = {后国炜},
+  title  = {基于进化计算的焊接机器人系统作业规划研究},
+  school = {中南大学},
+  year   = {2023},
+  type   = {硕士学位论文},
+  url    = {https://airl.csu.edu.cn/PDFs/houguowei.pdf},
+}
+
+% 中文机器人系统论文：ROS用于喷浆机器人仿真设计与实现
+@mastersthesis{linxuebin2020shotcreterobot,
+  author = {林学斌},
+  title  = {隧道自动喷浆机器人喷浆轨迹规划研究},
+  school = {中南大学},
+  year   = {2020},
+  type   = {硕士学位论文},
+  url    = {https://airl.csu.edu.cn/PDFs/lxb.pdf},
+}
+
+%% ── 第2章 相关工作 ──────────────────────────────────────────
+
+% RT-1: RT 系列第一代，证明大规模机器人数据训练 Transformer 的可行性
+@article{rt1,
+  author  = {Brohan, Anthony and Brown, Noah and Carbajal, Justice and others},
+  title   = {{RT-1}: Robotics Transformer for Real-World Control at Scale},
+  journal = {arXiv preprint arXiv:2212.06817},
+  year    = {2022},
+}
+
+% ROS2: 机器人操作系统事实标准，本文软件栈的对比参照
+@inproceedings{ros2,
+  author    = {Macenski, Steve and Foote, Tully and Gerkey, Brian and others},
+  title     = {Robot Operating System 2: Design, architecture, and uses in the wild},
+  booktitle = {Science Robotics},
+  volume    = {7},
+  number    = {66},
+  year      = {2022},
+}
+
+% LCM: Lightweight Communications and Marshalling，实时性通信库，对比参照
+@inproceedings{lcm,
+  author    = {Huang, Albert S. and Olson, Edwin and Moore, David C.},
+  title     = {{LCM}: Lightweight Communications and Marshalling},
+  booktitle = {IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS)},
+  year      = {2010},
+}
+
+% ONNX Runtime: 微软推理引擎，本文优化方向之一（INT8/FP16 量化后端）
+@article{onnxruntime,
+  author = {Microsoft},
+  title  = {{ONNX Runtime}},
+  year   = {2024},
+  url    = {https://github.com/microsoft/onnxruntime},
+}
+
+% TFLite: Google 移动端推理框架，ARM 嵌入式部署的对比参照
+@article{tflite,
+  author = {Google},
+  title  = {{TensorFlow Lite}},
+  year   = {2024},
+  url    = {https://www.tensorflow.org/lite},
+}
+
+% PyTorch: 主流深度学习与推理框架，本文运行时与线程行为分析的重要背景
+@article{pytorch,
+  author = {PyTorch},
+  title  = {{PyTorch}},
+  year   = {2024},
+  url    = {https://pytorch.org/},
+}
+
+% PyTorch Mobile: Meta 移动端推理框架，本文 PyTorch 生态的延伸
+@article{pytorchmobile,
+  author = {Meta},
+  title  = {{PyTorch Mobile}},
+  year   = {2024},
+  url    = {https://pytorch.org/mobile/},
+}
+
+% Transformer: Attention Is All You Need，ACT 策略网络的核心架构
+@inproceedings{transformer,
+  author    = {Vaswani, Ashish and Shazeer, Noam and Parmar, Niki and others},
+  title     = {Attention Is All You Need},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
+  year      = {2017},
+}
+
+% CVAE: Conditional VAE，ACT 中动作解码器的生成模型基础
+@article{cvae,
+  author  = {Sohn, Kihyuk and Lee, Honglak and Yan, Xinchen},
+  title   = {Learning Structured Output Representation using Deep Conditional Generative Models},
+  journal = {Advances in Neural Information Processing Systems (NeurIPS)},
+  year    = {2015},
+}
+
+% ResNet: 深度残差网络，ACT 策略网络中视觉编码器的骨干网络
+@article{resnet,
+  author  = {He, Kaiming and Zhang, Xiangyu and Ren, Shaoqing and Sun, Jian},
+  title   = {Deep Residual Learning for Image Recognition},
+  journal = {IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
+  year    = {2016},
+}
+
+%% ── Profiling 工具与系统分析 ────────────────────────────────
+
+% Brendan Gregg《系统性能》：profiling 方法论的经典参考，支撑本文四层分析模型
+@book{perfbook,
+  author    = {Gregg, Brendan},
+  title     = {Systems Performance: Enterprise and the Cloud},
+  publisher = {Addison-Wesley},
+  year      = {2020},
+  edition   = {2nd},
+}
+
+% ftrace: Linux 内核级函数追踪工具，本文内核层测量的主要工具
+@misc{ftrace,
+  author = {Linux Kernel Organization},
+  title  = {ftrace --- Function Tracer},
+  url    = {https://www.kernel.org/doc/html/latest/trace/ftrace.html},
+  year   = {2024},
+}
+
+% strace: 系统调用追踪工具，本文方法论中与 ftrace 对比的反面案例（9× 开销放大）
+@misc{strace,
+  author = {strace developers},
+  title  = {strace --- System Call Tracer},
+  url    = {https://strace.io/},
+  year   = {2024},
+}
+
+% torch.profiler: PyTorch 官方 profiling 工具，本文 AI 算子级测量的主要工具
+@misc{torchprofiler,
+  author = {PyTorch},
+  title  = {{PyTorch Profiler}},
+  url    = {https://pytorch.org/tutorials/recipes/recipes/profiler_recipe.html},
+  year   = {2024},
+}
+
+%% ── 开源硬件与低成本本体 ───────────────────────────────────
+
+% OpenManipulator: ROBOTIS 开源机械臂，配套 ROS2，全硬件图纸开源，适合教学与原型开发
+@misc{openmanipulator,
+  author = {ROBOTIS},
+  title  = {{OpenManipulator}},
+  year   = {2024},
+  url    = {https://emanual.robotis.com/docs/en/platform/openmanipulator_x/},
+}
+
+% TurtleBot: 开源移动机器人，2010 年由 Willow Garage 创建，ROS 生态事实标准，最新为 TurtleBot 4
+@misc{turtlebot4,
+  author = {Open Robotics and Clearpath Robotics},
+  title  = {{TurtleBot 4}},
+  year   = {2023},
+  url    = {https://www.turtlebot.com/},
+}
+
+% Berkeley Humanoid Lite: UC Berkeley HybridRobotics 实验室开源小型人形机器人，3D 打印硬件方案
+@misc{berkeleyhumanoidlite,
+  author = {HybridRobotics},
+  title  = {{Berkeley Humanoid Lite}},
+  year   = {2025},
+  url    = {https://lite.berkeley-humanoid.org/},
+}
+
+%% ── 树莓派 / ARM 平台 ─────────────────────────────────────
+
+% Raspberry Pi 5 官方文档：Cortex-A76 架构，确认无 GPU 的硬件约束
+@manual{rpi5,
+  author       = {Raspberry Pi Foundation},
+  title        = {Raspberry Pi 5 Documentation},
+  year         = {2024},
+  url          = {https://www.raspberrypi.com/documentation/},
+}
+
+% Cortex-A76 TRM: ARM 官方技术参考手册，确认 NEON SIMD 和 GEMM 加速能力
+@manual{cortexa76,
+  author       = {ARM},
+  title        = {{Cortex-A76} Technical Reference Manual},
+  year         = {2024},
+  url          = {https://developer.arm.com/documentation/},
+}

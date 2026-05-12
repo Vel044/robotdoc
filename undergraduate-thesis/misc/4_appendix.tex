@@ -1,0 +1,114 @@
+%%
+% 附录
+%%
+
+\begin{appendices}
+
+\section{开源仓库与复现资源}\label{app:open-repos}
+
+本文相关代码、实验文档和复现资源均已开源。
+表~\ref{tab:open-repos} 汇总了主要仓库、当前本地提交和用途。
+
+\begin{table}[htbp]
+  \centering
+  \caption{开源仓库与复现资源}
+  \label{tab:open-repos}
+  \small
+  \begin{tabularx}{\textwidth}{@{}p{0.30\textwidth}p{0.16\textwidth}X@{}}
+    \toprule
+    资源入口 & 提交或版本 & 用途 \\
+    \midrule
+    \href{https://github.com/Vel044/lerobot}{github.com/Vel044/lerobot}
+      & c29c0aa5
+      & LeRobot 主项目代码，包含在线推理循环、实验打点与离线分析脚本。 \\
+    \href{https://github.com/Vel044/linux}{github.com/Vel044/linux}
+      & bb3dc4ed2
+      & Linux 内核源码与插桩修改，用于 ftrace、\texttt{do\_select} 和 \texttt{do\_futex} 分析。 \\
+    \href{https://huggingface.co/Vel044}{huggingface.co/Vel044}
+      & 模型 13 个；数据集 3 个
+      & HuggingFace 模型权重与实验数据集入口，具体资源见表后说明。 \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+截至本文整理时，HuggingFace 账号下公开模型资源如表~\ref{tab:hf-models}所示。
+
+\begin{table}[htbp]
+  \centering
+  \caption{HuggingFace 公开模型资源}
+  \label{tab:hf-models}
+  \small
+  \begin{tabularx}{\textwidth}{@{}p{0.44\textwidth}p{0.23\textwidth}X@{}}
+    \toprule
+    模型资源 & 任务类型 & 说明 \\
+    \midrule
+    \href{https://huggingface.co/Vel044/so101_act_bottle}{so101\_act\_bottle}
+      & bottle
+      & 基础模型。 \\
+    \href{https://huggingface.co/Vel044/so101_act_bottle_cs1}{so101\_act\_bottle\_cs1}
+      & bottle
+      & chunk\_size = 1。 \\
+    \href{https://huggingface.co/Vel044/so101_act_bottle_cs3}{so101\_act\_bottle\_cs3}
+      & bottle
+      & chunk\_size = 3。 \\
+    \href{https://huggingface.co/Vel044/so101_act_bottle_cs5}{so101\_act\_bottle\_cs5}
+      & bottle
+      & chunk\_size = 5。 \\
+    \href{https://huggingface.co/Vel044/so101_act_bottle_cs10}{so101\_act\_bottle\_cs10}
+      & bottle
+      & chunk\_size = 10。 \\
+    \href{https://huggingface.co/Vel044/so101_act_bottle_cs20}{so101\_act\_bottle\_cs20}
+      & bottle
+      & chunk\_size = 20。 \\
+    \href{https://huggingface.co/Vel044/so101_act_bottle_cs50}{so101\_act\_bottle\_cs50}
+      & bottle
+      & chunk\_size = 50。 \\
+    \href{https://huggingface.co/Vel044/so101_act_bottle_cs100}{so101\_act\_bottle\_cs100}
+      & bottle
+      & chunk\_size = 100。 \\
+    \midrule
+    \href{https://huggingface.co/Vel044/so101_act_bottle_classification}{so101\_act\_bottle\_classification}
+      & bottle classification
+      & 基础分类任务模型。 \\
+    \href{https://huggingface.co/Vel044/so101_act_bottle_classification_cs20}{so101\_act\_bottle\_classification\_cs20}
+      & bottle classification
+      & chunk\_size = 20。 \\
+    \href{https://huggingface.co/Vel044/so101_act_bottle_classification_cs50}{so101\_act\_bottle\_classification\_cs50}
+      & bottle classification
+      & chunk\_size = 50。 \\
+    \href{https://huggingface.co/Vel044/so101_act_bottle_classification_cs200}{so101\_act\_bottle\_classification\_cs200}
+      & bottle classification
+      & chunk\_size = 200。 \\
+    \midrule
+    \href{https://huggingface.co/Vel044/so101_act_bottle_push}{so101\_act\_bottle\_push}
+      & bottle push
+      & 推倒任务模型。 \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+公开数据集资源如表~\ref{tab:hf-datasets}所示。
+
+\begin{table}[htbp]
+  \centering
+  \caption{HuggingFace 公开数据集资源}
+  \label{tab:hf-datasets}
+  \small
+  \begin{tabularx}{\textwidth}{@{}p{0.34\textwidth}p{0.22\textwidth}X@{}}
+    \toprule
+    数据集资源 & 类型 & 说明 \\
+    \midrule
+    \href{https://huggingface.co/datasets/Vel044/so101_bottle}{so101\_bottle}
+      & 论文任务数据集
+      & bottle 任务数据集。 \\
+    \href{https://huggingface.co/datasets/Vel044/so101_bottle_classification}{so101\_bottle\_classification}
+      & 论文任务数据集
+      & bottle classification 任务数据集。 \\
+    \href{https://huggingface.co/datasets/Vel044/so101_bottle_push}{so101\_bottle\_push}
+      & 论文任务数据集
+      & bottle push 推倒任务数据集。 \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\end{appendices}

@@ -1,0 +1,97 @@
+\begingroup
+\definecolor{recordFrame}{HTML}{E5E7EB}
+\definecolor{recordStageFill}{HTML}{F8FBFF}
+\definecolor{recordBlue}{HTML}{2563EB}
+\definecolor{recordWaitFill}{HTML}{FFFAF2}
+\definecolor{recordOrange}{HTML}{F97316}
+\definecolor{recordAsyncFill}{HTML}{F9FAFB}
+\definecolor{recordGray}{HTML}{6B7280}
+\definecolor{recordText}{HTML}{111827}
+\definecolor{recordSubText}{HTML}{4B5563}
+\definecolor{recordSmallText}{HTML}{374151}
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+  x=1pt,
+  y=-1pt,
+  >=Triangle,
+  stage/.style={
+    rounded corners=10pt,
+    draw=recordBlue,
+    line width=2.4pt,
+    fill=recordStageFill,
+  },
+  wait/.style={
+    rounded corners=10pt,
+    draw=recordOrange,
+    line width=2.4pt,
+    fill=recordWaitFill,
+  },
+  async/.style={
+    rounded corners=9pt,
+    draw=recordGray,
+    line width=1.8pt,
+    dashed,
+    dash pattern=on 7pt off 5pt,
+    fill=recordAsyncFill,
+  },
+  flow/.style={
+    draw=recordBlue,
+    line width=3.2pt,
+    -{Triangle[length=18pt,width=21pt]},
+  },
+  loop/.style={
+    draw=recordGray,
+    line width=2.8pt,
+    rounded corners=0pt,
+    -{Triangle[length=18pt,width=21pt]},
+  },
+  asyncFlow/.style={
+    draw=recordGray,
+    line width=2.2pt,
+    dashed,
+    dash pattern=on 7pt off 5pt,
+    -{Triangle[length=18pt,width=21pt]},
+  },
+]
+  \path[use as bounding box] (0,0) rectangle (1080,360);
+
+  \draw[rounded corners=18pt, draw=recordFrame, line width=1.5pt, fill=white]
+    (28,28) rectangle (1052,332);
+
+  \draw[stage] (104,88) rectangle (294,184);
+  \node[font=\bfseries\fontsize{34}{40}\selectfont, text=recordText] at (199,128) {观测阶段};
+  \node[font=\fontsize{24}{30}\selectfont, text=recordSubText] at (199,164) {Observation};
+
+  \draw[stage] (332,88) rectangle (522,184);
+  \node[font=\bfseries\fontsize{34}{40}\selectfont, text=recordText] at (427,128) {推理阶段};
+  \node[font=\fontsize{24}{30}\selectfont, text=recordSubText] at (427,164) {Inference};
+
+  \draw[stage] (560,88) rectangle (750,184);
+  \node[font=\bfseries\fontsize{34}{40}\selectfont, text=recordText] at (655,128) {执行阶段};
+  \node[font=\fontsize{24}{30}\selectfont, text=recordSubText] at (655,164) {Execution};
+
+  \draw[wait] (788,88) rectangle (978,184);
+  \node[font=\bfseries\fontsize{34}{40}\selectfont, text=recordText] at (883,128) {等待阶段};
+  \node[font=\fontsize{24}{30}\selectfont, text=recordSubText] at (883,164) {Wait};
+
+  \draw[flow] (294,136) -- (332,136);
+  \draw[flow] (522,136) -- (560,136);
+  \draw[flow] (750,136) -- (788,136);
+
+  \draw[loop] (883,88) -- (883,58) -- (199,58) -- (199,88);
+  \node[
+    font=\fontsize{18}{23}\selectfont,
+    text=recordSubText,
+    fill=white,
+    inner xsep=22pt,
+    inner ysep=2pt,
+  ] at (540,57) {等待结束后进入下一帧};
+
+  \draw[async] (74,230) rectangle (324,294);
+  \node[font=\bfseries\fontsize{22}{28}\selectfont, text=recordSmallText] at (199,256) {异步读摄像头线程};
+  \node[font=\fontsize{18}{24}\selectfont, text=recordGray] at (199,281) {Camera Prefetch Thread};
+
+  \draw[asyncFlow] (199,184) -- (199,230);
+\end{tikzpicture}%
+}
+\endgroup
