@@ -6,9 +6,18 @@
 
 1. USB 后台接收：CDC ACM 驱动提前提交 bulk IN URB，xHCI 收到舵机回包后通过 DMA 写入 URB 缓冲，完成回调再把数据推入 TTY/N_TTY 接收缓冲。
 2. `select.select([fd, pipe], [], [], 0)`：检查 `/dev/ttyACM0` 是否已有数据可读，内核路径是 `pselect6 -> do_select -> vfs_poll -> tty_poll -> n_tty_poll`。
-3. `os.read(fd, size)`：真正把数据从 N_TTY 缓冲区复制到用户态，内核路径是 `read -> ksys_read -> vfs_read -> tty_read -> n_tty_read -> copy_to_iter`。
+3. `os.read(fd, size)`：真正把数据从 N_TTY 缓冲区复制到用户态，内核路径是 `read -> ksys_read -> vfs_read -> new_sync_read -> tty_read -> n_tty_read -> copy_to_iter`。
 
 其中 `select()` 在 Linux 内核中通常表现为 `pselect6`，它只是 `read()` 之前的可读性检查；协议字节真正返回用户态发生在后面的 `read()` 中。`pselect6` 的公共链路单独见 [pyserial_select_pselect6到内核链路.md](pyserial_select_pselect6到内核链路.md)。
+
+本次源码核对后的补齐点：
+
+| 链路段 | 核对结论 |
+| --- | --- |
+| VFS 读分发 | 已补 `new_sync_read()`，明确 `vfs_read -> new_sync_read -> tty_fops.read_iter` |
+| 读 URB 预提交 | 已补 `acm_submit_read_urb -> usb_submit_urb -> usb_hcd_submit_urb -> xhci_urb_enqueue -> xhci_queue_bulk_tx` |
+| flip buffer 复制 | 已补 `tty_insert_flip_string()` 到 `__tty_insert_flip_string_flags()` 的复制路径 |
+| CPython 来源 | 来源标识覆盖 `os_read_impl/_Py_read`，不再只标入口函数 |
 
 ---
 
@@ -19,6 +28,9 @@ read(fd, buf, count)                    # Python/CPython 调用入口
   │
   ▼
 VFS: vfs_read()                         # 权限检查后分发到 tty_fops.read_iter
+  │
+  ▼
+VFS: new_sync_read()                    # 包装 kiocb/iov_iter 后调用 read_iter
   │
   ▼
 TTY: tty_read()                         # TTY 读入口，获取当前 line discipline
@@ -41,6 +53,7 @@ copy_to_iter()                          # 再复制到 CPython 分配的用户�
 
 `readPort()` 在 `protocol_packet_handler.rxPacket()` 的循环中被反复调用：
 
+来源：scservo_sdk/protocol_packet_handler.py:相关代码片段（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
 # scservo_sdk/protocol_packet_handler.py
 rxpacket.extend(port.readPort(wait_length - rx_length))  # 非阻塞读取还缺的字节
@@ -49,6 +62,7 @@ rx_length = len(rxpacket)                                # 更新当前已收到
 
 SDK 起点源码：
 
+来源：scservo_sdk/port_handler.py:readPort（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
 # scservo_sdk/port_handler.py
 def readPort(self, length):                  # length 是本次最多希望读取的字节数
@@ -155,6 +169,23 @@ Linux SYSCALL_DEFINE3(read, fd, buf, count)
 ### 2.5 USB 回包进入内核缓冲区
 
 ```text
+tty 打开/激活
+│  CDC ACM 驱动提前准备接收通道，不等用户态 read() 才提交 USB 请求。
+└── acm_port_activate()
+    │  提交控制 URB，并批量提交 bulk IN 读 URB。
+    └── acm_submit_read_urbs()
+        │  遍历接收 URB 池。
+        └── acm_submit_read_urb()
+            │  每个空闲读 URB 都交给 USB core。
+            └── usb_submit_urb()
+                │  USB core 校验 URB 并设置 IN 方向。
+                └── usb_hcd_submit_urb()
+                    │  map_urb_for_dma() 处理 DMA 访问关系。
+                    └── xhci_urb_enqueue()
+                        │  bulk IN endpoint 也排进 xHCI transfer ring。
+                        └── xhci_queue_bulk_tx()
+                            │  写 TRB 并敲 doorbell，硬件随后等待设备回包。
+
 舵机回包到达 USB bulk IN endpoint
 │  硬件层：STS3215 回包经 USB CDC ACM 数据 IN 端点返回主机。
 └── xHCI 完成读 URB
@@ -185,6 +216,7 @@ pyserial 的读逻辑是"先 poll 再 read"：先用 `select` 检查 `/dev/ttyAC
 
 ### 3.1 pyserial `read()`
 
+来源：serial/serialposix.py:read（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
 # venv/lib/python3.13/site-packages/serial/serialposix.py
 def read(self, size=1):                           # size 是 SDK 本次想读的最大字节数
@@ -216,11 +248,12 @@ def read(self, size=1):                           # size 是 SDK 本次想读的
 
 ### 3.2 CPython `select.select()`
 
+来源：cpython/Modules/selectmodule.c:select_select_impl（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // cpython/Modules/selectmodule.c
-static PyObject *
-select_select_impl(PyObject *module, PyObject *rlist, PyObject *wlist,
-                   PyObject *xlist, PyObject *timeout_obj)
+static PyObject *  // 本行参与当前 C 层路径的控制流或数据准备
+select_select_impl(PyObject *module, PyObject *rlist, PyObject *wlist,  // 处理 fd 就绪检查和等待唤醒逻辑
+                   PyObject *xlist, PyObject *timeout_obj)  // 本行参与当前 C 层路径的控制流或数据准备
 {
     pylist rfd2obj[FD_SETSIZE + 1];               // Python 对象和 fd 的映射表
     pylist wfd2obj[FD_SETSIZE + 1];               // 写 fd 映射表，本链路为空
@@ -260,11 +293,12 @@ timeout = {tv_sec=0, tv_usec=0}
 
 ### 3.3 glibc `select()` 到 `pselect6`
 
+来源：glibc-2.42/sysdeps/unix/sysv/linux/select.c:__select64（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // glibc-2.42/sysdeps/unix/sysv/linux/select.c
-int
-__select64 (int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
-            struct __timeval64 *timeout)
+int  // 本行参与当前 C 层路径的控制流或数据准备
+__select64 (int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,  // 处理 fd 就绪检查和等待唤醒逻辑
+            struct __timeval64 *timeout)  // 定义当前链路涉及的内核数据结构
 {
   __time64_t s = timeout != NULL ? timeout->tv_sec : 0; // 秒
   int32_t us = timeout != NULL ? timeout->tv_usec : 0;  // 微秒
@@ -276,13 +310,13 @@ __select64 (int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
 
   struct __timespec64 ts64, *pts64 = NULL;              // pselect6 使用 timespec
   if (timeout != NULL) {                                // pyserial timeout=0，会传非 NULL
-    ts64.tv_sec = s;                                    // 0
-    ts64.tv_nsec = ns;                                  // 0
+    ts64.tv_sec = s;                                    // 0  // 更新当前层需要传递的状态、长度、指针或错误码
+    ts64.tv_nsec = ns;                                  // 0  // 更新当前层需要传递的状态、长度、指针或错误码
     pts64 = &ts64;                                      // 指向栈上 timespec
   }
 
-  int r = SYSCALL_CANCEL(pselect6_time64, nfds, readfds, writefds,
-                         exceptfds, pts64, NULL);       // sigmask=NULL
+  int r = SYSCALL_CANCEL(pselect6_time64, nfds, readfds, writefds,  // 处理 fd 就绪检查和等待唤醒逻辑
+                         exceptfds, pts64, NULL);       // sigmask=NULL  // 更新当前层需要传递的状态、长度、指针或错误码
   return r;                                             // 返回就绪 fd 数
 }
 ```
@@ -307,18 +341,19 @@ sig  = NULL
 
 ### 4.1 `pselect6` 入口
 
+来源：linux/fs/select.c:SYSCALL_DEFINE pselect6（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/fs/select.c
-SYSCALL_DEFINE6(pselect6, int, n, fd_set __user *, inp, fd_set __user *, outp,
-                fd_set __user *, exp, struct __kernel_timespec __user *, tsp,
-                void __user *, sig)
+SYSCALL_DEFINE6(pselect6, int, n, fd_set __user *, inp, fd_set __user *, outp,  // 定义 Linux 系统调用入口，用户态 syscall 会进入这里
+                fd_set __user *, exp, struct __kernel_timespec __user *, tsp,  // 本行参与当前 C 层路径的控制流或数据准备
+                void __user *, sig)  // 本行参与当前 C 层路径的控制流或数据准备
 {
     struct sigset_argpack x = {NULL, 0};          // pselect 的 sigmask 打包参数
 
     if (get_sigset_argpack(&x, sig))              // sig=NULL 时不读取
         return -EFAULT;                           // sig 指针非法才失败
 
-    return do_pselect(n, inp, outp, exp, tsp, x.p, x.size, PT_TIMESPEC);
+    return do_pselect(n, inp, outp, exp, tsp, x.p, x.size, PT_TIMESPEC);  // 定义当前层的 C 函数入口
                                                    // 进入 select 核心
 }
 ```
@@ -327,10 +362,11 @@ SYSCALL_DEFINE6(pselect6, int, n, fd_set __user *, inp, fd_set __user *, outp,
 
 ### 4.2 `core_sys_select()`
 
+来源：linux/fs/select.c:core_sys_select（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/fs/select.c
-int core_sys_select(int n, fd_set __user *inp, fd_set __user *outp,
-                    fd_set __user *exp, struct timespec64 *end_time)
+int core_sys_select(int n, fd_set __user *inp, fd_set __user *outp,  // 定义当前层的 C 函数入口
+                    fd_set __user *exp, struct timespec64 *end_time)  // 本行参与当前 C 层路径的控制流或数据准备
 {
     fd_set_bits fds;                              // 内核内部 fd 位图集合
     void *bits;                                   // 位图内存
@@ -363,9 +399,10 @@ int core_sys_select(int n, fd_set __user *inp, fd_set __user *outp,
 
 ### 4.3 `do_select()`
 
+来源：linux/fs/select.c:do_select（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/fs/select.c
-static int do_select(int n, fd_set_bits *fds, struct timespec64 *end_time)
+static int do_select(int n, fd_set_bits *fds, struct timespec64 *end_time)  // 定义当前层的 C 函数入口
 {
     struct poll_wqueues table;                    // 保存 poll 等待队列
     poll_table *wait;                             // 传给各 fd 的 poll 回调
@@ -374,13 +411,13 @@ static int do_select(int n, fd_set_bits *fds, struct timespec64 *end_time)
     poll_initwait(&table);                        // 初始化等待队列
     wait = &table.pt;                             // 取 poll_table
 
-    if (end_time && !end_time->tv_sec && !end_time->tv_nsec) { // timeout={0,0}
+    if (end_time && !end_time->tv_sec && !end_time->tv_nsec) { // timeout={0,0}  // 检查状态或错误码，决定是否走异常/分支路径
         wait->_qproc = NULL;                      // 不挂等待队列，只立即轮询
     }
 
     for (;;) {                                    // select 主循环
         for (每一个被置位的 fd) {                 // 遍历 fd_set 中的 bit
-            struct fd f = fdget(i);               // fd -> struct file
+            struct fd f = fdget(i);               // fd -> struct file  // 定义当前链路涉及的内核数据结构
             if (fd_file(f)) {                     // fd 有效
                 wait_key_set(wait, in, out, bit, 0); // 设置关心的事件类型
                 mask = vfs_poll(fd_file(f), wait); // 调具体文件的 poll
@@ -407,12 +444,13 @@ static int do_select(int n, fd_set_bits *fds, struct timespec64 *end_time)
 
 ### 4.4 `tty_poll()` 与 `n_tty_poll()`
 
+来源：linux/drivers/tty/tty_io.c:tty_poll（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/drivers/tty/tty_io.c
-static __poll_t tty_poll(struct file *filp, poll_table *wait)
+static __poll_t tty_poll(struct file *filp, poll_table *wait)  // 定义当前层的 C 函数入口
 {
-    struct tty_struct *tty = file_tty(filp);      // file -> tty_struct
-    struct tty_ldisc *ld;                         // line discipline
+    struct tty_struct *tty = file_tty(filp);      // file -> tty_struct  // 定义当前链路涉及的内核数据结构
+    struct tty_ldisc *ld;                         // line discipline  // 定义当前链路涉及的内核数据结构
     __poll_t ret = 0;                             // poll 结果掩码
 
     ld = tty_ldisc_ref_wait(tty);                 // 获取 N_TTY 行规程
@@ -425,10 +463,11 @@ static __poll_t tty_poll(struct file *filp, poll_table *wait)
 }
 ```
 
+来源：linux/drivers/tty/n_tty.c:n_tty_poll（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/drivers/tty/n_tty.c
-static __poll_t n_tty_poll(struct tty_struct *tty, struct file *file,
-                           poll_table *wait)
+static __poll_t n_tty_poll(struct tty_struct *tty, struct file *file,  // 定义当前层的 C 函数入口
+                           poll_table *wait)  // 处理 fd 就绪检查和等待唤醒逻辑
 {
     __poll_t mask = 0;                            // 就绪事件掩码
 
@@ -443,8 +482,8 @@ static __poll_t n_tty_poll(struct tty_struct *tty, struct file *file,
             mask |= EPOLLIN | EPOLLRDNORM;        // 有数据则读就绪
     }
 
-    if (tty->ops->write && !tty_is_writelocked(tty) &&
-        tty_chars_in_buffer(tty) < WAKEUP_CHARS &&
+    if (tty->ops->write && !tty_is_writelocked(tty) &&  // 检查状态或错误码，决定是否走异常/分支路径
+        tty_chars_in_buffer(tty) < WAKEUP_CHARS &&  // 调用 TTY 层接口处理串口设备语义
         tty_write_room(tty) > 0)                  // 写侧也可写时
         mask |= EPOLLOUT | EPOLLWRNORM;           // 返回写就绪
 
@@ -462,11 +501,12 @@ static __poll_t n_tty_poll(struct tty_struct *tty, struct file *file,
 
 ### 5.1 打开 tty 时预提交读 URB
 
+来源：linux/drivers/usb/class/cdc-acm.c:acm_port_activate（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/drivers/usb/class/cdc-acm.c
-static int acm_port_activate(struct tty_port *port, struct tty_struct *tty)
+static int acm_port_activate(struct tty_port *port, struct tty_struct *tty)  // 定义当前层的 C 函数入口
 {
-    struct acm *acm = container_of(port, struct acm, port); // tty_port -> acm
+    struct acm *acm = container_of(port, struct acm, port); // tty_port -> acm  // 定义当前链路涉及的内核数据结构
 
     acm->ctrlurb->dev = acm->dev;                 // 控制中断 URB 绑定 USB 设备
     usb_submit_urb(acm->ctrlurb, GFP_KERNEL);     // 提交控制状态 URB
@@ -479,9 +519,10 @@ static int acm_port_activate(struct tty_port *port, struct tty_struct *tty)
 
 ### 5.2 提交读 URB
 
+来源：linux/drivers/usb/class/cdc-acm.c:acm_submit_read_urb（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/drivers/usb/class/cdc-acm.c
-static int acm_submit_read_urb(struct acm *acm, int index, gfp_t mem_flags)
+static int acm_submit_read_urb(struct acm *acm, int index, gfp_t mem_flags)  // 定义当前层的 C 函数入口
 {
     int res;                                      // usb_submit_urb 返回值
 
@@ -497,7 +538,7 @@ static int acm_submit_read_urb(struct acm *acm, int index, gfp_t mem_flags)
     return 0;                                     // 成功提交
 }
 
-static int acm_submit_read_urbs(struct acm *acm, gfp_t mem_flags)
+static int acm_submit_read_urbs(struct acm *acm, gfp_t mem_flags)  // 定义当前层的 C 函数入口
 {
     int i;                                        // URB 下标
 
@@ -512,20 +553,303 @@ CDC ACM 的读不是用户调用 `read()` 时才向 USB 设备要数据，而是
 
 这些接收 URB 的缓冲区在设备初始化时已经通过 `usb_alloc_coherent()` 分配，并设置了 `URB_NO_TRANSFER_DMA_MAP`。因此 USB core 提交读 URB 时主要处理 DMA 访问关系，不会再额外分配一块普通缓冲来复制舵机回包。
 
+来源：linux/drivers/usb/class/cdc-acm.c:相关代码片段（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/drivers/usb/class/cdc-acm.c
-rb->base = usb_alloc_coherent(acm->dev, readsize, GFP_KERNEL, &rb->dma);
-urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
-urb->transfer_dma = rb->dma;
-usb_fill_bulk_urb(urb, acm->dev, acm->in, rb->base,
-                  acm->readsize, acm_read_bulk_callback, rb);
+rb->base = usb_alloc_coherent(acm->dev, readsize, GFP_KERNEL, &rb->dma);  // 更新当前层需要传递的状态、长度、指针或错误码
+urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;  // 更新当前层需要传递的状态、长度、指针或错误码
+urb->transfer_dma = rb->dma;  // 更新当前层需要传递的状态、长度、指针或错误码
+usb_fill_bulk_urb(urb, acm->dev, acm->in, rb->base,  // 调用下一层 C 函数继续完成当前路径
+                  acm->readsize, acm_read_bulk_callback, rb);  // 调用下一层 C 函数继续完成当前路径
 ```
 
-### 5.3 URB 完成回调
+### 5.3 读 URB 进入 USB core/xHCI 队列
 
+`acm_submit_read_urb()` 调用的 `usb_submit_urb()` 和写路径共用 USB core/HCD/xHCI 入队逻辑。区别是这里的 endpoint 是 bulk IN，URB 被预先排到 xHCI transfer ring 后，硬件等待设备返回数据；后面的 `read()` 系统调用只是消费已经到达 TTY/N_TTY 缓冲区的数据，不会在当下才创建这条 USB 传输。
+
+来源：linux/drivers/usb/core/urb.c:usb_submit_urb（节选：仅保留 bulk IN 读 URB 相关分支，已按当前仓库源码核对）
+```c
+// linux/drivers/usb/core/urb.c
+int usb_submit_urb(struct urb *urb, gfp_t mem_flags) // USB core 接收驱动提交的异步传输请求
+{
+    int xfertype, max;                            // endpoint 类型和最大包长
+    struct usb_device *dev;                       // URB 绑定的 USB 设备
+    struct usb_host_endpoint *ep;                 // pipe 对应的 endpoint
+    int is_out;                                   // 方向标记；bulk IN 读 URB 为 0
+    unsigned int allowed;                         // 当前传输类型允许的 URB 标志
+
+    if (!urb || !urb->complete)                   // URB 必须存在并带完成回调
+        return -EINVAL;                           // 参数错误，不能提交
+    if (urb->hcpriv) {                            // hcpriv 非空表示 URB 已经在 HCD 手里
+        WARN_ONCE(1, "URB %pK submitted while active\n", urb); // 警告重复提交
+        return -EBUSY;                            // 返回忙
+    }
+
+    dev = urb->dev;                               // 取出 USB 设备
+    if ((!dev) || (dev->state < USB_STATE_UNAUTHENTICATED)) // 设备不存在或状态太早
+        return -ENODEV;                           // 设备不可用
+
+    ep = usb_pipe_endpoint(dev, urb->pipe);       // 从 pipe 找到 bulk IN endpoint
+    if (!ep)                                      // endpoint 查不到
+        return -ENOENT;                           // 返回不存在
+
+    urb->ep = ep;                                 // 把 endpoint 缓存在 URB 上
+    urb->status = -EINPROGRESS;                   // 标记传输已经进入进行中状态
+    urb->actual_length = 0;                       // 完成前实际接收长度清零
+
+    xfertype = usb_endpoint_type(&ep->desc);      // 读取 endpoint 类型
+    if (xfertype == USB_ENDPOINT_XFER_CONTROL) {  // 控制端点分支
+        /* CDC ACM 数据读 URB 是 bulk IN，不走控制端点分支。 */ // 节选说明
+    } else {                                      // 非控制端点
+        is_out = usb_endpoint_dir_out(&ep->desc); // bulk IN endpoint 得到 is_out=0
+    }
+
+    urb->transfer_flags &= ~(URB_DIR_MASK | URB_DMA_MAP_SINGLE | // 清掉上次提交遗留的方向和 DMA 标志
+            URB_DMA_MAP_PAGE | URB_DMA_MAP_SG | URB_MAP_LOCAL | // 清掉 page/sg/local 映射标志
+            URB_SETUP_MAP_SINGLE | URB_SETUP_MAP_LOCAL |        // 清掉控制包映射标志
+            URB_DMA_SG_COMBINED);                // 清掉合并 SG 标志
+    urb->transfer_flags |= (is_out ? URB_DIR_OUT : URB_DIR_IN); // bulk IN 读 URB 设置 URB_DIR_IN
+
+    if (xfertype != USB_ENDPOINT_XFER_CONTROL && // 非控制端点
+            dev->state < USB_STATE_CONFIGURED)   // 设备必须已配置
+        return -ENODEV;                           // 未配置设备不能提交数据 URB
+
+    max = usb_endpoint_maxp(&ep->desc);           // 读取 endpoint 最大包长
+    if (max <= 0)                                 // endpoint 描述符异常
+        return -EMSGSIZE;                         // 包长非法
+
+    allowed = (URB_NO_TRANSFER_DMA_MAP | URB_NO_INTERRUPT | URB_DIR_MASK | // 基础允许标志
+            URB_FREE_BUFFER);                     // 允许完成时释放缓冲
+    switch (xfertype) {                           // 按传输类型补充允许标志
+    case USB_ENDPOINT_XFER_BULK:                  // CDC ACM 读数据端点是 bulk
+    case USB_ENDPOINT_XFER_INT:                   // interrupt 和 bulk 共享部分规则
+        if (is_out)                               // OUT 方向才允许 ZERO_PACKET
+            allowed |= URB_ZERO_PACKET;           // bulk IN 不会加这个标志
+        fallthrough;                              // 继续执行非 isoc 默认规则
+    default:                                      // 所有非 isochronous endpoint
+        if (!is_out)                              // IN 方向
+            allowed |= URB_SHORT_NOT_OK;          // 允许驱动要求短包视为错误
+        break;                                    // 规则处理结束
+    }
+    allowed &= urb->transfer_flags;               // 只保留当前 URB 实际设置且允许的标志
+
+    return usb_hcd_submit_urb(urb, mem_flags);    // 交给 Host Controller Driver，树莓派 5 上进入 xHCI
+}
+```
+
+来源：linux/drivers/usb/core/hcd.c:usb_hcd_submit_urb（节选：仅保留 bulk IN 读 URB 相关分支，已按当前仓库源码核对）
+```c
+// linux/drivers/usb/core/hcd.c
+int usb_hcd_submit_urb(struct urb *urb, gfp_t mem_flags) // USB core 到 HCD 的提交入口
+{
+    int status;                                   // HCD 提交结果
+    struct usb_hcd *hcd = bus_to_hcd(urb->dev->bus); // 从 USB bus 找到主机控制器
+
+    usb_get_urb(urb);                             // 增加 URB 引用，HCD 完成前不能释放
+    atomic_inc(&urb->use_count);                  // 标记 URB 正在被 HCD 使用
+    atomic_inc(&urb->dev->urbnum);                // 设备当前活跃 URB 数加一
+    usbmon_urb_submit(&hcd->self, urb);           // 给 usbmon 记录提交事件
+
+    status = map_urb_for_dma(hcd, urb, mem_flags); // 建立或确认 DMA 访问关系
+    if (likely(status == 0)) {                    // DMA 关系处理成功
+        status = hcd->driver->urb_enqueue(hcd, urb, mem_flags); // 调 HCD 的 urb_enqueue，xHCI 下就是 xhci_urb_enqueue()
+        if (unlikely(status))                     // HCD 入队失败
+            unmap_urb_for_dma(hcd, urb);          // 回滚 DMA 映射关系
+    }
+
+    if (unlikely(status)) {                       // 提交流程失败
+        usbmon_urb_submit_error(&hcd->self, urb, status); // 给 usbmon 记录错误
+        urb->hcpriv = NULL;                       // 清掉 HCD 私有指针
+        INIT_LIST_HEAD(&urb->urb_list);           // 重置 URB 链表节点
+        atomic_dec(&urb->use_count);              // 撤销使用计数
+    }
+
+    return status;                                // 0 表示读 URB 已交给 HCD，完成会异步回调
+}
+```
+
+读 URB 的 DMA 映射分发和写 URB 走同一套函数，只是方向变成 `DMA_FROM_DEVICE`。CDC ACM 读缓冲同样来自 `usb_alloc_coherent()` 并设置了 `URB_NO_TRANSFER_DMA_MAP`，因此这里确认/沿用已有 DMA 地址，而不是在用户态 `read()` 时再复制一份 USB 接收缓冲。
+
+来源：linux/drivers/usb/core/hcd.c:map_urb_for_dma / linux/drivers/usb/host/xhci.c:xhci_map_urb_for_dma / linux/drivers/usb/core/hcd.c:usb_hcd_map_urb_for_dma（节选：仅保留 CDC ACM 读链路相关分支，已按当前仓库源码核对）
+```c
+// linux/drivers/usb/core/hcd.c
+static int map_urb_for_dma(struct usb_hcd *hcd, struct urb *urb, // USB core 调用的 DMA 映射分发入口
+                           gfp_t mem_flags)      // 提交读 URB 时通常是 GFP_KERNEL 或 GFP_ATOMIC
+{
+    if (hcd->driver->map_urb_for_dma)             // xHCI HCD 注册了自己的映射钩子
+        return hcd->driver->map_urb_for_dma(hcd, urb, mem_flags); // 先进入 xhci_map_urb_for_dma()
+    else                                          // 没有 HCD 私有钩子
+        return usb_hcd_map_urb_for_dma(hcd, urb, mem_flags); // 直接走通用映射
+}
+
+// linux/drivers/usb/host/xhci.c
+static int xhci_map_urb_for_dma(struct usb_hcd *hcd, struct urb *urb, // xHCI 的 DMA 映射钩子
+                                gfp_t mem_flags)  // 原样传给通用映射
+{
+    struct xhci_hcd *xhci;                        // xHCI 主控私有结构
+
+    xhci = hcd_to_xhci(hcd);                      // 从通用 HCD 取 xHCI 对象
+
+    if (xhci_urb_suitable_for_idt(urb))           // IDT 只适用于很小的 OUT 传输
+        return 0;                                 // bulk IN 读 URB 不会走这个返回
+
+    if (xhci->quirks & XHCI_SG_TRB_CACHE_SIZE_QUIRK) { // 少数 xHCI 需要临时缓冲规避 SG/TRB 缓存限制
+        if (xhci_urb_temp_buffer_required(hcd, urb)) // 判断是否需要 bounce buffer
+            return xhci_map_temp_buffer(hcd, urb); // 需要时先分配临时缓冲
+    }
+    return usb_hcd_map_urb_for_dma(hcd, urb, mem_flags); // 常规 bulk IN 读 URB 进入通用映射
+}
+
+// linux/drivers/usb/core/hcd.c
+int usb_hcd_map_urb_for_dma(struct usb_hcd *hcd, struct urb *urb, // 通用 HCD DMA 映射函数
+                            gfp_t mem_flags)     // 映射所需的内存分配上下文
+{
+    enum dma_data_direction dir;                  // DMA 方向
+    int ret = 0;                                  // 默认成功
+
+    dir = usb_urb_dir_in(urb) ? DMA_FROM_DEVICE : DMA_TO_DEVICE; // bulk IN 读 URB 是 DMA_FROM_DEVICE
+    if (urb->transfer_buffer_length != 0          // 有接收缓冲才需要处理映射
+        && !(urb->transfer_flags & URB_NO_TRANSFER_DMA_MAP)) { // CDC ACM 读 URB 设置了该标志，所以跳过重映射分支
+        /* 通用 sg/page/single 映射分支在这里；本链路使用 coherent 缓冲，不进入。 */ // 节选说明
+    }
+    return ret;                                   // 返回 0 后继续交给 xHCI urb_enqueue
+}
+```
+
+来源：linux/drivers/usb/host/xhci.c:xhci_urb_enqueue（节选：仅保留 bulk IN 读 URB 相关分支，已按当前仓库源码核对）
+```c
+// linux/drivers/usb/host/xhci.c
+static int xhci_urb_enqueue(struct usb_hcd *hcd, struct urb *urb, gfp_t mem_flags) // xHCI 接收 URB 的入口
+{
+    struct xhci_hcd *xhci = hcd_to_xhci(hcd);     // 从通用 HCD 取 xHCI 私有结构
+    unsigned long flags;                          // 保存中断标志
+    int ret = 0;                                  // 入队结果
+    unsigned int slot_id, ep_index;               // USB 设备 slot 和 endpoint 索引
+    struct urb_priv *urb_priv;                    // xHCI 跟踪 URB/TD 的私有结构
+    int num_tds;                                  // 本 URB 需要的 TD 数量
+
+    ep_index = xhci_get_endpoint_index(&urb->ep->desc); // 根据 endpoint 描述符计算 ep_index
+    num_tds = 1;                                  // 普通 bulk IN 读 URB 通常一个 TD
+    urb_priv = kzalloc(struct_size(urb_priv, td, num_tds), mem_flags); // 分配 xHCI 私有跟踪结构
+    if (!urb_priv)                                // 分配失败
+        return -ENOMEM;                           // 返回内存不足
+
+    urb_priv->num_tds = num_tds;                  // 记录 TD 数量
+    urb_priv->num_tds_done = 0;                   // 完成 TD 计数清零
+    urb->hcpriv = urb_priv;                       // 把 xHCI 私有结构挂到 URB 上
+
+    spin_lock_irqsave(&xhci->lock, flags);        // 锁住 xHCI 状态和 transfer ring
+    ret = xhci_check_args(hcd, urb->dev, urb->ep, true, true, __func__); // 检查设备和 endpoint 是否可用
+    if (ret <= 0) {                               // 参数或状态非法
+        ret = ret ? ret : -EINVAL;                // 规范化错误码
+        goto free_priv;                           // 释放私有结构并返回
+    }
+
+    slot_id = urb->dev->slot_id;                  // 读取 xHCI slot id
+    switch (usb_endpoint_type(&urb->ep->desc)) {  // 按 endpoint 类型分发
+    case USB_ENDPOINT_XFER_BULK:                  // CDC ACM bulk IN 进入这个分支
+        ret = xhci_queue_bulk_tx(xhci, GFP_ATOMIC, urb, slot_id, ep_index); // 把读 URB 转成 bulk transfer TRB
+        break;                                    // bulk 分支结束
+    }
+
+    if (ret) {                                    // 入队失败
+free_priv:
+        xhci_urb_free_priv(urb_priv);             // 释放 xHCI 私有结构
+        urb->hcpriv = NULL;                       // 清掉 URB 私有指针
+    }
+    spin_unlock_irqrestore(&xhci->lock, flags);   // 释放 xHCI 锁
+    return ret;                                   // 0 表示 URB 已排进 xHCI transfer ring
+}
+```
+
+来源：linux/drivers/usb/host/xhci-ring.c:xhci_queue_bulk_tx（节选：仅保留 bulk IN 读 URB 相关分支，已按当前仓库源码核对）
+```c
+// linux/drivers/usb/host/xhci-ring.c
+int xhci_queue_bulk_tx(struct xhci_hcd *xhci, gfp_t mem_flags, // 把 bulk URB 写入 xHCI transfer ring
+        struct urb *urb, int slot_id, unsigned int ep_index) // URB、设备 slot 和 endpoint 索引
+{
+    struct xhci_ring *ring;                       // endpoint 对应的 transfer ring
+    struct urb_priv *urb_priv;                    // 前面分配的 URB 私有结构
+    struct xhci_td *td;                           // 当前 Transfer Descriptor
+    struct xhci_generic_trb *start_trb;           // 本 TD 的第一个 TRB
+    bool more_trbs_coming = true;                 // 是否还有后续 TRB
+    bool first_trb = true;                        // 首个 TRB 的 cycle bit 延后交给硬件
+    unsigned int start_cycle, enqd_len, trb_buff_len, full_len; // 首 TRB cycle、已入队长度、本 TRB 长度、总长度
+    unsigned int num_trbs;                       // 这个 URB 需要写入的 TRB 数量
+    u32 field, length_field, remainder;           // TRB 控制字段和长度字段
+    u64 addr, send_addr;                          // DMA 地址
+    int ret;                                      // prepare_transfer 返回值
+
+    ring = xhci_urb_to_transfer_ring(xhci, urb);  // 找到 bulk IN endpoint 的 transfer ring
+    if (!ring)                                    // ring 不存在
+        return -EINVAL;                           // endpoint 状态异常
+
+    full_len = urb->transfer_buffer_length;       // 本次读 URB 可接收的最大字节数
+    num_trbs = count_trbs_needed(urb);            // 根据接收缓冲长度和边界计算需要的 TRB 数
+    addr = (u64) urb->transfer_dma;               // CDC ACM 读缓冲的 DMA 地址
+    send_addr = addr;                             // 当前 TRB 要写入的 DMA 地址
+    ret = prepare_transfer(xhci, xhci->devs[slot_id], // 为 endpoint ring 预留 TRB 空间
+            ep_index, urb->stream_id,             // 指定 endpoint 和 stream
+            num_trbs, urb, 0, mem_flags);         // 按 TRB 数预留一个 TD 的 ring 空间
+    if (unlikely(ret < 0))                        // ring 空间准备失败
+        return ret;                               // 返回 HCD 错误码
+
+    urb_priv = urb->hcpriv;                       // 取 xHCI 私有结构
+    td = &urb_priv->td[0];                        // 普通 bulk URB 的第一个 TD
+    start_trb = &ring->enqueue->generic;          // 保存第一个 TRB 地址
+    start_cycle = ring->cycle_state;              // 保存首 TRB 当前 cycle，等所有 TRB 写完后再交给硬件
+
+    for (enqd_len = 0; first_trb || enqd_len < full_len; // 遍历，把整个接收缓冲描述成一个或多个 TRB
+            enqd_len += trb_buff_len) {           // 每轮推进一个 TRB 长度
+        field = TRB_TYPE(TRB_NORMAL);             // bulk 传输使用 Normal TRB
+        trb_buff_len = TRB_BUFF_LEN_UP_TO_BOUNDARY(addr); // 单个 TRB 不能跨 64KB 边界
+        if (enqd_len + trb_buff_len > full_len)   // 最后一段不能超过 URB 总长度
+            trb_buff_len = full_len - enqd_len;   // 截断成剩余长度
+
+        if (first_trb) {                          // 第一个 TRB
+            first_trb = false;                    // 后续循环不再是首 TRB
+        } else {                                  // 后续 TRB
+            field |= ring->cycle_state;           // 非首 TRB 直接带当前 cycle 状态
+        }
+
+        if (enqd_len + trb_buff_len >= full_len) { // 最后一个 TRB
+            field &= ~TRB_CHAIN;                  // 清掉 CHAIN，表示 TD 结束
+            field |= TRB_IOC;                     // 完成时产生事件
+            more_trbs_coming = false;             // 没有后续 TRB
+            td->last_trb = ring->enqueue;         // 记录 TD 最后一个 TRB
+            td->last_trb_seg = ring->enq_seg;     // 记录最后 TRB 所在 segment
+        }
+
+        if (usb_urb_dir_in(urb))                  // bulk IN 读 URB
+            field |= TRB_ISP;                     // 短包也产生事件，便于收到实际长度后完成
+
+        remainder = xhci_td_remainder(xhci, enqd_len, trb_buff_len, // 计算 TD 剩余量
+                                      full_len, urb, more_trbs_coming); // 供控制器调度和事件生成使用
+        length_field = TRB_LEN(trb_buff_len) |    // 当前 TRB 可接收长度
+            TRB_TD_SIZE(remainder) |              // TD 剩余大小提示
+            TRB_INTR_TARGET(0);                   // 完成事件发给 interrupter 0
+
+        queue_trb(xhci, ring, more_trbs_coming,   // 把 TRB 写入 transfer ring
+                  lower_32_bits(send_addr),       // buffer DMA 地址低 32 位
+                  upper_32_bits(send_addr),       // buffer DMA 地址高 32 位
+                  length_field,                   // 长度和中断目标字段
+                  field);                         // 类型、cycle、IOC、ISP 等控制位
+        addr += trb_buff_len;                     // 推进下一个 TRB 的 DMA 地址
+        send_addr = addr;                         // 更新下一轮写入地址
+    }
+
+    giveback_first_trb(xhci, slot_id, ep_index, urb->stream_id, // 交出首 TRB 并敲 doorbell
+            start_cycle, start_trb);              // 通知 xHCI 硬件这个 bulk IN URB 可以执行
+    return 0;                                     // 入队完成；后续由完成事件触发 acm_read_bulk_callback()
+}
+```
+
+### 5.4 URB 完成回调
+
+来源：linux/drivers/usb/class/cdc-acm.c:acm_read_bulk_callback（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/drivers/usb/class/cdc-acm.c
-static void acm_read_bulk_callback(struct urb *urb)
+static void acm_read_bulk_callback(struct urb *urb)  // 定义当前层的 C 函数入口
 {
     struct acm_rb *rb = urb->context;             // 接收缓冲描述符
     struct acm *acm = rb->instance;               // 所属 CDC ACM 设备
@@ -536,7 +860,7 @@ static void acm_read_bulk_callback(struct urb *urb)
         usb_mark_last_busy(acm->dev);             // 更新 USB 自动电源管理活跃时间
         acm_process_read_urb(acm, urb);           // 把 URB 数据推给 TTY
         break;                                    // 完成正常路径
-    case -EPIPE:                                  // endpoint stall
+    case -EPIPE:                                  // endpoint stall  // 处理当前 switch 命中的具体命令分支
         set_bit(EVENT_RX_STALL, &acm->flags);     // 标记需要清 halt
         return;                                   // 暂停后续提交
     }
@@ -548,11 +872,12 @@ static void acm_read_bulk_callback(struct urb *urb)
 }
 ```
 
-### 5.4 推入 TTY flip buffer
+### 5.5 推入 TTY flip buffer
 
+来源：linux/drivers/usb/class/cdc-acm.c:acm_process_read_urb（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/drivers/usb/class/cdc-acm.c
-static void acm_process_read_urb(struct acm *acm, struct urb *urb)
+static void acm_process_read_urb(struct acm *acm, struct urb *urb)  // 定义当前层的 C 函数入口
 {
     unsigned long flags;                          // 保存中断标志
 
@@ -571,52 +896,108 @@ static void acm_process_read_urb(struct acm *acm, struct urb *urb)
 
 这一步把 USB 层收到的舵机状态包变成 TTY 层可读数据。后续 N_TTY 的 receive buffer 有数据，`n_tty_poll()` 才会返回 `EPOLLIN`。
 
-### 5.5 从 flip buffer 到 N_TTY read_buf
+`tty_insert_flip_string()` 是 CDC ACM 到 TTY flip buffer 的 CPU 复制点。它在头文件中是 inline 包装，最终进入 `__tty_insert_flip_string_flags()`，该函数按 TTY buffer 可用空间分段 `memcpy()`。
+
+来源：linux/include/linux/tty_flip.h:tty_insert_flip_string / linux/drivers/tty/tty_buffer.c:__tty_insert_flip_string_flags（节选：仅保留普通字节 TTY_NORMAL 路径，已按当前仓库源码核对）
+```c
+// linux/include/linux/tty_flip.h
+static inline size_t tty_insert_flip_string(struct tty_port *port, // CDC ACM 调用的普通字节入队接口
+                                            const u8 *chars, size_t size) // chars 指向 URB transfer_buffer
+{
+    return tty_insert_flip_string_fixed_flag(port, chars, TTY_NORMAL, size); // 普通串口字节统一标成 TTY_NORMAL
+}
+
+static inline size_t tty_insert_flip_string_fixed_flag(struct tty_port *port, // 带固定 flag 的 flip buffer 入队接口
+                                                       const u8 *chars, u8 flag, // flag 对所有字符相同
+                                                       size_t size) // 要复制的字节数
+{
+    return __tty_insert_flip_string_flags(port, chars, &flag, false, size); // 进入真正复制函数，flags 不随字符变化
+}
+
+// linux/drivers/tty/tty_buffer.c
+size_t __tty_insert_flip_string_flags(struct tty_port *port, const u8 *chars, // 把驱动收到的字节复制进 flip buffer
+                                      const u8 *flags, bool mutable_flags, // flags 描述每个字节的状态
+                                      size_t size) // 目标复制长度
+{
+    bool need_flags = mutable_flags || flags[0] != TTY_NORMAL; // 普通字节不需要额外 flag buffer
+    size_t copied = 0;                           // 已复制字节数
+
+    do {                                         // 可能跨多个 tty_buffer 分段复制
+        size_t goal = min_t(size_t, size - copied, TTY_BUFFER_PAGE); // 本轮最多申请一页大小空间
+        size_t space = __tty_buffer_request_room(port, goal, need_flags); // 向 flip buffer 申请可写空间
+        struct tty_buffer *tb = port->buf.tail;  // 当前写入的 flip buffer
+
+        if (unlikely(space == 0))                // 没有可用空间
+            break;                               // 停止复制，返回已复制长度
+
+        memcpy(char_buf_ptr(tb, tb->used), chars, space); // URB transfer_buffer -> TTY flip buffer
+
+        if (mutable_flags) {                     // 每个字节有独立 flag
+            memcpy(flag_buf_ptr(tb, tb->used), flags, space); // 同步复制 flag 数组
+            flags += space;                      // 推进 flag 源指针
+        } else if (tb->flags) {                  // 当前 buffer 分配了 flag 区
+            memset(flag_buf_ptr(tb, tb->used), flags[0], space); // 写入固定 flag
+        } else {                                 // 普通 TTY_NORMAL 且无 flag 区
+            WARN_ON_ONCE(need_flags);            // 理论上不需要 flag，却发现状态不一致时报警
+        }
+
+        tb->used += space;                       // 推进 flip buffer 已用长度
+        copied += space;                         // 累加本次已经复制的字节数
+        chars += space;                          // 推进 URB 缓冲源指针
+    } while (unlikely(size > copied));            // 还有未复制字节时继续申请下一个 buffer
+
+    return copied;                               // 返回实际进入 flip buffer 的字节数
+}
+```
+
+### 5.6 从 flip buffer 到 N_TTY read_buf
 
 `tty_flip_buffer_push()` 不是直接让用户态 `read()` 读取 URB 缓冲，而是把 TTY flip buffer 的处理工作放到 workqueue。`flush_to_ldisc()` 之后会把 flip buffer 中的数据交给当前行规程；本项目通常仍使用 N_TTY 行规程，并处于原始模式，因此 N_TTY 基本不解释舵机字节，只把它们写入自己的 `read_buf`，随后唤醒等待在 `read_wait` 上的读者。
 
+来源：linux/drivers/tty/tty_buffer.c:tty_flip_buffer_push（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/drivers/tty/tty_buffer.c
-void tty_flip_buffer_push(struct tty_port *port)
+void tty_flip_buffer_push(struct tty_port *port)  // 定义当前层的 C 函数入口
 {
-    struct tty_bufhead *buf = &port->buf;
+    struct tty_bufhead *buf = &port->buf;  // 定义当前链路涉及的内核数据结构
 
     tty_flip_buffer_commit(buf->tail);             // 提交 flip buffer 中的新字节
     queue_work(system_unbound_wq, &buf->work);     // 调度 flush_to_ldisc()
 }
 
-static void flush_to_ldisc(struct work_struct *work)
+static void flush_to_ldisc(struct work_struct *work)  // 定义当前层的 C 函数入口
 {
-    struct tty_port *port = container_of(work, struct tty_port, buf.work);
-    struct tty_buffer *head = port->buf.head;
-    size_t count = smp_load_acquire(&head->commit) - head->read;
+    struct tty_port *port = container_of(work, struct tty_port, buf.work);  // 定义当前链路涉及的内核数据结构
+    struct tty_buffer *head = port->buf.head;  // 定义当前链路涉及的内核数据结构
+    size_t count = smp_load_acquire(&head->commit) - head->read;  // 更新当前层需要传递的状态、长度、指针或错误码
 
     receive_buf(port, head, count);                // 把 flip buffer 交给 line discipline
 }
 
-static size_t tty_ldisc_receive_buf(struct tty_ldisc *ld, const u8 *p,
-                                    const u8 *f, size_t count)
+static size_t tty_ldisc_receive_buf(struct tty_ldisc *ld, const u8 *p,  // 定义当前层的 C 函数入口
+                                    const u8 *f, size_t count)  // 本行参与当前 C 层路径的控制流或数据准备
 {
-    if (ld->ops->receive_buf2)
-        count = ld->ops->receive_buf2(ld->tty, p, f, count); // N_TTY receive_buf2
-    return count;
+    if (ld->ops->receive_buf2)  // 检查状态或错误码，决定是否走异常/分支路径
+        count = ld->ops->receive_buf2(ld->tty, p, f, count); // N_TTY receive_buf2  // 更新当前层需要传递的状态、长度、指针或错误码
+    return count;  // 把本层处理结果或错误码返回上一层
 }
 ```
 
+来源：linux/drivers/tty/n_tty.c:n_tty_receive_buf_common（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/drivers/tty/n_tty.c
-static size_t n_tty_receive_buf_common(struct tty_struct *tty, const u8 *cp,
-                                       const u8 *fp, size_t count, bool flow)
+static size_t n_tty_receive_buf_common(struct tty_struct *tty, const u8 *cp,  // 定义当前层的 C 函数入口
+                                       const u8 *fp, size_t count, bool flow)  // 本行参与当前 C 层路径的控制流或数据准备
 {
-    struct n_tty_data *ldata = tty->disc_data;
+    struct n_tty_data *ldata = tty->disc_data;  // 定义当前链路涉及的内核数据结构
 
     down_read(&tty->termios_rwsem);                // 读取 termios 配置
     __receive_buf(tty, cp, fp, count);             // 原始模式下把字节写入 read_buf
     smp_store_release(&ldata->commit_head, ldata->read_head); // 发布给 read/poll 侧
-    wake_up_interruptible_poll(&tty->read_wait, EPOLLIN | EPOLLRDNORM);
-    up_read(&tty->termios_rwsem);
+    wake_up_interruptible_poll(&tty->read_wait, EPOLLIN | EPOLLRDNORM);  // 处理 fd 就绪检查和等待唤醒逻辑
+    up_read(&tty->termios_rwsem);  // 调用下一层 C 函数继续完成当前路径
 
-    return count;
+    return count;  // 把本层处理结果或错误码返回上一层
 }
 ```
 
@@ -630,10 +1011,11 @@ pyserial 先用 `select` 确认 fd 可读，然后调用 `os.read()` 把数据�
 
 ### 6.1 CPython 与 glibc
 
+来源：cpython/Modules/posixmodule.c:os_read_impl / cpython/Python/fileutils.c:_Py_read（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // cpython/Modules/posixmodule.c
-static PyObject *
-os_read_impl(PyObject *module, int fd, Py_ssize_t length)
+static PyObject *  // 本行参与当前 C 层路径的控制流或数据准备
+os_read_impl(PyObject *module, int fd, Py_ssize_t length)  // 调用下一层 C 函数继续完成当前路径
 {
     PyBytesWriter *writer = PyBytesWriter_Create(length); // 分配 Python bytes 写入器
     Py_ssize_t n = _Py_read(fd, PyBytesWriter_GetData(writer), length); // 调 _Py_read
@@ -641,11 +1023,11 @@ os_read_impl(PyObject *module, int fd, Py_ssize_t length)
 }
 
 // cpython/Python/fileutils.c
-Py_ssize_t
-_Py_read(int fd, void *buf, size_t count)
+Py_ssize_t  // 本行参与当前 C 层路径的控制流或数据准备
+_Py_read(int fd, void *buf, size_t count)  // 调用下一层 C 函数继续完成当前路径
 {
     Py_ssize_t n;                                // read 返回值
-    int err;                                     // errno
+    int err;                                     // errno  // 本行参与当前 C 层路径的控制流或数据准备
 
     do {                                        // EINTR 重试循环
         Py_BEGIN_ALLOW_THREADS                   // 释放 GIL
@@ -660,10 +1042,11 @@ _Py_read(int fd, void *buf, size_t count)
 }
 ```
 
+来源：glibc-2.42/sysdeps/unix/sysv/linux/read.c:__libc_read（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // glibc-2.42/sysdeps/unix/sysv/linux/read.c
-ssize_t
-__libc_read (int fd, void *buf, size_t nbytes)
+ssize_t  // 本行参与当前 C 层路径的控制流或数据准备
+__libc_read (int fd, void *buf, size_t nbytes)  // 调用下一层 C 函数继续完成当前路径
 {
   return SYSCALL_CANCEL (read, fd, buf, nbytes); // 发 read 系统调用
 }
@@ -672,27 +1055,34 @@ weak_alias (__libc_read, read)                   // read 是 __libc_read 的别�
 
 ### 6.2 Linux VFS read
 
+来源：linux/fs/read_write.c:SYSCALL_DEFINE read（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/fs/read_write.c
-SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
+SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)  // 定义 Linux 系统调用入口，用户态 syscall 会进入这里
 {
     return ksys_read(fd, buf, count);             // 进入通用 read 逻辑
 }
 
-ssize_t ksys_read(unsigned int fd, char __user *buf, size_t count)
+ssize_t ksys_read(unsigned int fd, char __user *buf, size_t count)  // 定义当前层的 C 函数入口
 {
-    struct fd f = fdget_pos(fd);                  // fd -> struct file
+    struct fd f = fdget_pos(fd);                  // fd -> struct file  // 定义当前链路涉及的内核数据结构
     ssize_t ret = -EBADF;                         // 默认 fd 错误
 
     if (fd_file(f)) {                             // fd 有效
         loff_t pos, *ppos = file_ppos(fd_file(f)); // tty 是 stream，ppos 通常 NULL
+        if (ppos) {                               // 普通文件才需要维护文件偏移
+            pos = *ppos;                          // 保存原始偏移
+            ppos = &pos;                          // 使用临时偏移变量
+        }
         ret = vfs_read(fd_file(f), buf, count, ppos); // 调 VFS read
+        if (ret >= 0 && ppos)                     // 普通文件读取成功后
+            fd_file(f)->f_pos = pos;              // 回写文件偏移
         fdput_pos(f);                             // 释放 fd 引用
     }
     return ret;                                   // 返回读到字节数或错误
 }
 
-ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
+ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)  // 定义当前层的 C 函数入口
 {
     ssize_t ret;                                  // 返回值
 
@@ -704,10 +1094,10 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
         return -EFAULT;                           // 返回坏地址
 
     ret = rw_verify_area(READ, file, pos, count); // 检查读范围和权限
-    if (ret)
-        return ret;
+    if (ret)  // 检查状态或错误码，决定是否走异常/分支路径
+        return ret;  // 把本层处理结果或错误码返回上一层
     if (count > MAX_RW_COUNT)                     // 限制单次读写最大长度
-        count = MAX_RW_COUNT;
+        count = MAX_RW_COUNT;  // 更新当前层需要传递的状态、长度、指针或错误码
 
     if (file->f_op->read)                         // 老式 read
         ret = file->f_op->read(file, buf, count, pos); // 调 read
@@ -726,14 +1116,40 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 }
 ```
 
-### 6.3 TTY read 与 N_TTY read
+### 6.3 `new_sync_read()`
 
+`new_sync_read()` 是 `vfs_read()` 和 `tty_fops.read_iter` 之间的同步包装层。它把 CPython 传下来的用户态目标缓冲包装成 `iov_iter`，然后调用 `/dev/ttyACM0` 的 `read_iter`，也就是 `tty_read()`。
+
+来源：linux/fs/read_write.c:new_sync_read（已按当前仓库源码核对）
+```c
+// linux/fs/read_write.c
+static ssize_t new_sync_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos) // 把 VFS read 请求包装成同步 read_iter 调用
+{
+    struct kiocb kiocb;                          // 同步 I/O 控制块，携带 file 和当前位置
+    struct iov_iter iter;                        // 描述用户态目标缓冲的迭代器
+    ssize_t ret;                                 // 保存 read_iter 返回值
+
+    init_sync_kiocb(&kiocb, filp);               // 初始化同步 kiocb，并绑定当前 struct file
+    kiocb.ki_pos = (ppos ? *ppos : 0);           // 普通文件使用当前位置；TTY stream 的 ppos 通常为 NULL
+    iov_iter_ubuf(&iter, ITER_DEST, buf, len);   // 把用户态接收缓冲包装成 ITER_DEST
+
+    ret = filp->f_op->read_iter(&kiocb, &iter);  // 调用 tty_fops.read_iter，也就是 tty_read()
+    BUG_ON(ret == -EIOCBQUEUED);                 // 同步 read 路径不允许返回异步排队状态
+    if (ppos)                                    // 普通文件需要维护偏移
+        *ppos = kiocb.ki_pos;                    // 把 read_iter 更新后的偏移回写给调用方
+    return ret;                                  // 返回读到字节数或错误码
+}
+```
+
+### 6.4 TTY read 与 N_TTY read
+
+来源：linux/drivers/tty/tty_io.c:tty_read（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/drivers/tty/tty_io.c
-static ssize_t tty_read(struct kiocb *iocb, struct iov_iter *to)
+static ssize_t tty_read(struct kiocb *iocb, struct iov_iter *to)  // 定义当前层的 C 函数入口
 {
     struct file *file = iocb->ki_filp;            // 当前打开的 tty 文件
-    struct tty_struct *tty = file_tty(file);      // file -> tty_struct
+    struct tty_struct *tty = file_tty(file);      // file -> tty_struct  // 定义当前链路涉及的内核数据结构
     struct tty_ldisc *ld;                         // 当前 line discipline
     ssize_t ret;                                  // 返回值
 
@@ -754,46 +1170,48 @@ static ssize_t tty_read(struct kiocb *iocb, struct iov_iter *to)
 
 `tty_read()` 本身不直接把数据复制到用户态，而是调用 `iterate_tty_read()`。这里有一个固定的 64 字节 `kernel_buf`：N_TTY 先把 `read_buf` 中的数据复制到这个内核临时缓冲，TTY core 再用 `copy_to_iter()` 把数据复制到用户态 `bytes` 缓冲。
 
+来源：linux/drivers/tty/tty_io.c:iterate_tty_read（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/drivers/tty/tty_io.c
-static ssize_t iterate_tty_read(struct tty_ldisc *ld, struct tty_struct *tty,
-                                struct file *file, struct iov_iter *to)
+static ssize_t iterate_tty_read(struct tty_ldisc *ld, struct tty_struct *tty,  // 定义当前层的 C 函数入口
+                                struct file *file, struct iov_iter *to)  // 定义当前链路涉及的内核数据结构
 {
     void *cookie = NULL;                           // N_TTY 跨次继续读的状态
     unsigned long offset = 0;                      // 已复制到用户态的偏移
     size_t copied, count = iov_iter_count(to);     // 用户本次请求读取的字节数
     u8 kernel_buf[64];                             // TTY core 的内核临时缓冲
-    ssize_t retval = 0;
+    ssize_t retval = 0;  // 更新当前层需要传递的状态、长度、指针或错误码
 
-    do {
-        ssize_t size = min(count, sizeof(kernel_buf));
+    do {  // 本行参与当前 C 层路径的控制流或数据准备
+        ssize_t size = min(count, sizeof(kernel_buf));  // 更新当前层需要传递的状态、长度、指针或错误码
 
-        size = ld->ops->read(tty, file, kernel_buf, size, &cookie, offset);
-        if (!size)
-            break;
-        if (size < 0) {
-            retval = retval ? retval : size;
-            break;
+        size = ld->ops->read(tty, file, kernel_buf, size, &cookie, offset);  // 更新当前层需要传递的状态、长度、指针或错误码
+        if (!size)  // 检查状态或错误码，决定是否走异常/分支路径
+            break;  // 本行参与当前 C 层路径的控制流或数据准备
+        if (size < 0) {  // 检查状态或错误码，决定是否走异常/分支路径
+            retval = retval ? retval : size;  // 更新当前层需要传递的状态、长度、指针或错误码
+            break;  // 本行参与当前 C 层路径的控制流或数据准备
         }
 
         copied = copy_to_iter(kernel_buf, size, to); // 从内核临时缓冲复制到用户态 iov_iter
-        offset += copied;
-        count -= copied;
-        if (unlikely(copied != size)) {
-            count = 0;
-            retval = -EFAULT;
+        offset += copied;  // 更新当前层需要传递的状态、长度、指针或错误码
+        count -= copied;  // 更新当前层需要传递的状态、长度、指针或错误码
+        if (unlikely(copied != size)) {  // 检查状态或错误码，决定是否走异常/分支路径
+            count = 0;  // 更新当前层需要传递的状态、长度、指针或错误码
+            retval = -EFAULT;  // 更新当前层需要传递的状态、长度、指针或错误码
         }
-    } while (cookie);
+    } while (cookie);  // 调用下一层 C 函数继续完成当前路径
 
-    memzero_explicit(kernel_buf, sizeof(kernel_buf));
-    return offset ? offset : retval;
+    memzero_explicit(kernel_buf, sizeof(kernel_buf));  // 调用下一层 C 函数继续完成当前路径
+    return offset ? offset : retval;  // 把本层处理结果或错误码返回上一层
 }
 ```
 
+来源：linux/drivers/tty/n_tty.c:n_tty_read（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/drivers/tty/n_tty.c
-static ssize_t n_tty_read(struct tty_struct *tty, struct file *file, u8 *kbuf,
-                          size_t nr, void **cookie, unsigned long offset)
+static ssize_t n_tty_read(struct tty_struct *tty, struct file *file, u8 *kbuf,  // 定义当前层的 C 函数入口
+                          size_t nr, void **cookie, unsigned long offset)  // 本行参与当前 C 层路径的控制流或数据准备
 {
     struct n_tty_data *ldata = tty->disc_data;    // N_TTY 私有数据，包含 read_buf
     u8 *kb = kbuf;                                // 内核临时缓冲写入位置
@@ -837,24 +1255,25 @@ static ssize_t n_tty_read(struct tty_struct *tty, struct file *file, u8 *kbuf,
 
 `copy_from_read_buf()` 内部通过 `memcpy()` 从 N_TTY 的环形 `read_buf` 复制到 `iterate_tty_read()` 提供的 `kernel_buf`。因此，同步 `read()` 路径中 CPU 参与的主要复制是 `read_buf -> kernel_buf -> 用户态 bytes`。
 
+来源：linux/drivers/tty/n_tty.c:copy_from_read_buf（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/drivers/tty/n_tty.c
-static bool copy_from_read_buf(const struct tty_struct *tty, u8 **kbp,
-                               size_t *nr)
+static bool copy_from_read_buf(const struct tty_struct *tty, u8 **kbp,  // 定义当前层的 C 函数入口
+                               size_t *nr)  // 本行参与当前 C 层路径的控制流或数据准备
 {
-    struct n_tty_data *ldata = tty->disc_data;
-    size_t head = smp_load_acquire(&ldata->commit_head);
-    size_t tail = MASK(ldata->read_tail);
-    size_t n = min3(head - ldata->read_tail, N_TTY_BUF_SIZE - tail, *nr);
-    u8 *from = read_buf_addr(ldata, tail);
+    struct n_tty_data *ldata = tty->disc_data;  // 定义当前链路涉及的内核数据结构
+    size_t head = smp_load_acquire(&ldata->commit_head);  // 更新当前层需要传递的状态、长度、指针或错误码
+    size_t tail = MASK(ldata->read_tail);  // 更新当前层需要传递的状态、长度、指针或错误码
+    size_t n = min3(head - ldata->read_tail, N_TTY_BUF_SIZE - tail, *nr);  // 更新当前层需要传递的状态、长度、指针或错误码
+    u8 *from = read_buf_addr(ldata, tail);  // 更新当前层需要传递的状态、长度、指针或错误码
 
-    memcpy(*kbp, from, n);                         // N_TTY read_buf -> kernel_buf
+    memcpy(*kbp, from, n);                         // N_TTY read_buf -> kernel_buf  // 调用下一层 C 函数继续完成当前路径
     zero_buffer(tty, from, n);                     // 清掉已消费区域
-    smp_store_release(&ldata->read_tail, ldata->read_tail + n);
+    smp_store_release(&ldata->read_tail, ldata->read_tail + n);  // 调用下一层 C 函数继续完成当前路径
     *kbp += n;
     *nr -= n;
 
-    return head != ldata->read_tail;
+    return head != ldata->read_tail;  // 把本层处理结果或错误码返回上一层
 }
 ```
 
@@ -874,6 +1293,8 @@ static bool copy_from_read_buf(const struct tty_struct *tty, u8 **kbp,
 | `struct n_tty_data` | `n_tty.c` | N_TTY 私有缓冲，`read_buf` 保存已经收到但用户还没读走的字节 |
 | `struct acm` | `cdc-acm.c` | CDC ACM USB 串口设备，连接 USB 和 TTY |
 | `struct urb` | USB core | USB Request Block，bulk IN URB 收舵机回包 |
+| `struct usb_hcd` | USB core/HCD | USB 主机控制器抽象，负责把 URB 分发给 xHCI |
+| `struct xhci_hcd` / TRB | xHCI driver | 树莓派 5 USB 主控的传输环和硬件请求描述 |
 
 ---
 

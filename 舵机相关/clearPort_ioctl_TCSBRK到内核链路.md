@@ -41,6 +41,7 @@ acm_tty_chars_in_buffer()              # CDC ACM 驱动计算正在使用的写�
 
 `clearPort()` 在 `protocol_packet_handler.txPacket()` 中，每次真正 `writePort()` 之前调用：
 
+来源：scservo_sdk/protocol_packet_handler.py:相关代码片段（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
 # scservo_sdk/protocol_packet_handler.py
 port.clearPort()                         # 发送新协议帧前，先等待上一次输出排空
@@ -49,6 +50,7 @@ written_packet_length = port.writePort(txpacket)  # 然后把本次协议帧写�
 
 SDK 起点源码：
 
+来源：scservo_sdk/port_handler.py:clearPort（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
 # scservo_sdk/port_handler.py
 def clearPort(self):                      # self 是 PortHandler，内部持有 self.ser
@@ -69,6 +71,7 @@ def clearPort(self):                      # self 是 PortHandler，内部持有 
 
 在 ARM64 的通用 syscall 表里，`ioctl` 的系统调用号是 `__NR_ioctl=29`。`TCSBRK` 的 ioctl 命令值来自 `linux/include/uapi/asm-generic/ioctls.h`：
 
+来源：linux/include/uapi/asm-generic/ioctls.h:TCSBRK
 ```c
 #define TCSBRK 0x5409                         // tty ioctl：等待输出完成或发送 break
 ```
@@ -162,6 +165,7 @@ static const struct tty_operations acm_ops = {
 
 ### 3.1 pyserial `flush()`
 
+来源：serial/serialposix.py:flush（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
 # venv/lib/python3.13/site-packages/serial/serialposix.py
 def flush(self):                          # file-like flush，语义是等待输出完成
@@ -174,9 +178,10 @@ def flush(self):                          # file-like flush，语义是等待输
 
 ### 3.2 CPython `termios.tcdrain()`
 
+来源：cpython/Modules/termios.c:termios_tcdrain_impl（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // cpython/Modules/termios.c
-static PyObject *
+static PyObject *  // 本行参与当前 C 层路径的控制流或数据准备
 termios_tcdrain_impl(PyObject *module, int fd)  // fd 是 Python 传入的 int 文件描述符
 {
     termiosmodulestate *state = PyModule_GetState(module);  // 获取 termios 模块状态
@@ -184,7 +189,7 @@ termios_tcdrain_impl(PyObject *module, int fd)  // fd 是 Python 传入的 int �
 
     Py_BEGIN_ALLOW_THREADS                                  // 释放 GIL，避免阻塞其他 Python 线程
     r = tcdrain(fd);                                        // 调用 libc 的 tcdrain(fd)
-    Py_END_ALLOW_THREADS                                    // reacquire GIL
+    Py_END_ALLOW_THREADS                                    // reacquire GIL  // 本行参与当前 C 层路径的控制流或数据准备
 
     if (r == -1) {                                          // libc 返回 -1 表示失败
         return PyErr_SetFromErrno(state->TermiosError);     // 把 errno 转成 Python 异常
@@ -197,9 +202,10 @@ CPython 不解释 tty 语义，只负责释放 GIL，并把 `fd` 原样交给 li
 
 ### 3.3 glibc `tcdrain()`
 
+来源：glibc-2.42/sysdeps/unix/sysv/linux/tcdrain.c:__libc_tcdrain（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // glibc-2.42/sysdeps/unix/sysv/linux/tcdrain.c
-int
+int  // 本行参与当前 C 层路径的控制流或数据准备
 __libc_tcdrain (int fd)                         // fd 是 /dev/ttyACM0 的文件描述符
 {
   return SYSCALL_CANCEL (ioctl, fd, TCSBRK, 1);  // 发 ioctl(fd, TCSBRK, 1)
@@ -224,9 +230,10 @@ weak_alias (__libc_tcdrain, tcdrain)             // tcdrain 是 __libc_tcdrain �
 
 ### 4.1 系统调用入口
 
+来源：linux/fs/ioctl.c:SYSCALL_DEFINE ioctl（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/fs/ioctl.c
-SYSCALL_DEFINE3(ioctl, unsigned int, fd, unsigned int, cmd, unsigned long, arg)
+SYSCALL_DEFINE3(ioctl, unsigned int, fd, unsigned int, cmd, unsigned long, arg)  // 定义 Linux 系统调用入口，用户态 syscall 会进入这里
 {
     struct fd f = fdget(fd);                      // 用 fd 查当前进程的 file 表，得到 struct file
     int error;                                    // 保存返回码
@@ -242,7 +249,7 @@ SYSCALL_DEFINE3(ioctl, unsigned int, fd, unsigned int, cmd, unsigned long, arg)
     if (error == -ENOIOCTLCMD)                    // 通用层不认识该命令
         error = vfs_ioctl(fd_file(f), cmd, arg);  // 调用具体 file_operations 的 ioctl
 
-out:
+out:  // 本行参与当前 C 层路径的控制流或数据准备
     fdput(f);                                     // 释放 fd 引用
     return error;                                 // 返回 ioctl 结果
 }
@@ -259,9 +266,10 @@ __NR_ioctl = 29
 
 ### 4.2 `/dev/ttyACM0` 的 file_operations
 
+来源：linux/drivers/tty/tty_io.c:相关代码片段（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/drivers/tty/tty_io.c
-static const struct file_operations tty_fops = {
+static const struct file_operations tty_fops = {  // 调用 TTY 层接口处理串口设备语义
     .read_iter       = tty_read,        // read() 走 tty_read
     .write_iter      = tty_write,       // write() 走 tty_write
     .poll            = tty_poll,        // select/poll 走 tty_poll
@@ -281,9 +289,10 @@ glibc 把 `tcdrain` 转成 `ioctl(fd, TCSBRK, 1)` 传入内核。TTY 层的 `tty
 
 ### 5.1 `tty_ioctl()` 的 `TCSBRK` 分支
 
+来源：linux/drivers/tty/tty_io.c:tty_ioctl（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/drivers/tty/tty_io.c
-long tty_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+long tty_ioctl(struct file *file, unsigned int cmd, unsigned long arg)  // 定义当前层的 C 函数入口
 {
     struct tty_struct *tty = file_tty(file);       // 从 struct file 取出对应 tty_struct
     int retval;                                    // 保存中间返回码
@@ -314,9 +323,10 @@ long tty_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 ### 5.2 `tty_wait_until_sent()`
 
+来源：linux/drivers/tty/tty_ioctl.c:tty_wait_until_sent（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/drivers/tty/tty_ioctl.c
-void tty_wait_until_sent(struct tty_struct *tty, long timeout)
+void tty_wait_until_sent(struct tty_struct *tty, long timeout)  // 定义当前层的 C 函数入口
 {
     if (!timeout)                                  // timeout 为 0
         timeout = MAX_SCHEDULE_TIMEOUT;            // 转成无限等待
@@ -341,9 +351,10 @@ void tty_wait_until_sent(struct tty_struct *tty, long timeout)
 
 ### 5.3 `tty_chars_in_buffer()`
 
+来源：linux/drivers/tty/tty_ioctl.c:tty_chars_in_buffer（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/drivers/tty/tty_ioctl.c
-unsigned int tty_chars_in_buffer(struct tty_struct *tty)
+unsigned int tty_chars_in_buffer(struct tty_struct *tty)  // 定义当前层的 C 函数入口
 {
     if (tty->ops->chars_in_buffer)                 // 如果具体 tty 驱动提供查询函数
         return tty->ops->chars_in_buffer(tty);     // 调驱动查询剩余输出字节
@@ -361,9 +372,10 @@ unsigned int tty_chars_in_buffer(struct tty_struct *tty)
 
 ### 6.1 `tty_operations` 绑定
 
+来源：linux/drivers/usb/class/cdc-acm.c:相关代码片段（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/drivers/usb/class/cdc-acm.c
-static const struct tty_operations acm_ops = {
+static const struct tty_operations acm_ops = {  // 调用 TTY 层接口处理串口设备语义
     .write           = acm_tty_write,              // TTY 写数据时调用
     .write_room      = acm_tty_write_room,         // 查询还能写多少
     .flush_buffer    = acm_tty_flush_buffer,       // 刷新输出队列时调用
@@ -375,34 +387,36 @@ static const struct tty_operations acm_ops = {
 
 ### 6.2 `acm_tty_chars_in_buffer()`
 
+来源：linux/drivers/usb/class/cdc-acm.c:acm_tty_chars_in_buffer（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/drivers/usb/class/cdc-acm.c
-static unsigned int acm_tty_chars_in_buffer(struct tty_struct *tty)
+static unsigned int acm_tty_chars_in_buffer(struct tty_struct *tty)  // 定义当前层的 C 函数入口
 {
     struct acm *acm = tty->driver_data;            // tty->driver_data 指向 CDC ACM 私有结构
 
     if (acm->disconnected)                         // 如果 USB 设备已经拔掉
         return 0;                                  // 剩余字节视为 0
 
-    return (ACM_NW - acm_wb_is_avail(acm)) * acm->writesize;
+    return (ACM_NW - acm_wb_is_avail(acm)) * acm->writesize;  // 把本层处理结果或错误码返回上一层
                                                     // 估算正在使用的写缓冲数量 × 每个缓冲大小
 }
 ```
 
 `acm_wb_is_avail()` 会在 `acm->write_lock` 保护下扫描 CDC ACM 的写缓冲数组。只要某个 `acm_wb.use` 仍为 true，就说明对应的 USB 写 URB 还没有完成，`tcdrain()` 就不能认为发送队列已经排空。
 
+来源：linux/drivers/usb/class/cdc-acm.c:acm_wb_is_avail（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/drivers/usb/class/cdc-acm.c
-static int acm_wb_is_avail(struct acm *acm)
+static int acm_wb_is_avail(struct acm *acm)  // 定义当前层的 C 函数入口
 {
     int i, n = ACM_NW;                              // ACM_NW 是写缓冲个数
-    unsigned long flags;
+    unsigned long flags;  // 本行参与当前 C 层路径的控制流或数据准备
 
     spin_lock_irqsave(&acm->write_lock, flags);     // 保护写缓冲状态
-    for (i = 0; i < ACM_NW; i++)
+    for (i = 0; i < ACM_NW; i++)  // 循环处理队列、缓冲区或 fd 集合
         if (acm->wb[i].use)                         // 该写缓冲仍被某个 URB 使用
-            n--;
-    spin_unlock_irqrestore(&acm->write_lock, flags);
+            n--;  // 本行参与当前 C 层路径的控制流或数据准备
+    spin_unlock_irqrestore(&acm->write_lock, flags);  // 调用下一层 C 函数继续完成当前路径
 
     return n;                                      // 返回空闲写缓冲数量
 }
@@ -419,9 +433,10 @@ static int acm_wb_is_avail(struct acm *acm)
 
 ### 6.3 USB 写完成如何唤醒等待者
 
+来源：linux/drivers/usb/class/cdc-acm.c:acm_write_bulk（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/drivers/usb/class/cdc-acm.c
-static void acm_write_bulk(struct urb *urb)
+static void acm_write_bulk(struct urb *urb)  // 定义当前层的 C 函数入口
 {
     struct acm_wb *wb = urb->context;              // urb->context 指向本次写使用的 acm_wb
     struct acm *acm = wb->instance;                // wb->instance 指向所属 acm 设备
@@ -436,14 +451,14 @@ static void acm_write_bulk(struct urb *urb)
     schedule_delayed_work(&acm->dwork, 0);         // 调度 workqueue，避免在硬中断上下文做复杂工作
 }
 
-static void acm_write_done(struct acm *acm, struct acm_wb *wb)
+static void acm_write_done(struct acm *acm, struct acm_wb *wb)  // 定义当前层的 C 函数入口
 {
     wb->use = false;                               // 写缓冲重新变为空闲
     acm->transmitting--;                           // 正在传输的写请求数减一
     usb_autopm_put_interface_async(acm->control);  // 释放 runtime PM 引用
 }
 
-static void acm_softint(struct work_struct *work)
+static void acm_softint(struct work_struct *work)  // 定义当前层的 C 函数入口
 {
     struct acm *acm = container_of(work, struct acm, dwork.work); // 由 work 找回 acm
 
@@ -452,27 +467,28 @@ static void acm_softint(struct work_struct *work)
 }
 ```
 
+来源：linux/drivers/tty/tty_port.c:tty_port_tty_wakeup（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
 // linux/drivers/tty/tty_port.c
-void tty_port_tty_wakeup(struct tty_port *port)
+void tty_port_tty_wakeup(struct tty_port *port)  // 定义当前层的 C 函数入口
 {
     port->client_ops->write_wakeup(port);          // 默认指向 tty_port_default_wakeup()
 }
 
-static void tty_port_default_wakeup(struct tty_port *port)
+static void tty_port_default_wakeup(struct tty_port *port)  // 定义当前层的 C 函数入口
 {
-    struct tty_struct *tty = tty_port_tty_get(port);
+    struct tty_struct *tty = tty_port_tty_get(port);  // 定义当前链路涉及的内核数据结构
 
-    if (tty) {
+    if (tty) {  // 检查状态或错误码，决定是否走异常/分支路径
         tty_wakeup(tty);                           // 最终唤醒 tty->write_wait
-        tty_kref_put(tty);
+        tty_kref_put(tty);  // 调用 TTY 层接口处理串口设备语义
     }
 }
 
 // linux/drivers/tty/tty_io.c
-void tty_wakeup(struct tty_struct *tty)
+void tty_wakeup(struct tty_struct *tty)  // 定义当前层的 C 函数入口
 {
-    wake_up_interruptible_poll(&tty->write_wait, EPOLLOUT);
+    wake_up_interruptible_poll(&tty->write_wait, EPOLLOUT);  // 处理 fd 就绪检查和等待唤醒逻辑
 }
 ```
 

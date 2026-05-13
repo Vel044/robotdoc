@@ -52,12 +52,16 @@ client 端输出逐 episode 的统计文件，记录动作执行帧数、stall �
 此外新增 stall 事件记录，追踪每次队列耗尽到恢复的起止时间和持续帧数。
 离线分析时由脚本将 client 与 server 的记录按时间戳对齐合并后绘图。
 
-\subsection{打点与对齐方法}\label{sec:async-exp-metrics}
+\subsection{性能记录与日志对齐方法}\label{sec:async-exp-metrics}
 
 client 端记录的核心指标包括：执行帧数、stall 帧数、过期帧数、
-must\_go 触发次数、帧率统计以及 CPU 温度与频率。其中有效 FPS 定义为：
+must\_go 触发次数、帧率统计以及 CPU 温度与频率。
+其中 $\mathrm{action\_frames}$ 表示 episode 内真正执行动作的帧数，
+$\mathrm{episode\_total\_s}$ 表示 episode 的实际总持续时间，单位为秒；
+有效 FPS 定义如式（\ref{eq:exp-effective-fps}）所示：
 \begin{equation}
   F_{\text{eff}} = \frac{\mathrm{action\_frames}}{\mathrm{episode\_total\_s}}.
+  \label{eq:exp-effective-fps}
 \end{equation}
 该指标只统计真正执行了 action 的帧，能剔除 stall 停顿对名义循环频率的影响。
 

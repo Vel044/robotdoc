@@ -8,30 +8,33 @@
 
 **调用位置**：`motors_bus.py: _sync_write()`
 
+来源：lerobot/src/lerobot/motors/motors_bus.py:_setup_sync_writer（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
-def _setup_sync_writer(self, ids_values: dict[int, int], addr: int, length: int) -> None:
-    self.sync_writer.clearParam()
-    self.sync_writer.start_address = addr   # 42（Goal_Position）
+def _setup_sync_writer(self, ids_values: dict[int, int], addr: int, length: int) -> None:  # 定义本链路要说明的函数入口
+    self.sync_writer.clearParam()  # 清理上一轮注册参数，避免旧 ID 或旧数据残留
+    self.sync_writer.start_address = addr   # 42（Goal_Position）  # 保存本链路后续步骤需要使用的中间状态或参数
     self.sync_writer.data_length = length   # 2（2字节）
-    for id_, value in ids_values.items():
-        data = self._serialize_data(value, length)
+    for id_, value in ids_values.items():  # 遍历本次链路涉及的元素
+        data = self._serialize_data(value, length)  # 保存本链路后续步骤需要使用的中间状态或参数
         # _serialize_data(1891, 2) → [0x83, 0x07]（小端：低字节先）
-        self.sync_writer.addParam(id_, data)
+        self.sync_writer.addParam(id_, data)  # 把目标电机注册到同步读写参数表
 ```
 
 `self.sync_writer` 是 `scs.GroupSyncWrite` 实例，在 `feetech.py.__init__` 里创建：
 
+来源：lerobot/src/lerobot/motors/feetech/feetech.py:__init__.sync_writer 初始化（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
 # feetech.py
-self.sync_writer = scs.GroupSyncWrite(self.port_handler, self.packet_handler, 0, 0)
+self.sync_writer = scs.GroupSyncWrite(self.port_handler, self.packet_handler, 0, 0)  # 保存本链路后续步骤需要使用的中间状态或参数
 ```
 
 ### `clearParam()` — 清空上次注册的电机
 
+来源：scservo_sdk/group_sync_write.py:clearParam（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
 # group_sync_write.py
-def clearParam(self):
-    self.data_dict.clear()
+def clearParam(self):  # 定义本链路要说明的函数入口
+    self.data_dict.clear()  # 维护电机 ID 到数据字节的映射
     # data_dict = {}
 ```
 
@@ -48,19 +51,20 @@ data_dict = {
 
 这一步在 setup 里调用，把每个电机的目标位置整数拆成 SDK 需要的字节列表。
 
+来源：lerobot/src/lerobot/motors/motors_bus.py:_serialize_data（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
 # motors_bus.py（调用 scservo_sdk 宏）
-def _serialize_data(self, value: int, length: int) -> list[int]:
-    import scservo_sdk as scs
+def _serialize_data(self, value: int, length: int) -> list[int]:  # 定义本链路要说明的函数入口
+    import scservo_sdk as scs  # 本行参与当前链路的控制流或数据准备
 
-    if length == 1:
-        return [value]
-    elif length == 2:
-        return [scs.SCS_LOBYTE(value), scs.SCS_HIBYTE(value)]
+    if length == 1:  # 检查条件，决定是否进入该分支
+        return [value]  # 把本层处理结果返回给调用方
+    elif length == 2:  # 检查前一分支未命中后的备选条件
+        return [scs.SCS_LOBYTE(value), scs.SCS_HIBYTE(value)]  # 把本层处理结果返回给调用方
         # SCS_LOBYTE(1891) = 1891 & 0xFF = 0x83（低字节）
         # SCS_HIBYTE(1891) = (1891 >> 8) & 0xFF = 0x07（高字节）
-    elif length == 4:
-        return [
+    elif length == 4:  # 检查前一分支未命中后的备选条件
+        return [  # 把本层处理结果返回给调用方
             scs.SCS_LOBYTE(scs.SCS_LOWORD(value)),   # 低16位的低字节
             scs.SCS_HIBYTE(scs.SCS_LOWORD(value)),    # 低16位的高字节
             scs.SCS_LOBYTE(scs.SCS_HIWORD(value)),    # 高16位的低字节
@@ -69,26 +73,28 @@ def _serialize_data(self, value: int, length: int) -> list[int]:
 ```
 
 `SCS_LOBYTE` / `SCS_HIBYTE` 在 `scservo_def.py` 里定义，受 `SCS_END` 字节序控制：
+来源：scservo_sdk/scservo_def.py:SCS_LOBYTE（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
-def SCS_LOBYTE(w):
+def SCS_LOBYTE(w):  # 定义本链路要说明的函数入口
     if SCS_END == 0:    # Protocol 0 小端
-        return w & 0xFF
+        return w & 0xFF  # 把本层处理结果返回给调用方
     else:               # Protocol 1 大端
-        return (w >> 8) & 0xFF
+        return (w >> 8) & 0xFF  # 把本层处理结果返回给调用方
 ```
 
 ### `addParam(id_, data)` — 注册一个电机的 ID 和数据
 
+来源：scservo_sdk/group_sync_write.py:addParam（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
 # group_sync_write.py
-def addParam(self, scs_id, data):
+def addParam(self, scs_id, data):  # 定义本链路要说明的函数入口
     if scs_id in self.data_dict:        # 已存在则拒绝（clearParam 后不触发）
-        return False
+        return False  # 把本层处理结果返回给调用方
     if len(data) > self.data_length:    # 数据超长则拒绝
-        return False
+        return False  # 把本层处理结果返回给调用方
     self.data_dict[scs_id] = data       # 存入，例如 data_dict[1] = [0x83, 0x07]
     self.is_param_changed = True        # 标记"下次发送前要重新 makeParam()"
-    return True
+    return True  # 把本层处理结果返回给调用方
 ```
 
 与读链路的 `addParam` 相比：读链路只存 `data_dict[id] = []`（空列表，等接收填充），写链路存 `data_dict[id] = data`（已知数据）。
@@ -112,36 +118,39 @@ is_param_changed = True
 
 **调用位置**：`motors_bus.py: _sync_write()`
 
+来源：scservo_sdk/group_sync_write.py:txPacket（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
-comm = self.sync_writer.txPacket()
+comm = self.sync_writer.txPacket()  # 进入协议发送流程，后续会组帧并写串口
 ```
 
+来源：scservo_sdk/group_sync_write.py:txPacket（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
 # group_sync_write.py
-def txPacket(self):
-    if not self.data_dict:
-        return COMM_NOT_AVAILABLE
+def txPacket(self):  # 定义本链路要说明的函数入口
+    if not self.data_dict:  # 检查条件，决定是否进入该分支
+        return COMM_NOT_AVAILABLE  # 把本层处理结果返回给调用方
 
-    if self.is_param_changed or not self.param:
+    if self.is_param_changed or not self.param:  # 检查条件，决定是否进入该分支
         self.makeParam()   # 把 data_dict 展开为连续字节列表
 
     # param_length = 电机数 × (1字节ID + data_length字节数据) = 6 × (1+2) = 18
-    return self.ph.syncWriteTxOnly(
-        self.port,
-        self.start_address,            # 42
-        self.data_length,              # 2
-        self.param,                    # [1,0x83,0x07, 2,0x99,0x0A, ...]
-        len(self.data_dict) * (1 + self.data_length)  # 6 × 3 = 18
+    return self.ph.syncWriteTxOnly(  # 把本层处理结果返回给调用方
+        self.port,  # 本行参与当前链路的控制流或数据准备
+        self.start_address,            # 42  # 本行参与当前链路的控制流或数据准备
+        self.data_length,              # 2  # 本行参与当前链路的控制流或数据准备
+        self.param,                    # [1,0x83,0x07, 2,0x99,0x0A, ...]  # 本行参与当前链路的控制流或数据准备
+        len(self.data_dict) * (1 + self.data_length)  # 6 × 3 = 18  # 维护电机 ID 到数据字节的映射
     )
 ```
 
 ### `makeParam()` — 展开 data_dict 为 `[id, b0, b1, id, b0, b1, ...]`
 
+来源：scservo_sdk/group_sync_write.py:makeParam（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
 # group_sync_write.py
-def makeParam(self):
-    self.param = []
-    for scs_id in self.data_dict:
+def makeParam(self):  # 定义本链路要说明的函数入口
+    self.param = []  # 保存本链路后续步骤需要使用的中间状态或参数
+    for scs_id in self.data_dict:  # 遍历本次链路涉及的元素
         self.param.append(scs_id)                # 先放 ID（1字节）
         self.param.extend(self.data_dict[scs_id])  # 再放数据（data_length字节）
 ```
@@ -163,23 +172,24 @@ param = [
 
 ### `syncWriteTxOnly()` — 组装 Sync Write 指令包
 
+来源：scservo_sdk/protocol_packet_handler.py:syncWriteTxOnly（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
 # protocol_packet_handler.py
-def syncWriteTxOnly(self, port, start_address, data_length, param, param_length):
+def syncWriteTxOnly(self, port, start_address, data_length, param, param_length):  # 定义本链路要说明的函数入口
     # 包总长 = param_length(18) + 8（FF FF ID LEN INST ADDR DLEN CHK）
-    txpacket = [0] * (param_length + 8)
+    txpacket = [0] * (param_length + 8)  # 保存本链路后续步骤需要使用的中间状态或参数
 
     txpacket[PKT_ID]          = BROADCAST_ID     # 0xFE，广播
-    txpacket[PKT_LENGTH]      = param_length + 4  # LEN = 18 + 4 = 22
-    txpacket[PKT_INSTRUCTION] = INST_SYNC_WRITE   # 0x83
-    txpacket[PKT_PARAMETER0 + 0] = start_address  # 42，0x2A
-    txpacket[PKT_PARAMETER0 + 1] = data_length    # 2
+    txpacket[PKT_LENGTH]      = param_length + 4  # LEN = 18 + 4 = 22  # 读写 Feetech 协议帧的固定字段
+    txpacket[PKT_INSTRUCTION] = INST_SYNC_WRITE   # 0x83  # 读写 Feetech 协议帧的固定字段
+    txpacket[PKT_PARAMETER0 + 0] = start_address  # 42，0x2A  # 读写 Feetech 协议帧的固定字段
+    txpacket[PKT_PARAMETER0 + 1] = data_length    # 2  # 读写 Feetech 协议帧的固定字段
 
     txpacket[PKT_PARAMETER0 + 2: PKT_PARAMETER0 + 2 + param_length] = param  # 18字节参数
 
     # txRxPacket 检测到 PKT_ID=BROADCAST_ID → 发完即返回，不等响应
-    _, result, _ = self.txRxPacket(port, txpacket)
-    return result
+    _, result, _ = self.txRxPacket(port, txpacket)  # 保存本链路后续步骤需要使用的中间状态或参数
+    return result  # 把本层处理结果返回给调用方
 ```
 
 组装后的原始帧（十六进制）：
@@ -199,56 +209,144 @@ CS = (~sum(0xFE+0x16+0x83+0x2A+0x02+...所有ID和数据字节)) & 0xFF
 
 ### `txRxPacket()` → `txPacket()` — 广播检测，发完即返回
 
+来源：scservo_sdk/protocol_packet_handler.py:txRxPacket（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
 # protocol_packet_handler.py
-def txRxPacket(self, port, txpacket):
+def txRxPacket(self, port, txpacket):  # 定义本链路要说明的函数入口
     result = self.txPacket(port, txpacket)   # 计算校验和、写串口
-    if result != COMM_SUCCESS:
-        return None, result, 0
+    if result != COMM_SUCCESS:  # 检查条件，决定是否进入该分支
+        return None, result, 0  # 把本层处理结果返回给调用方
 
     # 广播包：PKT_ID == 0xFE → 发完直接释放锁返回，不等任何回包
-    if txpacket[PKT_ID] == BROADCAST_ID:
+    if txpacket[PKT_ID] == BROADCAST_ID:  # 检查条件，决定是否进入该分支
         port.is_using = False   # 释放并发锁
-        return None, result, 0
+        return None, result, 0  # 把本层处理结果返回给调用方
 
     # 单播包才会走下面的 rxPacket（写链路不走这里）
-    ...
+    ...  # 本行参与当前链路的控制流或数据准备
 ```
 
 ### `txPacket()` — 填校验和、写串口
 
+来源：scservo_sdk/protocol_packet_handler.py:txPacket（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
 # protocol_packet_handler.py
-def txPacket(self, port, txpacket):
-    if port.is_using:
-        return COMM_PORT_BUSY
+def txPacket(self, port, txpacket):  # 定义本链路要说明的函数入口
+    if port.is_using:  # 检查条件，决定是否进入该分支
+        return COMM_PORT_BUSY  # 把本层处理结果返回给调用方
     port.is_using = True   # 加并发锁
 
     total_packet_length = txpacket[PKT_LENGTH] + 4  # 22 + 4 = 26 字节
 
-    txpacket[PKT_HEADER0] = 0xFF
-    txpacket[PKT_HEADER1] = 0xFF
+    txpacket[PKT_HEADER0] = 0xFF  # 读写 Feetech 协议帧的固定字段
+    txpacket[PKT_HEADER1] = 0xFF  # 读写 Feetech 协议帧的固定字段
 
-    checksum = 0
-    for idx in range(2, total_packet_length - 1):
-        checksum += txpacket[idx]
-    txpacket[total_packet_length - 1] = ~checksum & 0xFF
+    checksum = 0  # 计算或保存 Feetech 协议校验和
+    for idx in range(2, total_packet_length - 1):  # 遍历本次链路涉及的元素
+        checksum += txpacket[idx]  # 计算或保存 Feetech 协议校验和
+    txpacket[total_packet_length - 1] = ~checksum & 0xFF  # 计算或保存 Feetech 协议校验和
 
     port.clearPort()   # ser.flush()，避免粘包
-    written = port.writePort(txpacket)   # ★ ser.write(packet)
-    if total_packet_length != written:
-        port.is_using = False
-        return COMM_TX_FAIL
+    written = port.writePort(txpacket)   # ★ ser.write(packet)  # 保存本链路后续步骤需要使用的中间状态或参数
+    if total_packet_length != written:  # 检查条件，决定是否进入该分支
+        port.is_using = False  # 保存本链路后续步骤需要使用的中间状态或参数
+        return COMM_TX_FAIL  # 把本层处理结果返回给调用方
     # 注意：此处不释放 is_using，由 txRxPacket 检测 BROADCAST_ID 后释放
-    return COMM_SUCCESS
+    return COMM_SUCCESS  # 把本层处理结果返回给调用方
 ```
 
 `writePort` 最终调用：
+来源：scservo_sdk/port_handler.py:writePort（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
 # port_handler.py
-def writePort(self, packet):
+def writePort(self, packet):  # 定义本链路要说明的函数入口
     return self.ser.write(packet)   # pyserial → write(fd, buf, len) 系统调用
 ```
+
+继续往下进入项目里的 pyserial POSIX 后端。树莓派 5 上跑 Linux，因此 `serial.Serial.write()` 实际落到 `serial/serialposix.py`：
+
+来源：serial/serialposix.py:write（节选：仅保留本链路相关分支，已按当前仓库源码核对）
+```python
+# serial/serialposix.py
+def write(self, data):  # 定义本链路要说明的函数入口
+    """Output the given byte string over the serial port."""  # 本行参与当前链路的控制流或数据准备
+    if not self.is_open:  # 检查条件，决定是否进入该分支
+        raise PortNotOpenError()  # 调用下一层函数继续完成当前链路动作
+
+    d = to_bytes(data)  # 保存本链路后续步骤需要使用的中间状态或参数
+    tx_len = length = len(d)  # 保存本链路后续步骤需要使用的中间状态或参数
+    timeout = Timeout(self._write_timeout)  # 维护本次串口读写的超时控制状态
+
+    while tx_len > 0:  # 循环等待或持续处理直到满足退出条件
+        try:  # 进入可能触发异常的系统/IO 调用保护区
+            # 这里是真正的数据写系统调用：
+            # fd 是 os.open("/dev/ttyACM0", ...) 得到的文件描述符；
+            # d 是 26 字节 Sync Write 协议帧。
+            n = os.write(self.fd, d)   # ★ write(fd, buf, count) syscall  # 触发 write 系统调用，把用户态协议帧交给内核 fd
+
+            if timeout.is_non_blocking:  # 检查条件，决定是否进入该分支
+                return n  # 把本层处理结果返回给调用方
+            elif not timeout.is_infinite:  # 检查前一分支未命中后的备选条件
+                if timeout.expired():  # 检查条件，决定是否进入该分支
+                    raise SerialTimeoutException('Write timeout')  # 维护本次串口读写的超时控制状态
+                abort, ready, _ = select.select(  # 触发 select/pselect6 就绪检查，等待 fd 可读或可写
+                    [self.pipe_abort_write_r],  # 本行参与当前链路的控制流或数据准备
+                    [self.fd],  # 本行参与当前链路的控制流或数据准备
+                    [],  # 本行参与当前链路的控制流或数据准备
+                    timeout.time_left()  # 维护本次串口读写的超时控制状态
+                )   # 可能触发 pselect6，用来等 fd 可写或取消写
+                if abort:  # 检查条件，决定是否进入该分支
+                    os.read(self.pipe_abort_write_r, 1000)  # 触发 read 系统调用，从内核 fd 取回已到达字节
+                    break  # 本行参与当前链路的控制流或数据准备
+                if not ready:  # 检查条件，决定是否进入该分支
+                    raise SerialTimeoutException('Write timeout')  # 维护本次串口读写的超时控制状态
+            else:  # 处理前面条件都不满足的情况
+                abort, ready, _ = select.select(  # 触发 select/pselect6 就绪检查，等待 fd 可读或可写
+                    [self.pipe_abort_write_r],  # 本行参与当前链路的控制流或数据准备
+                    [self.fd],  # 本行参与当前链路的控制流或数据准备
+                    [],  # 本行参与当前链路的控制流或数据准备
+                    None  # 本行参与当前链路的控制流或数据准备
+                )   # 默认 write_timeout=None 时，阻塞等待 fd 可写
+                if abort:  # 检查条件，决定是否进入该分支
+                    os.read(self.pipe_abort_write_r, 1)  # 触发 read 系统调用，从内核 fd 取回已到达字节
+                    break  # 本行参与当前链路的控制流或数据准备
+                if not ready:  # 检查条件，决定是否进入该分支
+                    raise SerialException('write failed (select)')  # 调用下一层函数继续完成当前链路动作
+
+            d = d[n:]  # 保存本链路后续步骤需要使用的中间状态或参数
+            tx_len -= n  # 保存本链路后续步骤需要使用的中间状态或参数
+        except OSError as e:  # 捕获底层调用失败并转换为上层错误
+            if e.errno not in (  # 检查条件，决定是否进入该分支
+                errno.EAGAIN, errno.EALREADY, errno.EWOULDBLOCK,  # 本行参与当前链路的控制流或数据准备
+                errno.EINPROGRESS, errno.EINTR  # 本行参与当前链路的控制流或数据准备
+            ):  # 本行参与当前链路的控制流或数据准备
+                raise SerialException('write failed: {}'.format(e))  # 调用下一层函数继续完成当前链路动作
+
+    return length - len(d)  # 把本层处理结果返回给调用方
+```
+
+`txPacket()` 写之前还会调用 `port.clearPort()`，这不是清空接收缓冲，而是等待之前排队的输出完成：
+
+来源：scservo_sdk/port_handler.py:clearPort（节选：仅保留本链路相关分支，已按当前仓库源码核对）
+```python
+# port_handler.py
+def clearPort(self):  # 定义本链路要说明的函数入口
+    self.ser.flush()  # 调用 pyserial flush，语义是等待已提交输出完成
+
+# serial/serialposix.py
+def flush(self):  # 定义本链路要说明的函数入口
+    if not self.is_open:  # 检查条件，决定是否进入该分支
+        raise PortNotOpenError()  # 调用下一层函数继续完成当前链路动作
+    termios.tcdrain(self.fd)   # ★ Linux 上最终进入 ioctl(fd, TCSBRK, 1)
+```
+
+所以写链路在 `serial` 层触发的关键系统调用是：
+
+| 位置 | serial 代码 | syscall 作用 |
+|---|---|---|
+| `clearPort()` | `termios.tcdrain(self.fd)` | 等上一帧输出排空，Linux 下最终是 `ioctl(TCSBRK, 1)` |
+| `writePort()` | `os.write(self.fd, d)` | 把 26 字节协议帧写入 `/dev/ttyACM0` |
+| 阻塞写等待 | `select.select(..., [self.fd], ...)` | 等 fd 可写，内核侧通常表现为 `pselect6` |
 
 26 字节一次性写入串口缓冲区，内核通过 UART 以 1Mbps 发出。6 个舵机同时收到，各自更新 `Goal_Position`（地址 42，写 2 字节），驱动电机转动。**主机不等任何回包，函数直接返回。**
 

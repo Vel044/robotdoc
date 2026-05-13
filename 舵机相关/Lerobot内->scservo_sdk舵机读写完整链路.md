@@ -132,9 +132,10 @@ motors/motors_bus.py
 
 feetech.py 在 `__init__` 中通过 `import scservo_sdk as scs` 导入 SDK，并创建了以下关键对象：
 
+来源：lerobot/src/lerobot/motors/feetech/feetech.py:__init__.sync_reader 初始化（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
 # feetech.py:126-137
-import scservo_sdk as scs
+import scservo_sdk as scs  # 本行参与当前链路的控制流或数据准备
 
 self.port_handler = scs.PortHandler(self.port)                # 串口管理器（打开/关闭/读/写）
 self.packet_handler = scs.PacketHandler(protocol_version)     # 协议处理器（组包/拆包/校验）
@@ -150,26 +151,27 @@ self.sync_writer = scs.GroupSyncWrite(self.port_handler, self.packet_handler, 0,
 
 > 文件：`lerobot/src/lerobot/robots/so101_follower/so101_follower.py:408-462`
 
+来源：lerobot/src/lerobot/robots/so101_follower/so101_follower.py:get_observation（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
-def get_observation(self) -> dict[str, Any]:
+def get_observation(self) -> dict[str, Any]:  # 定义本链路要说明的函数入口
     """获取机器人的当前观测数据（每帧调用一次，约 33ms@30fps）。"""
-    if not self.is_connected:
-        raise DeviceNotConnectedError(f"{self} is not connected.")
+    if not self.is_connected:  # 检查条件，决定是否进入该分支
+        raise DeviceNotConnectedError(f"{self} is not connected.")  # 调用下一层函数继续完成当前链路动作
 
     # 步骤1: 批量同步读取6个舵机的当前位置
     # 返回原始格式: {"shoulder_pan": -12.5, "shoulder_lift": 30.0, ..., "gripper": 60.0}
-    obs_dict = self.bus.sync_read("Present_Position")
+    obs_dict = self.bus.sync_read("Present_Position")  # 保存本链路后续步骤需要使用的中间状态或参数
 
     # 步骤2: 键名添加 ".pos" 后缀，与 observation_features schema 对齐
-    obs_dict = {f"{motor}.pos": val for motor, val in obs_dict.items()}
-    dt_ms = (time.perf_counter() - start) * 1e3
+    obs_dict = {f"{motor}.pos": val for motor, val in obs_dict.items()}  # 保存本链路后续步骤需要使用的中间状态或参数
+    dt_ms = (time.perf_counter() - start) * 1e3  # 保存本链路后续步骤需要使用的中间状态或参数
 
     # 步骤3: 非阻塞读取相机最新帧
-    for cam_key, cam in self.cameras.items():
-        start = time.perf_counter()
-        obs_dict[cam_key] = cam.async_read()
+    for cam_key, cam in self.cameras.items():  # 遍历本次链路涉及的元素
+        start = time.perf_counter()  # 保存本链路后续步骤需要使用的中间状态或参数
+        obs_dict[cam_key] = cam.async_read()  # 保存本链路后续步骤需要使用的中间状态或参数
 
-    return obs_dict
+    return obs_dict  # 把本层处理结果返回给调用方
 ```
 
 ---
@@ -178,53 +180,54 @@ def get_observation(self) -> dict[str, Any]:
 
 > 文件：`lerobot/src/lerobot/motors/motors_bus.py:1628-1699`
 
+来源：lerobot/src/lerobot/motors/motors_bus.py:sync_read（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
-def sync_read(
-    self,
-    data_name: str,
-    motors: str | list[str] | None = None,
-    *,
-    normalize: bool = True,
-    num_retry: int = 0,
-) -> dict[str, Value]:
+def sync_read(  # 定义本链路要说明的函数入口
+    self,  # 本行参与当前链路的控制流或数据准备
+    data_name: str,  # 本行参与当前链路的控制流或数据准备
+    motors: str | list[str] | None = None,  # 保存本链路后续步骤需要使用的中间状态或参数
+    *,  # 本行参与当前链路的控制流或数据准备
+    normalize: bool = True,  # 保存本链路后续步骤需要使用的中间状态或参数
+    num_retry: int = 0,  # 保存本链路后续步骤需要使用的中间状态或参数
+) -> dict[str, Value]:  # 本行参与当前链路的控制流或数据准备
     """同步读取多个电机的同一寄存器（一次广播，所有电机同时响应）。"""
-    if not self.is_connected:
-        raise DeviceNotConnectedError(...)
+    if not self.is_connected:  # 检查条件，决定是否进入该分支
+        raise DeviceNotConnectedError(...)  # 调用下一层函数继续完成当前链路动作
 
     # 1) 校验协议支持
-    self._assert_protocol_is_compatible("sync_read")
+    self._assert_protocol_is_compatible("sync_read")  # 调用下一层函数继续完成当前链路动作
 
     # 2) 解析电机名称为 ID 和型号
-    names = self._get_motors_list(motors)
-    ids = [self.motors[motor].id for motor in names]
-    models = [self.motors[motor].model for motor in names]
+    names = self._get_motors_list(motors)  # 保存本链路后续步骤需要使用的中间状态或参数
+    ids = [self.motors[motor].id for motor in names]  # 保存本链路后续步骤需要使用的中间状态或参数
+    models = [self.motors[motor].model for motor in names]  # 保存本链路后续步骤需要使用的中间状态或参数
 
     # 3) 校验地址一致性（混用不同型号时必须地址兼容）
-    if self._has_different_ctrl_tables:
-        assert_same_address(self.model_ctrl_table, models, data_name)
+    if self._has_different_ctrl_tables:  # 检查条件，决定是否进入该分支
+        assert_same_address(self.model_ctrl_table, models, data_name)  # 调用下一层函数继续完成当前链路动作
 
     # 查控制表，得到寄存器地址和字节长度
     # "Present_Position" → (56, 2)，即从舵机内存第56字节起读取2字节
-    model = next(iter(models))
-    addr, length = get_address(self.model_ctrl_table, model, data_name)
+    model = next(iter(models))  # 保存本链路后续步骤需要使用的中间状态或参数
+    addr, length = get_address(self.model_ctrl_table, model, data_name)  # 保存本链路后续步骤需要使用的中间状态或参数
 
     # 4) 执行底层同步读取（串口通信主耗时 ~5~15ms）
-    ids_values, _ = self._sync_read(
-        addr, length, ids, num_retry=num_retry, raise_on_error=True, err_msg=...
+    ids_values, _ = self._sync_read(  # 保存本链路后续步骤需要使用的中间状态或参数
+        addr, length, ids, num_retry=num_retry, raise_on_error=True, err_msg=...  # 保存本链路后续步骤需要使用的中间状态或参数
     )
     # 此时 ids_values = {1: 2301, 2: 1800, 3: 2048, 4: 2100, 5: 2048, 6: 3500}
     # （原始 12-bit tick 值，0~4095）
 
     # 5) Sign-Magnitude 符号位解码（bit15为符号位）
-    ids_values = self._decode_sign(data_name, ids_values)
+    ids_values = self._decode_sign(data_name, ids_values)  # 保存本链路后续步骤需要使用的中间状态或参数
     # 正常运行时位置值为正（0~4095范围内），bit15 通常为0，解码后值不变
 
     # 6) 归一化（原始 tick → -100~100 或 0~100）
-    if normalize and data_name in self.normalized_data:
-        ids_values = self._normalize(ids_values)
+    if normalize and data_name in self.normalized_data:  # 检查条件，决定是否进入该分支
+        ids_values = self._normalize(ids_values)  # 保存本链路后续步骤需要使用的中间状态或参数
 
     # 7) ID → 电机名称
-    return {self._id_to_name(id_): value for id_, value in ids_values.items()}
+    return {self._id_to_name(id_): value for id_, value in ids_values.items()}  # 把本层处理结果返回给调用方
     # {1: 24.7, ...} → {"shoulder_pan": 24.7, "shoulder_lift": ..., "gripper": 60.0}
 ```
 
@@ -240,17 +243,18 @@ def sync_read(
 > - `self.sync_reader.txRxPacket()` — 发送广播读指令 + 等待所有电机回包
 > - `self.sync_reader.getData()` — 从 SDK 内部缓冲区解析各电机返回的原始值
 
+来源：lerobot/src/lerobot/motors/motors_bus.py:_sync_read（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
-def _sync_read(
-    self,
-    addr: int,
-    length: int,
-    motor_ids: list[int],
-    *,
-    num_retry: int = 0,
-    raise_on_error: bool = True,
-    err_msg: str = "",
-) -> tuple[dict[int, int], int]:
+def _sync_read(  # 定义本链路要说明的函数入口
+    self,  # 本行参与当前链路的控制流或数据准备
+    addr: int,  # 本行参与当前链路的控制流或数据准备
+    length: int,  # 本行参与当前链路的控制流或数据准备
+    motor_ids: list[int],  # 本行参与当前链路的控制流或数据准备
+    *,  # 本行参与当前链路的控制流或数据准备
+    num_retry: int = 0,  # 保存本链路后续步骤需要使用的中间状态或参数
+    raise_on_error: bool = True,  # 保存本链路后续步骤需要使用的中间状态或参数
+    err_msg: str = "",  # 保存本链路后续步骤需要使用的中间状态或参数
+) -> tuple[dict[int, int], int]:  # 本行参与当前链路的控制流或数据准备
     """底层同步读取实现（setup → txrx → unpack 三阶段）。"""
 
     # === 阶段1: Setup — 配置 scservo_sdk 的 GroupSyncRead 对象 ===
@@ -260,7 +264,7 @@ def _sync_read(
     #   2. start_address = addr   — 告诉 SDK 目标寄存器起始地址（56 = Present_Position）
     #   3. data_length = length   — 告诉 SDK 每个电机要读几个字节（2字节 = 16位位置值）
     #   4. addParam(id_) × 6     — 注册6个电机 ID，SDK 后续只会等这些电机的回包
-    self._setup_sync_reader(motor_ids, addr, length)
+    self._setup_sync_reader(motor_ids, addr, length)  # 调用下一层函数继续完成当前链路动作
 
     # === 阶段2: TxRx — 发送广播读包 + 等待6个应答（主要耗时 ~5~15ms） ===
     # self.sync_reader.txRxPacket() 进入 scservo_sdk，做了两件事：
@@ -268,22 +272,22 @@ def _sync_read(
     #                  通过 port_handler.writePort() 发到串口
     #   2. rxPacket() — 循环等待6个电机依次回包（半双工，一次只能一个回），
     #                  每收到一个就校验 checksum 并存入内部 data_dict
-    for n_try in range(1 + num_retry):
-        comm = self.sync_reader.txRxPacket()
-        if self._is_comm_success(comm):
-            break
+    for n_try in range(1 + num_retry):  # 遍历本次链路涉及的元素
+        comm = self.sync_reader.txRxPacket()  # 保存本链路后续步骤需要使用的中间状态或参数
+        if self._is_comm_success(comm):  # 检查条件，决定是否进入该分支
+            break  # 本行参与当前链路的控制流或数据准备
 
-    if not self._is_comm_success(comm) and raise_on_error:
-        raise ConnectionError(...)
+    if not self._is_comm_success(comm) and raise_on_error:  # 检查条件，决定是否进入该分支
+        raise ConnectionError(...)  # 调用下一层函数继续完成当前链路动作
 
     # === 阶段3: Unpack — 从 SDK 内部缓冲区提取各电机的原始值 ===
     # self.sync_reader.getData() 进入 scservo_sdk，
     # 从阶段2存好的 data_dict 中按 (电机ID, 地址, 长度) 取出原始字节，拼成整数返回
     # 小端序：DATA_L | (DATA_H << 8)，例如 0xFD + (0x08 << 8) = 0x08FD = 2301
-    values = {id_: self.sync_reader.getData(id_, addr, length) for id_ in motor_ids}
+    values = {id_: self.sync_reader.getData(id_, addr, length) for id_ in motor_ids}  # 保存本链路后续步骤需要使用的中间状态或参数
     # → {1: 2301, 2: 1800, 3: 2048, 4: 2100, 5: 2048, 6: 3500}
 
-    return values, comm
+    return values, comm  # 把本层处理结果返回给调用方
 ```
 
 **串口上发生的事情（Feetech 协议 v0）：**
@@ -319,13 +323,14 @@ def _sync_read(
 > - `data_length = length` — 设置每个电机要读取的字节数
 > - `addParam(id_)` — 把电机 ID 注册进去，SDK 后续只等这些 ID 的回包
 
+来源：lerobot/src/lerobot/motors/motors_bus.py:_setup_sync_reader（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
-def _setup_sync_reader(self, motor_ids: list[int], addr: int, length: int) -> None:
+def _setup_sync_reader(self, motor_ids: list[int], addr: int, length: int) -> None:  # 定义本链路要说明的函数入口
     """配置 scservo_sdk 的 GroupSyncRead：告诉 SDK 读哪个寄存器、读几个字节、读哪些电机。"""
-    self.sync_reader.clearParam()
-    self.sync_reader.start_address = addr     # 56（Present_Position）
+    self.sync_reader.clearParam()  # 清理上一轮注册参数，避免旧 ID 或旧数据残留
+    self.sync_reader.start_address = addr     # 56（Present_Position）  # 保存本链路后续步骤需要使用的中间状态或参数
     self.sync_reader.data_length = length     # 2（2字节）
-    for id_ in motor_ids:
+    for id_ in motor_ids:  # 遍历本次链路涉及的元素
         self.sync_reader.addParam(id_)        # 注册 ID=1,2,3,4,5,6
 ```
 
@@ -339,44 +344,47 @@ def _setup_sync_reader(self, motor_ids: list[int], addr: int, length: int) -> No
 
 **Sync Read 的 addParam**（只注册 ID，不需要数据——因为我们是"要读"，还没拿到数据）：
 
+来源：scservo_sdk/group_sync_read.py:addParam（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
 # group_sync_read.py:42-54
-def addParam(self, scs_id):
+def addParam(self, scs_id):  # 定义本链路要说明的函数入口
     if scs_id in self.data_dict:  # 已存在则拒绝重复
-        return False
+        return False  # 把本层处理结果返回给调用方
     self.data_dict[scs_id] = []   # 空列表占位，等 rxPacket() 填充实际数据
     self.is_param_changed = True  # 标记"参数变了，下次发送前要重新 makeParam()"
-    return True
+    return True  # 把本层处理结果返回给调用方
 ```
 
 **Sync Write 的 addParam**（需要注册 ID + 要写入的数据——因为我们是"要写"，数据已知）：
 
+来源：scservo_sdk/group_sync_write.py:addParam（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
 # group_sync_write.py:48-68
-def addParam(self, scs_id, data):
+def addParam(self, scs_id, data):  # 定义本链路要说明的函数入口
     if scs_id in self.data_dict:  # 已存在则拒绝重复
-        return False
+        return False  # 把本层处理结果返回给调用方
     if len(data) > self.data_length:  # 数据超长则拒绝
-        return False
+        return False  # 把本层处理结果返回给调用方
     self.data_dict[scs_id] = data   # 存入 [byte0, byte1]，例如 [0x83, 0x07]
     self.is_param_changed = True    # 标记"参数变了，下次发送前要重新 makeParam()"
-    return True
+    return True  # 把本层处理结果返回给调用方
 ```
 
 **两者共用的 `makeParam()`**（发送前把字典展开为连续字节列表）：
 
+来源：scservo_sdk/group_sync_read.py:makeParam 与 scservo_sdk/group_sync_write.py:makeParam（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
 # group_sync_read.py:29-40
-def makeParam(self):
-    self.param = []
-    for scs_id in self.data_dict:
+def makeParam(self):  # 定义本链路要说明的函数入口
+    self.param = []  # 保存本链路后续步骤需要使用的中间状态或参数
+    for scs_id in self.data_dict:  # 遍历本次链路涉及的元素
         self.param.append(scs_id)  # 只有 ID，如 [1, 2, 3, 4, 5, 6]
 
 # group_sync_write.py:27-46
-def makeParam(self):
-    self.param = []
-    for scs_id in self.data_dict:
-        self.param.append(scs_id)              # ID
+def makeParam(self):  # 定义本链路要说明的函数入口
+    self.param = []  # 保存本链路后续步骤需要使用的中间状态或参数
+    for scs_id in self.data_dict:  # 遍历本次链路涉及的元素
+        self.param.append(scs_id)              # ID  # 调用下一层函数继续完成当前链路动作
         self.param.extend(self.data_dict[scs_id])  # + 数据，如 [1, 0x83, 0x07, 2, 0x09, 0x0A, ...]
 ```
 
@@ -389,18 +397,19 @@ def makeParam(self):
 
 > 文件：`lerobot/src/lerobot/motors/feetech/feetech.py:351-359`
 
+来源：lerobot/src/lerobot/motors/feetech/feetech.py:_decode_sign（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
-def _decode_sign(self, data_name: str, ids_values: dict[int, int]) -> dict[int, int]:
+def _decode_sign(self, data_name: str, ids_values: dict[int, int]) -> dict[int, int]:  # 定义本链路要说明的函数入口
     """Sign-Magnitude 符号位解码：查编码表，对需要解码的寄存器进行解码。"""
-    for id_ in ids_values:
-        model = self._id_to_model(id_)
-        encoding_table = self.model_encoding_table.get(model)
+    for id_ in ids_values:  # 遍历本次链路涉及的元素
+        model = self._id_to_model(id_)  # 保存本链路后续步骤需要使用的中间状态或参数
+        encoding_table = self.model_encoding_table.get(model)  # 保存本链路后续步骤需要使用的中间状态或参数
         # Present_Position 在 STS_SMS_SERIES_ENCODINGS_TABLE 里，sign_bit=15
-        if encoding_table and data_name in encoding_table:
-            sign_bit = encoding_table[data_name]
-            ids_values[id_] = decode_sign_magnitude(ids_values[id_], sign_bit)
+        if encoding_table and data_name in encoding_table:  # 检查条件，决定是否进入该分支
+            sign_bit = encoding_table[data_name]  # 保存本链路后续步骤需要使用的中间状态或参数
+            ids_values[id_] = decode_sign_magnitude(ids_values[id_], sign_bit)  # 保存本链路后续步骤需要使用的中间状态或参数
 
-    return ids_values
+    return ids_values  # 把本层处理结果返回给调用方
 ```
 
 ---
@@ -409,13 +418,14 @@ def _decode_sign(self, data_name: str, ids_values: dict[int, int]) -> dict[int, 
 
 > 文件：`lerobot/src/lerobot/utils/encoding_utils.py:29-36`
 
+来源：lerobot/src/lerobot/utils/encoding_utils.py:decode_sign_magnitude（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
-def decode_sign_magnitude(encoded_value: int, sign_bit_index: int):
+def decode_sign_magnitude(encoded_value: int, sign_bit_index: int):  # 定义本链路要说明的函数入口
     """将 Feetech 寄存器原始值 → Python int（符号-幅值解码）。"""
     direction_bit = (encoded_value >> sign_bit_index) & 1   # 取 bit15
     magnitude_mask = (1 << sign_bit_index) - 1              # = 0x7FFF，取低15位
-    magnitude = encoded_value & magnitude_mask
-    return -magnitude if direction_bit else magnitude
+    magnitude = encoded_value & magnitude_mask  # 保存本链路后续步骤需要使用的中间状态或参数
+    return -magnitude if direction_bit else magnitude  # 把本层处理结果返回给调用方
 ```
 
 ---
@@ -424,44 +434,46 @@ def decode_sign_magnitude(encoded_value: int, sign_bit_index: int):
 
 > 文件：`lerobot/src/lerobot/motors/motors_bus.py:1221-1277`
 
+来源：lerobot/src/lerobot/motors/motors_bus.py:_normalize（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
-def _normalize(self, ids_values: dict[int, int]) -> dict[int, float]:
+def _normalize(self, ids_values: dict[int, int]) -> dict[int, float]:  # 定义本链路要说明的函数入口
     """将原始编码值归一化为用户友好的范围。"""
-    if not self.calibration:
-        raise RuntimeError(f"{self} has no calibration registered.")
+    if not self.calibration:  # 检查条件，决定是否进入该分支
+        raise RuntimeError(f"{self} has no calibration registered.")  # 调用下一层函数继续完成当前链路动作
 
-    normalized_values = {}
-    for id_, val in ids_values.items():
-        motor = self._id_to_name(id_)
-        min_ = self.calibration[motor].range_min
-        max_ = self.calibration[motor].range_max
-        drive_mode = self.apply_drive_mode and self.calibration[motor].drive_mode
-        if max_ == min_:
-            raise ValueError(...)
+    normalized_values = {}  # 保存本链路后续步骤需要使用的中间状态或参数
+    for id_, val in ids_values.items():  # 遍历本次链路涉及的元素
+        motor = self._id_to_name(id_)  # 保存本链路后续步骤需要使用的中间状态或参数
+        min_ = self.calibration[motor].range_min  # 保存本链路后续步骤需要使用的中间状态或参数
+        max_ = self.calibration[motor].range_max  # 保存本链路后续步骤需要使用的中间状态或参数
+        drive_mode = self.apply_drive_mode and self.calibration[motor].drive_mode  # 保存本链路后续步骤需要使用的中间状态或参数
+        if max_ == min_:  # 检查条件，决定是否进入该分支
+            raise ValueError(...)  # 调用下一层函数继续完成当前链路动作
 
-        bounded_val = min(max_, max(min_, val))
+        bounded_val = min(max_, max(min_, val))  # 保存本链路后续步骤需要使用的中间状态或参数
 
-        if self.motors[motor].norm_mode is MotorNormMode.RANGE_M100_100:
+        if self.motors[motor].norm_mode is MotorNormMode.RANGE_M100_100:  # 检查条件，决定是否进入该分支
             # 身体关节：((raw - min) / (max - min)) * 200 - 100
             # 例: shoulder_pan, raw=2301, min=1024, max=3072
             #     = ((2301-1024)/(3072-1024))*200 - 100 = 24.7
-            norm = (((bounded_val - min_) / (max_ - min_)) * 200) - 100
-            normalized_values[id_] = -norm if drive_mode else norm
+            norm = (((bounded_val - min_) / (max_ - min_)) * 200) - 100  # 保存本链路后续步骤需要使用的中间状态或参数
+            normalized_values[id_] = -norm if drive_mode else norm  # 保存本链路后续步骤需要使用的中间状态或参数
 
-        elif self.motors[motor].norm_mode is MotorNormMode.RANGE_0_100:
+        elif self.motors[motor].norm_mode is MotorNormMode.RANGE_0_100:  # 检查前一分支未命中后的备选条件
             # 夹爪：((raw - min) / (max - min)) * 100
-            norm = ((bounded_val - min_) / (max_ - min_)) * 100
-            normalized_values[id_] = 100 - norm if drive_mode else norm
+            norm = ((bounded_val - min_) / (max_ - min_)) * 100  # 保存本链路后续步骤需要使用的中间状态或参数
+            normalized_values[id_] = 100 - norm if drive_mode else norm  # 保存本链路后续步骤需要使用的中间状态或参数
 
-        elif self.motors[motor].norm_mode is MotorNormMode.DEGREES:
-            mid = (min_ + max_) / 2
-            max_res = self.model_resolution_table[self._id_to_model(id_)] - 1
-            normalized_values[id_] = (val - mid) * 360 / max_res
+        elif self.motors[motor].norm_mode is MotorNormMode.DEGREES:  # 检查前一分支未命中后的备选条件
+            mid = (min_ + max_) / 2  # 保存本链路后续步骤需要使用的中间状态或参数
+            max_res = self.model_resolution_table[self._id_to_model(id_)] - 1  # 保存本链路后续步骤需要使用的中间状态或参数
+            normalized_values[id_] = (val - mid) * 360 / max_res  # 保存本链路后续步骤需要使用的中间状态或参数
 
-    return normalized_values
+    return normalized_values  # 把本层处理结果返回给调用方
 ```
 
 `min` / `max` 来自标定文件 `~/.lerobot/calibration/robots/R12254705.json`：
+示意代码：为说明链路整理，不作为逐字源码；已按当前源码语义核对。
 ```json
 {
   "shoulder_pan": {"range_min": 1024, "range_max": 3072, "homing_offset": 2048, ...},
@@ -477,34 +489,35 @@ def _normalize(self, ids_values: dict[int, int]) -> dict[int, float]:
 
 > 文件：`lerobot/src/lerobot/robots/so101_follower/so101_follower.py:464-528`
 
+来源：lerobot/src/lerobot/robots/so101_follower/so101_follower.py:send_action（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
-def send_action(self, action: dict[str, Any]) -> dict[str, Any]:
+def send_action(self, action: dict[str, Any]) -> dict[str, Any]:  # 定义本链路要说明的函数入口
     """命令机械臂移动到目标关节配置（每帧调用一次）。"""
-    if not self.is_connected:
-        raise DeviceNotConnectedError(f"{self} is not connected.")
+    if not self.is_connected:  # 检查条件，决定是否进入该分支
+        raise DeviceNotConnectedError(f"{self} is not connected.")  # 调用下一层函数继续完成当前链路动作
 
-    total_start = time.perf_counter()
+    total_start = time.perf_counter()  # 保存本链路后续步骤需要使用的中间状态或参数
 
     # 步骤1: 去掉键名的 ".pos" 后缀，转为总线期望的电机名格式
     # {"shoulder_pan.pos": -15.2} → {"shoulder_pan": -15.2}
-    goal_pos = {key.removesuffix(".pos"): val for key, val in action.items() if key.endswith(".pos")}
+    goal_pos = {key.removesuffix(".pos"): val for key, val in action.items() if key.endswith(".pos")}  # 保存本链路后续步骤需要使用的中间状态或参数
 
     # 步骤2: 安全限幅（可选，本次 max_relative_target=None，跳过）
-    read_ms = 0.0
-    if self.config.max_relative_target is not None:
-        read_start = time.perf_counter()
-        present_pos = self.bus.sync_read("Present_Position")
-        read_ms = (time.perf_counter() - read_start) * 1e3
-        goal_present_pos = {key: (g_pos, present_pos[key]) for key, g_pos in goal_pos.items()}
-        goal_pos = ensure_safe_goal_position(goal_present_pos, self.config.max_relative_target)
+    read_ms = 0.0  # 保存本链路后续步骤需要使用的中间状态或参数
+    if self.config.max_relative_target is not None:  # 检查条件，决定是否进入该分支
+        read_start = time.perf_counter()  # 保存本链路后续步骤需要使用的中间状态或参数
+        present_pos = self.bus.sync_read("Present_Position")  # 保存本链路后续步骤需要使用的中间状态或参数
+        read_ms = (time.perf_counter() - read_start) * 1e3  # 保存本链路后续步骤需要使用的中间状态或参数
+        goal_present_pos = {key: (g_pos, present_pos[key]) for key, g_pos in goal_pos.items()}  # 保存本链路后续步骤需要使用的中间状态或参数
+        goal_pos = ensure_safe_goal_position(goal_present_pos, self.config.max_relative_target)  # 保存本链路后续步骤需要使用的中间状态或参数
 
     # 步骤3: 批量写入目标位置到6个舵机的 Goal_Position 寄存器
-    write_start = time.perf_counter()
-    self.bus.sync_write("Goal_Position", goal_pos)
-    write_ms = (time.perf_counter() - write_start) * 1e3
+    write_start = time.perf_counter()  # 保存本链路后续步骤需要使用的中间状态或参数
+    self.bus.sync_write("Goal_Position", goal_pos)  # 调用下一层函数继续完成当前链路动作
+    write_ms = (time.perf_counter() - write_start) * 1e3  # 保存本链路后续步骤需要使用的中间状态或参数
 
     # 步骤4: 返回实际写入的目标位置（加回 ".pos" 后缀）
-    return {f"{motor}.pos": val for motor, val in goal_pos.items()}
+    return {f"{motor}.pos": val for motor, val in goal_pos.items()}  # 把本层处理结果返回给调用方
 ```
 
 ---
@@ -513,43 +526,44 @@ def send_action(self, action: dict[str, Any]) -> dict[str, Any]:
 
 > 文件：`lerobot/src/lerobot/motors/motors_bus.py:1784-1834`
 
+来源：lerobot/src/lerobot/motors/motors_bus.py:sync_write（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
-def sync_write(
-    self,
-    data_name: str,
-    values: Value | dict[str, Value],
-    *,
-    normalize: bool = True,
-    num_retry: int = 0,
-) -> None:
+def sync_write(  # 定义本链路要说明的函数入口
+    self,  # 本行参与当前链路的控制流或数据准备
+    data_name: str,  # 本行参与当前链路的控制流或数据准备
+    values: Value | dict[str, Value],  # 本行参与当前链路的控制流或数据准备
+    *,  # 本行参与当前链路的控制流或数据准备
+    normalize: bool = True,  # 保存本链路后续步骤需要使用的中间状态或参数
+    num_retry: int = 0,  # 保存本链路后续步骤需要使用的中间状态或参数
+) -> None:  # 本行参与当前链路的控制流或数据准备
     """向多个电机的同一寄存器同步写入（无响应包，速度快但可能丢包）。"""
-    if not self.is_connected:
-        raise DeviceNotConnectedError(...)
+    if not self.is_connected:  # 检查条件，决定是否进入该分支
+        raise DeviceNotConnectedError(...)  # 调用下一层函数继续完成当前链路动作
 
     # 1) 规整化输入为 {电机ID: 值}
     # {"shoulder_pan": -15.2} → {1: -15.2, 2: 32.0, ..., 6: 72.0}
-    ids_values = self._get_ids_values_dict(values)
-    models = [self._id_to_model(id_) for id_ in ids_values]
+    ids_values = self._get_ids_values_dict(values)  # 保存本链路后续步骤需要使用的中间状态或参数
+    models = [self._id_to_model(id_) for id_ in ids_values]  # 保存本链路后续步骤需要使用的中间状态或参数
 
     # 2) 校验地址一致性
-    if self._has_different_ctrl_tables:
-        assert_same_address(self.model_ctrl_table, models, data_name)
+    if self._has_different_ctrl_tables:  # 检查条件，决定是否进入该分支
+        assert_same_address(self.model_ctrl_table, models, data_name)  # 调用下一层函数继续完成当前链路动作
 
     # 查控制表：Goal_Position → (42, 2)
-    model = next(iter(models))
-    addr, length = get_address(self.model_ctrl_table, model, data_name)
+    model = next(iter(models))  # 保存本链路后续步骤需要使用的中间状态或参数
+    addr, length = get_address(self.model_ctrl_table, model, data_name)  # 保存本链路后续步骤需要使用的中间状态或参数
 
     # 3) 反归一化（-100~100 → 原始 tick 0~4095）
-    if normalize and data_name in self.normalized_data:
-        ids_values = self._unnormalize(ids_values)
+    if normalize and data_name in self.normalized_data:  # 检查条件，决定是否进入该分支
+        ids_values = self._unnormalize(ids_values)  # 保存本链路后续步骤需要使用的中间状态或参数
     # 结果：{1: 1891, 2: 2713, 3: 2150, 4: 1946, 5: 2423, 6: 3436}
 
     # 4) Sign-Magnitude 符号位编码
     # Goal_Position 不在编码表里，直接跳过
-    ids_values = self._encode_sign(data_name, ids_values)
+    ids_values = self._encode_sign(data_name, ids_values)  # 保存本链路后续步骤需要使用的中间状态或参数
 
     # 5) 底层同步写入
-    self._sync_write(addr, length, ids_values, num_retry=num_retry, raise_on_error=True, err_msg=...)
+    self._sync_write(addr, length, ids_values, num_retry=num_retry, raise_on_error=True, err_msg=...)  # 保存本链路后续步骤需要使用的中间状态或参数
 ```
 
 ---
@@ -563,16 +577,17 @@ def sync_write(
 > - `self.sync_writer.clearParam()` / `addParam()` — 注册要写入的电机 ID 和数据
 > - `self.sync_writer.txPacket()` — 把所有电机的数据打包成一条 Sync Write 广播包发出去，**不等待任何回包**
 
+来源：lerobot/src/lerobot/motors/motors_bus.py:_sync_write（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
-def _sync_write(
-    self,
-    addr: int,
-    length: int,
-    ids_values: dict[int, int],
-    num_retry: int = 0,
-    raise_on_error: bool = True,
-    err_msg: str = "",
-) -> int:
+def _sync_write(  # 定义本链路要说明的函数入口
+    self,  # 本行参与当前链路的控制流或数据准备
+    addr: int,  # 本行参与当前链路的控制流或数据准备
+    length: int,  # 本行参与当前链路的控制流或数据准备
+    ids_values: dict[int, int],  # 本行参与当前链路的控制流或数据准备
+    num_retry: int = 0,  # 保存本链路后续步骤需要使用的中间状态或参数
+    raise_on_error: bool = True,  # 保存本链路后续步骤需要使用的中间状态或参数
+    err_msg: str = "",  # 保存本链路后续步骤需要使用的中间状态或参数
+) -> int:  # 本行参与当前链路的控制流或数据准备
     """底层同步写入实现（setup → tx 两阶段，不等待应答）。"""
 
     # === 阶段1: Setup — 配置 scservo_sdk 的 GroupSyncWrite 对象 ===
@@ -583,21 +598,21 @@ def _sync_write(
     #   3. data_length = length   — 告诉 SDK 每个电机要写几个字节（2字节）
     #   4. addParam(id_, data) × 6 — 把每个电机的 ID + 小端序字节数据注册进去
     #      例如 ID=1, value=1891 → data=[0x83, 0x07]（小端序）
-    self._setup_sync_writer(ids_values, addr, length)
+    self._setup_sync_writer(ids_values, addr, length)  # 调用下一层函数继续完成当前链路动作
 
     # === 阶段2: Tx — 发送广播写包（主要耗时 ~1~3ms） ===
     # self.sync_writer.txPacket() 进入 scservo_sdk，做了一件事：
     #   把上面 setup 注册的所有 (ID, data) 打包成一条 Sync Write 指令包（指令码 0x83），
     #   通过 port_handler.writePort() 发到串口，**不等待任何回包**，直接返回
-    for n_try in range(1 + num_retry):
-        comm = self.sync_writer.txPacket()
-        if self._is_comm_success(comm):
-            break
+    for n_try in range(1 + num_retry):  # 遍历本次链路涉及的元素
+        comm = self.sync_writer.txPacket()  # 进入协议发送流程，后续会组帧并写串口
+        if self._is_comm_success(comm):  # 检查条件，决定是否进入该分支
+            break  # 本行参与当前链路的控制流或数据准备
 
-    if not self._is_comm_success(comm) and raise_on_error:
-        raise ConnectionError(...)
+    if not self._is_comm_success(comm) and raise_on_error:  # 检查条件，决定是否进入该分支
+        raise ConnectionError(...)  # 调用下一层函数继续完成当前链路动作
 
-    return comm
+    return comm  # 把本层处理结果返回给调用方
 ```
 
 **串口上发生的事情：**
@@ -628,16 +643,17 @@ def _sync_write(
 > - `data_length = length` — 设置每个电机要写入的字节数
 > - `addParam(id_, data)` — 把电机 ID 和对应的小端序字节数据注册进去
 
+来源：lerobot/src/lerobot/motors/motors_bus.py:_setup_sync_writer（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
-def _setup_sync_writer(self, ids_values: dict[int, int], addr: int, length: int) -> None:
+def _setup_sync_writer(self, ids_values: dict[int, int], addr: int, length: int) -> None:  # 定义本链路要说明的函数入口
     """配置 scservo_sdk 的 GroupSyncWrite：告诉 SDK 写哪个寄存器、写几个字节、每个电机写什么值。"""
-    self.sync_writer.clearParam()
-    self.sync_writer.start_address = addr     # 42（Goal_Position）
+    self.sync_writer.clearParam()  # 清理上一轮注册参数，避免旧 ID 或旧数据残留
+    self.sync_writer.start_address = addr     # 42（Goal_Position）  # 保存本链路后续步骤需要使用的中间状态或参数
     self.sync_writer.data_length = length     # 2（2字节）
-    for id_, value in ids_values.items():
-        data = self._serialize_data(value, length)
+    for id_, value in ids_values.items():  # 遍历本次链路涉及的元素
+        data = self._serialize_data(value, length)  # 保存本链路后续步骤需要使用的中间状态或参数
         # _serialize_data(1891, 2) → [0x83, 0x07]（小端：低字节先发）
-        self.sync_writer.addParam(id_, data)
+        self.sync_writer.addParam(id_, data)  # 把目标电机注册到同步读写参数表
 ```
 
 ---
@@ -646,40 +662,41 @@ def _setup_sync_writer(self, ids_values: dict[int, int], addr: int, length: int)
 
 > 文件：`lerobot/src/lerobot/motors/motors_bus.py:1279-1317`
 
+来源：lerobot/src/lerobot/motors/motors_bus.py:_unnormalize（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
-def _unnormalize(self, ids_values: dict[int, float]) -> dict[int, int]:
+def _unnormalize(self, ids_values: dict[int, float]) -> dict[int, int]:  # 定义本链路要说明的函数入口
     """将归一化值反向转换为电机原始编码值。"""
-    if not self.calibration:
-        raise RuntimeError(f"{self} has no calibration registered.")
+    if not self.calibration:  # 检查条件，决定是否进入该分支
+        raise RuntimeError(f"{self} has no calibration registered.")  # 调用下一层函数继续完成当前链路动作
 
-    unnormalized_values = {}
-    for id_, val in ids_values.items():
-        motor = self._id_to_name(id_)
-        min_ = self.calibration[motor].range_min
-        max_ = self.calibration[motor].range_max
-        drive_mode = self.apply_drive_mode and self.calibration[motor].drive_mode
-        if max_ == min_:
-            raise ValueError(...)
+    unnormalized_values = {}  # 保存本链路后续步骤需要使用的中间状态或参数
+    for id_, val in ids_values.items():  # 遍历本次链路涉及的元素
+        motor = self._id_to_name(id_)  # 保存本链路后续步骤需要使用的中间状态或参数
+        min_ = self.calibration[motor].range_min  # 保存本链路后续步骤需要使用的中间状态或参数
+        max_ = self.calibration[motor].range_max  # 保存本链路后续步骤需要使用的中间状态或参数
+        drive_mode = self.apply_drive_mode and self.calibration[motor].drive_mode  # 保存本链路后续步骤需要使用的中间状态或参数
+        if max_ == min_:  # 检查条件，决定是否进入该分支
+            raise ValueError(...)  # 调用下一层函数继续完成当前链路动作
 
-        if self.motors[motor].norm_mode is MotorNormMode.RANGE_M100_100:
+        if self.motors[motor].norm_mode is MotorNormMode.RANGE_M100_100:  # 检查条件，决定是否进入该分支
             # 身体关节：norm=-15.2 → raw=1891
             # raw = int(((val+100)/200) * (max-min) + min)
-            val = -val if drive_mode else val
-            bounded_val = min(100.0, max(-100.0, val))
-            unnormalized_values[id_] = int(((bounded_val + 100) / 200) * (max_ - min_) + min_)
+            val = -val if drive_mode else val  # 保存本链路后续步骤需要使用的中间状态或参数
+            bounded_val = min(100.0, max(-100.0, val))  # 保存本链路后续步骤需要使用的中间状态或参数
+            unnormalized_values[id_] = int(((bounded_val + 100) / 200) * (max_ - min_) + min_)  # 保存本链路后续步骤需要使用的中间状态或参数
 
-        elif self.motors[motor].norm_mode is MotorNormMode.RANGE_0_100:
+        elif self.motors[motor].norm_mode is MotorNormMode.RANGE_0_100:  # 检查前一分支未命中后的备选条件
             # 夹爪：val=72.0 → raw=3436
-            val = 100 - val if drive_mode else val
-            bounded_val = min(100.0, max(0.0, val))
-            unnormalized_values[id_] = int((bounded_val / 100) * (max_ - min_) + min_)
+            val = 100 - val if drive_mode else val  # 保存本链路后续步骤需要使用的中间状态或参数
+            bounded_val = min(100.0, max(0.0, val))  # 保存本链路后续步骤需要使用的中间状态或参数
+            unnormalized_values[id_] = int((bounded_val / 100) * (max_ - min_) + min_)  # 保存本链路后续步骤需要使用的中间状态或参数
 
-        elif self.motors[motor].norm_mode is MotorNormMode.DEGREES:
-            mid = (min_ + max_) / 2
-            max_res = self.model_resolution_table[self._id_to_model(id_)] - 1
-            unnormalized_values[id_] = int((val * max_res / 360) + mid)
+        elif self.motors[motor].norm_mode is MotorNormMode.DEGREES:  # 检查前一分支未命中后的备选条件
+            mid = (min_ + max_) / 2  # 保存本链路后续步骤需要使用的中间状态或参数
+            max_res = self.model_resolution_table[self._id_to_model(id_)] - 1  # 保存本链路后续步骤需要使用的中间状态或参数
+            unnormalized_values[id_] = int((val * max_res / 360) + mid)  # 保存本链路后续步骤需要使用的中间状态或参数
 
-    return unnormalized_values
+    return unnormalized_values  # 把本层处理结果返回给调用方
 ```
 
 **举例计算：**
@@ -700,18 +717,19 @@ raw = int((72.0 / 100) * (3800 - 2500) + 2500)
 
 > 文件：`lerobot/src/lerobot/motors/feetech/feetech.py:341-349`
 
+来源：lerobot/src/lerobot/motors/feetech/feetech.py:_encode_sign（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
-def _encode_sign(self, data_name: str, ids_values: dict[int, int]) -> dict[int, int]:
+def _encode_sign(self, data_name: str, ids_values: dict[int, int]) -> dict[int, int]:  # 定义本链路要说明的函数入口
     """Sign-Magnitude 符号位编码：查编码表，对需要的寄存器进行编码。"""
-    for id_ in ids_values:
-        model = self._id_to_model(id_)
-        encoding_table = self.model_encoding_table.get(model)
+    for id_ in ids_values:  # 遍历本次链路涉及的元素
+        model = self._id_to_model(id_)  # 保存本链路后续步骤需要使用的中间状态或参数
+        encoding_table = self.model_encoding_table.get(model)  # 保存本链路后续步骤需要使用的中间状态或参数
         # Goal_Position 不在编码表里，直接跳过不做任何处理
-        if encoding_table and data_name in encoding_table:
-            sign_bit = encoding_table[data_name]
-            ids_values[id_] = encode_sign_magnitude(ids_values[id_], sign_bit)
+        if encoding_table and data_name in encoding_table:  # 检查条件，决定是否进入该分支
+            sign_bit = encoding_table[data_name]  # 保存本链路后续步骤需要使用的中间状态或参数
+            ids_values[id_] = encode_sign_magnitude(ids_values[id_], sign_bit)  # 保存本链路后续步骤需要使用的中间状态或参数
 
-    return ids_values
+    return ids_values  # 把本层处理结果返回给调用方
 ```
 
 ---
@@ -725,24 +743,25 @@ def _encode_sign(self, data_name: str, ids_values: dict[int, int]) -> dict[int, 
 > - `SCS_LOBYTE(1891)` = `1891 & 0xFF` = `0x83`（低字节）
 > - `SCS_HIBYTE(1891)` = `1891 >> 8` = `0x07`（高字节）
 
+来源：lerobot/src/lerobot/motors/feetech/feetech.py:_split_into_byte_chunks（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
-def _split_into_byte_chunks(value: int, length: int) -> list[int]:
+def _split_into_byte_chunks(value: int, length: int) -> list[int]:  # 定义本链路要说明的函数入口
     """将整数值按小端序拆分为字节列表（Feetech 使用小端序）。"""
-    import scservo_sdk as scs
+    import scservo_sdk as scs  # 本行参与当前链路的控制流或数据准备
 
-    if length == 1:
-        data = [value]
-    elif length == 2:
+    if length == 1:  # 检查条件，决定是否进入该分支
+        data = [value]  # 保存本链路后续步骤需要使用的中间状态或参数
+    elif length == 2:  # 检查前一分支未命中后的备选条件
         # 1891 → [0x83, 0x07]
-        data = [scs.SCS_LOBYTE(value), scs.SCS_HIBYTE(value)]
-    elif length == 4:
-        data = [
-            scs.SCS_LOBYTE(scs.SCS_LOWORD(value)),
-            scs.SCS_HIBYTE(scs.SCS_LOWORD(value)),
-            scs.SCS_LOBYTE(scs.SCS_HIWORD(value)),
-            scs.SCS_HIBYTE(scs.SCS_HIWORD(value)),
+        data = [scs.SCS_LOBYTE(value), scs.SCS_HIBYTE(value)]  # 保存本链路后续步骤需要使用的中间状态或参数
+    elif length == 4:  # 检查前一分支未命中后的备选条件
+        data = [  # 保存本链路后续步骤需要使用的中间状态或参数
+            scs.SCS_LOBYTE(scs.SCS_LOWORD(value)),  # 调用下一层函数继续完成当前链路动作
+            scs.SCS_HIBYTE(scs.SCS_LOWORD(value)),  # 调用下一层函数继续完成当前链路动作
+            scs.SCS_LOBYTE(scs.SCS_HIWORD(value)),  # 调用下一层函数继续完成当前链路动作
+            scs.SCS_HIBYTE(scs.SCS_HIWORD(value)),  # 调用下一层函数继续完成当前链路动作
         ]
-    return data
+    return data  # 把本层处理结果返回给调用方
 ```
 
 ---
@@ -751,16 +770,17 @@ def _split_into_byte_chunks(value: int, length: int) -> list[int]:
 
 > 文件：`lerobot/src/lerobot/utils/encoding_utils.py:16-26`
 
+来源：lerobot/src/lerobot/utils/encoding_utils.py:encode_sign_magnitude（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```python
-def encode_sign_magnitude(value: int, sign_bit_index: int):
+def encode_sign_magnitude(value: int, sign_bit_index: int):  # 定义本链路要说明的函数入口
     """将 Python int → Feetech 寄存器原始值（符号-幅值编码）。"""
-    max_magnitude = (1 << sign_bit_index) - 1
-    magnitude = abs(value)
-    if magnitude > max_magnitude:
-        raise ValueError(...)
+    max_magnitude = (1 << sign_bit_index) - 1  # 保存本链路后续步骤需要使用的中间状态或参数
+    magnitude = abs(value)  # 保存本链路后续步骤需要使用的中间状态或参数
+    if magnitude > max_magnitude:  # 检查条件，决定是否进入该分支
+        raise ValueError(...)  # 调用下一层函数继续完成当前链路动作
 
-    direction_bit = 1 if value < 0 else 0
-    return (direction_bit << sign_bit_index) | magnitude
+    direction_bit = 1 if value < 0 else 0  # 保存本链路后续步骤需要使用的中间状态或参数
+    return (direction_bit << sign_bit_index) | magnitude  # 把本层处理结果返回给调用方
 ```
 
 ---

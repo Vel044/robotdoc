@@ -80,9 +80,12 @@ LeRobot 默认将这一比例设为 0.5，即动作块尚余一半时就启动�
 动作队列剩余比例不高于 $h$，
 因此 $h$ 越大，触发越早；$h$ 越小，触发越晚。
 
-令一次推理期间主线程按目标频率会消耗的动作帧数为
+为便于把推理耗时与动作队列长度放在同一尺度下比较，
+这里引入 $D$ 表示一次推理返回前，主控制循环按目标频率大约会消耗掉的动作帧数。
+换言之，$D$ 是推理时延折算到控制帧尺度后的结果，如式（\ref{eq:async-consumed-frames}）所示：
 \begin{equation}
   D = T_{\text{infer}}F.
+  \label{eq:async-consumed-frames}
 \end{equation}
 严格来说，调度条件中应使用从观测被 server 取走到动作 chunk
 并入 client 队列的端到端返回时延；下文用 server 端记录的
@@ -92,11 +95,13 @@ $T_{\text{infer}}$ 近似这一时延，网络、序列化和队列调度开销�
 
 代码中存在两个不同层次的约束。第一，触发必须足够早：
 当队列剩余 $hN$ 帧时发出观测，如果 $D>hN$，
-新动作在当前队列耗尽前无法返回，控制循环必然出现 stall。因此有
+新动作在当前队列耗尽前无法返回，控制循环必然出现 stall。
+因此触发条件可写为式（\ref{eq:async-trigger-condition}）：
 \begin{equation}
   D \leq hN
   \quad\Longleftrightarrow\quad
   h \geq \frac{T_{\text{infer}}F}{N}.
+  \label{eq:async-trigger-condition}
 \end{equation}
 这只是``本次请求来得及赶上当前队列''的条件。
 
@@ -104,21 +109,26 @@ $T_{\text{infer}}$ 近似这一时延，网络、序列化和队列调度开销�
 推理服务进程返回的动作步号从观测步号开始递增，
 而控制端进程会丢弃所有动作步号不大于已执行步号的动作。
 若返回前没有 stall，推理期间已经执行了约 $D$ 帧，
-因此新 chunk 中真正能进入未来队列的帧数约为
+因此这里用 $N_{\text{eff}}$ 表示新 chunk 返回后，
+剔除过期动作后真正能进入未来队列的有效帧数，
+其近似值如式（\ref{eq:async-effective-chunk}）所示：
 \begin{equation}
   N_{\text{eff}} \approx N - D = N - T_{\text{infer}}F.
+  \label{eq:async-effective-chunk}
 \end{equation}
 由于同一 server 一次只能处理一个推理请求，下一轮推理仍要消耗约 $D$ 帧；
-所以稳态不 stall 还需要
+所以稳态不 stall 还需要满足式（\ref{eq:async-steady-condition}）：
 \begin{equation}
   N_{\text{eff}} \geq D
   \quad\Longleftrightarrow\quad
   N \geq 2T_{\text{infer}}F.
+  \label{eq:async-steady-condition}
 \end{equation}
 
-综合两者，异步流水线稳定无 stall 的近似条件应写为
+综合两者，异步流水线稳定无 stall 的近似条件应写为式（\ref{eq:async-stability-condition}）：
 \begin{equation}
   \boxed{\,T_{\text{infer}}F \leq \min(hN,\; N/2)\,}.
+  \label{eq:async-stability-condition}
 \end{equation}
 当 $h=0.5$ 时，两个约束同时退化为 $N \geq 2T_{\text{infer}}F$。
 当 $h<0.5$ 时，主要风险是触发太晚；当 $h>0.5$ 时，
@@ -179,15 +189,18 @@ $h$ 仍需作为调度参数单独扫描，但它不能替代对 $T_{\text{infer
 有效帧数 = $|[100, 149]|$ = 50 而非 30。
 这一点必须在公式推导中保留，否则时间线与公式会出现不自洽。
 
-\subsection{不等式在本平台的代入}\label{sec:async-inf-substitute}
+\subsection{平台参数代入}\label{sec:async-inf-substitute}
 
-代入第三章的实测参数 $T_{\text{infer}}$ = 2 s、$F$ = 30 FPS：
+代入第三章的实测参数 $T_{\text{infer}}$ = 2 s、$F$ = 30 FPS，
+可得式（\ref{eq:async-d-substitute}）：
 \begin{equation}
   D = T_{\text{infer}}F = 2 \times 30 = 60.
+  \label{eq:async-d-substitute}
 \end{equation}
-在默认 $h=0.5$、$N=100$ 时，
+在默认 $h=0.5$、$N=100$ 时，边界项如式（\ref{eq:async-bound-substitute}）所示：
 \begin{equation}
   \min(hN,\;N/2)=\min(50,\;50)=50 < D,
+  \label{eq:async-bound-substitute}
 \end{equation}
 因此异步流水线无法达到完全无 stall 的 30 FPS 稳态。
 
@@ -195,10 +208,12 @@ $h$ 仍需作为调度参数单独扫描，但它不能替代对 $T_{\text{infer
 $N_{\text{eff}}=N-D$ 来估算有效 FPS。队列耗尽后机器人停止执行，
 最新已执行动作步号不再随物理时间前进，所以返回动作块的过期部分
 不会继续扩大。对默认 $h=0.5$ 而言，进入周期性 stall 后，
-每轮返回大约仍有 $N/2=50$ 帧可执行；理想化有效 FPS 近似为：
+每轮返回大约仍有 $N/2=50$ 帧可执行；
+理想化有效 FPS 近似如式（\ref{eq:async-actual-fps}）所示：
 \begin{equation}
   F_{\text{actual}} \;\approx\; \frac{N/2}{T_{\text{infer}}}
   \;=\; \frac{50}{2} \;=\; 25\ \text{FPS},
+  \label{eq:async-actual-fps}
 \end{equation}
 这与后文异步实验中 25 FPS 左右的有效控制频率处在同一量级，
 也明显高于同步模式的实测约 16--19 FPS。
@@ -217,7 +232,8 @@ $N_{\text{eff}}=N-D$ 来估算有效 FPS。队列耗尽后机器人停止执行�
 同时，控制端进程、推理服务进程、相机线程和串口通信在树莓派 5
 上竞争同一组 CPU 核心。因此，实验中真正起作用的不是纯粹的模型前向耗时，
 而是从触发观测到新动作 chunk 合并进队列的有效返回时延。
-下文把这些实现细节统一吸收到 $T_{\text{rt}}$ 中，
+下文用 $T_{\text{rt}}$ 表示这一端到端有效返回时延，
+即从 client 触发观测、server 完成推理，到新动作 chunk 合并入队的实际耗时，
 再用 4.3 节的实测数据确定实际临界点。
 
 \subsection{FPS 与异步推理触发阈值的定量关系}\label{sec:async-inf-fps-hold}
@@ -227,11 +243,12 @@ $N_{\text{eff}}=N-D$ 来估算有效 FPS。队列耗尽后机器人停止执行�
 有效 FPS 应该如何随异步推理触发阈值变化？
 为避免把代码实现中的抖动误写成理论规律，本节只分析理想调度下的主导关系：
 临界点之前 FPS 随异步推理触发阈值上升，临界点之后饱和到目标帧率 30 FPS。
+这里先用 $h_{\text{crit}}$ 表示刚好消除 stall 的临界异步推理触发阈值；
+若 $h$ 小于该临界值，触发偏晚，旧动作队列会在新 chunk 返回前耗尽。
 以下推导只针对临界点之前的 stall 段，即
 $h<h_{\text{crit}}$ 且 $T_{\text{rt}}>hN/F$。
 实验中的 $h=0.60$ 仅作为偏早触发的参考点，不纳入该段公式。
 
-令 $T_{\text{rt}}$ 表示从 client 触发观测到新动作 chunk 合并进队列的有效返回时延。
 注意这里不再把 $T_{\text{rt}}$ 强行解释成``实际执行掉的帧数''：
 一旦发生 stall，机器人在推理期间实际最多只会继续执行触发时剩余的 $hN$ 帧，
 之后就停住等待。
@@ -240,42 +257,58 @@ $h<h_{\text{crit}}$ 且 $T_{\text{rt}}>hN/F$。
 剩下多少时间必须 stall。触发发生在队列剩余 $hN$ 帧时，
 因此计算期间最多能被旧队列继续执行的时间隐藏
 $hN/F$。在本节讨论的前段区间中，返回时延一定更长，
-所以多出来的部分就是 stall：
+因此这里用 $T_{\text{stall}}(h)$ 表示在触发阈值为 $h$ 时，
+旧队列耗尽后系统必须空等新 chunk 的时间，
+其计算方式如式（\ref{eq:stall-time}）所示：
 \begin{equation}
   T_{\text{stall}}(h)
   =
   T_{\text{rt}}-\frac{hN}{F},
   \qquad h<h_{\text{crit}}.
+  \label{eq:stall-time}
 \end{equation}
 
 在临界点之前，新 chunk 返回时旧队列已经耗尽，
 触发时剩余的 $hN$ 帧也已经执行完毕。
 因此新 chunk 前部与旧 chunk 重叠的 $hN$ 帧会被判定为过期，
-真正能作为未来动作执行的帧数约为
+这里用 $E(h)$ 表示每轮新 chunk 返回后仍可作为未来动作执行的帧数，
+其近似值如式（\ref{eq:future-action-frames}）所示：
 \begin{equation}
   E(h) = N(1-h),
+  \label{eq:future-action-frames}
 \end{equation}
-对应的正常执行时间为
+这里用 $T_{\text{exec}}(h)$ 表示执行这些有效未来动作所需的正常执行时间，
+其计算方式如式（\ref{eq:exec-time}）所示：
 \begin{equation}
   T_{\text{exec}}(h) = \frac{E(h)}{F}
   = \frac{N(1-h)}{F}.
+  \label{eq:exec-time}
 \end{equation}
 
 于是一个理想周期的有效 FPS 直接就是
-``执行帧数 /（执行时间 + stall 时间）''：
+``执行帧数 /（执行时间 + stall 时间）''，
+这里用 $F_{\text{eff}}^{\text{ideal}}(h)$ 表示理想调度下、
+给定触发阈值 $h$ 时的有效 FPS，
+可写为式（\ref{eq:ideal-effective-fps}）：
 \begin{equation}
+  \begin{aligned}
   F_{\text{eff}}^{\text{ideal}}(h)
-  =
-  \frac{E(h)}{T_{\text{exec}}(h)+T_{\text{stall}}(h)}
-  =
+  &=
+  \frac{E(h)}{T_{\text{exec}}(h)+T_{\text{stall}}(h)} \\
+  &=
   \frac{N(1-h)}
        {T_{\text{rt}}+\dfrac{N(1-2h)}{F}}.
+  \end{aligned}
+  \label{eq:ideal-effective-fps}
 \end{equation}
-当
+前文提到的临界异步推理触发阈值 $h_{\text{crit}}$
+对应 $T_{\text{stall}}(h)=0$ 的边界，
+定义如式（\ref{eq:critical-hold}）所示：
 \begin{equation}
   h_{\text{crit}} = \frac{T_{\text{rt}}F}{N}
+  \label{eq:critical-hold}
 \end{equation}
-时，$T_{\text{stall}}=0$，有效 FPS 就达到目标值 $F$；
+此时 $T_{\text{stall}}=0$，有效 FPS 就达到目标值 $F$；
 继续增大异步推理触发阈值就离开本节计算的 stall 段。
 在理想模型中，临界点之后不再有 stall，有效 FPS 饱和为 30 FPS。
 
