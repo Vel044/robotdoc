@@ -125,7 +125,7 @@ chunk\_size=100 在树莓派 5 上能跑到 $\approx$18.7 fps，距 30 fps 目�
 \subsection{单次 ACT 推理耗时分解}\label{sec:act-infer-breakdown}
 
 上面的 episode 级统计能够说明 chunk\_size 如何分摊推理开销，
-但还不能回答”一次完整 ACT 推理内部究竟慢在哪里”。
+但还不能回答“一次完整 ACT 推理内部究竟慢在哪里”。
 实验在 ACT 模型实现中的动作选择接口和前向计算路径内
 插入计时点，通过环境变量 LEROBOT\_PROFILING=1 启用，数据直接写入 CSV。
 在树莓派 5 上记录了 6 次队列为空的完整推理，结果汇总于表~\ref{tab:act-single-infer-profile}。

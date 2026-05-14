@@ -85,7 +85,11 @@ protocol_packet_handler.txPacket()
                             │  从这里进入 Linux 内核：ARM64 上 x8=__NR_write=64。
 ```
 
-### 2.2 内核内调用栈
+### 2.2 内核内调用栈（拆分版）
+
+下面把内核路径拆成 4 段。每段最后一行就是下一段的入口，这样既能保持完整链路，又不会把一整条栈压成一根很长的竖线。
+
+#### 2.2.1 syscall 到 TTY 入口
 
 ```text
 Linux SYSCALL_DEFINE3(write, fd, buf, count)
@@ -94,44 +98,65 @@ Linux SYSCALL_DEFINE3(write, fd, buf, count)
     │  fdget_pos() + file_ppos()：把 int fd 转成 struct file，并处理文件偏移语义。
     └── vfs_write(file, buf, count, pos)
         │  access_ok() + rw_verify_area()：检查用户地址、写权限和写入范围。
-        │  file_start_write()：标记一次文件写入开始；返回路径会执行 file_end_write()。
+        │  file_start_write()/file_end_write()：普通文件 freeze 保护；/dev/ttyACM0 是字符设备，实际直接返回。
         └── new_sync_write(file, buf, count, pos)
             │  init_sync_kiocb() + iov_iter_ubuf()：把用户缓冲包装成 kiocb + iov_iter。
             └── filp->f_op->write_iter(iocb, iter)
                 │  /dev/ttyACM0 对应 tty_fops.write_iter。
                 └── tty_write(iocb, iter)
-                    │  TTY file_operations 写入口：转入 file_tty_write。
-                    └── file_tty_write(file, iocb, iter)
-                        │  tty_ldisc_ref_wait()：找到 tty_struct 和当前行规程 N_TTY。
-                        └── iterate_tty_write(ld, tty, file, iter)
-                            │  tty_write_lock()：串行化同一个 TTY 的写入。
-                            │  copy_from_iter()：从用户态 iov_iter 分块复制到 tty->write_buf。
-                            └── ld->ops->write(tty, file, kbuf, nr)
-                                │  N_TTY 行规程 write。
-                                └── n_tty_write(tty, file, kbuf, nr)
-                                    │  termios_rwsem + output_lock；原始模式下基本不改字节。
-                                    └── tty->ops->write(tty, b, nr)
-                                        │  tty_operations 分发：/dev/ttyACM0 对应 acm_ops.write。
-                                        └── acm_tty_write(tty, buf, count)
-                                            │  acm_wb_alloc()：取空闲写缓冲。
-                                            │  memcpy()：把协议帧复制到 CDC ACM 的 USB 写缓冲。
-                                            │  usb_autopm_get_interface_async()：增加 USB runtime PM 引用。
-                                            └── acm_start_wb(acm, wb)
-                                                │  填 URB 的 transfer_buffer、DMA 地址、transfer_buffer_length 和 USB 设备。
-                                                └── usb_submit_urb(wb->urb, GFP_ATOMIC)
-                                                    │  USB core：校验 URB、endpoint、方向和长度，标记传输进行中。
-                                                    └── usb_hcd_submit_urb(urb, GFP_ATOMIC)
-                                                        │  map_urb_for_dma()：处理 DMA 访问关系。
-                                                        └── hcd->driver->urb_enqueue()
-                                                            │  HCD 分发表：树莓派 5 USB 主控走 xHCI 的 urb_enqueue。
-                                                            └── xhci_urb_enqueue()
-                                                                │  分配 urb_priv，检查 slot/endpoint 状态，选择传输类型。
-                                                                └── xhci_queue_bulk_tx()
-                                                                    │  queue_trb()：把 bulk OUT 数据描述成 TRB，放入 transfer ring。
-                                                                    └── giveback_first_trb()
-                                                                        │  交出首个 TRB 的 cycle bit。
-                                                                        └── xhci_ring_ep_doorbell()
-                                                                            │  写 doorbell 寄存器，通知硬件开始取 TRB。
+                    │  TTY file_operations 写入口，下一段继续展开。
+```
+
+#### 2.2.2 TTY/N_TTY 到 CDC ACM 入口
+
+```text
+tty_write(iocb, iter)
+│  TTY file_operations 写入口：转入 file_tty_write。
+└── file_tty_write(file, iocb, iter)
+    │  tty_ldisc_ref_wait()：找到 tty_struct 和当前行规程 N_TTY。
+    └── iterate_tty_write(ld, tty, file, iter)
+        │  tty_write_lock()：串行化同一个 TTY 的写入。
+        │  copy_from_iter()：从用户态 iov_iter 分块复制到 tty->write_buf。
+        └── ld->ops->write(tty, file, kbuf, nr)
+            │  N_TTY 行规程 write。
+            └── n_tty_write(tty, file, kbuf, nr)
+                │  termios_rwsem + output_lock；原始模式下基本不改字节。
+                └── tty->ops->write(tty, b, nr)
+                    │  tty_operations 分发：/dev/ttyACM0 对应 acm_ops.write。
+                    └── acm_tty_write(tty, buf, count)
+                        │  CDC ACM 写入口，下一段继续展开。
+```
+
+#### 2.2.3 CDC ACM 到 USB core
+
+```text
+acm_tty_write(tty, buf, count)
+│  acm_wb_alloc()：取空闲写缓冲。
+│  memcpy()：把协议帧复制到 CDC ACM 的 USB 写缓冲。
+│  usb_autopm_get_interface_async()：增加 USB runtime PM 引用。
+└── acm_start_wb(acm, wb)
+    │  填 URB 的 transfer_buffer、DMA 地址、transfer_buffer_length 和 USB 设备。
+    └── usb_submit_urb(wb->urb, GFP_ATOMIC)
+        │  USB core：校验 URB、endpoint、方向和长度，标记传输进行中。
+        └── usb_hcd_submit_urb(urb, GFP_ATOMIC)
+            │  HCD 提交入口，下一段继续展开。
+```
+
+#### 2.2.4 USB core 到 xHCI doorbell
+
+```text
+usb_hcd_submit_urb(urb, GFP_ATOMIC)
+│  map_urb_for_dma()：处理 DMA 访问关系。
+└── hcd->driver->urb_enqueue()
+    │  HCD 分发表：树莓派 5 USB 主控走 xHCI 的 urb_enqueue。
+    └── xhci_urb_enqueue()
+        │  分配 urb_priv，检查 slot/endpoint 状态，选择传输类型。
+        └── xhci_queue_bulk_tx()
+            │  queue_trb()：把 bulk OUT 数据描述成 TRB，放入 transfer ring。
+            └── giveback_first_trb()
+                │  交出首个 TRB 的 cycle bit。
+                └── xhci_ring_ep_doorbell()
+                    │  写 doorbell 寄存器，通知硬件开始取 TRB。
 ```
 
 对 `/dev/ttyACM0`，具体硬件驱动是 `linux/drivers/usb/class/cdc-acm.c`。
@@ -274,6 +299,40 @@ ssize_t ksys_write(unsigned int fd, const char __user *buf, size_t count)  // �
 
 `__user` 表示 `buf` 是用户态地址。内核不能直接信任它，只能通过 `copy_from_user()` 或 `iov_iter` 这类机制复制。
 
+#### 4.1.1 `fdget_pos()` / `file_ppos()` / `fdput_pos()`
+
+这三个函数是 syscall 入口里的 fd 管理辅助逻辑，不搬运舵机协议字节。`fdget_pos()` 把整数 fd 换成 `struct file`，必要时锁住文件偏移；`file_ppos()` 判断这个 file 是否需要文件偏移；`fdput_pos()` 在返回前释放 fd 引用和可能拿到的位置锁。对 `/dev/ttyACM0` 来说，TTY 是 `FMODE_STREAM`，所以 `file_ppos()` 返回 `NULL`，后面的 `pos` 分支不会参与串口数据路径。
+
+来源：linux/fs/file.c:fdget_pos / linux/fs/read_write.c:file_ppos / linux/include/linux/file.h:fdput_pos（节选：保留 fd 引用和 stream 偏移分支，已按当前仓库源码核对）
+```c
+// linux/fs/file.c
+struct fd fdget_pos(unsigned int fd)              // 把用户传入的整数 fd 转成内核 struct fd
+{
+    struct fd f = fdget(fd);                      // 从当前进程 fd 表取 struct file 引用
+    struct file *file = fd_file(f);               // 从 struct fd 中取出 struct file 指针
+
+    if (file && file_needs_f_pos_lock(file)) {    // 共享普通文件位置时才需要锁 f_pos
+        f.word |= FDPUT_POS_UNLOCK;               // 标记 fdput_pos() 返回时需要解锁
+        mutex_lock(&file->f_pos_lock);            // 锁住普通文件的当前位置
+    }
+    return f;                                     // 返回带引用的 fd 包装
+}
+
+// linux/fs/read_write.c
+static inline loff_t *file_ppos(struct file *file) // 判断本次 I/O 是否需要文件偏移
+{
+    return file->f_mode & FMODE_STREAM ? NULL : &file->f_pos; // TTY 是 stream，返回 NULL
+}
+
+// linux/include/linux/file.h
+static inline void fdput_pos(struct fd f)         // 释放 fdget_pos() 获取的资源
+{
+    if (f.word & FDPUT_POS_UNLOCK)                // 如果前面锁了普通文件 f_pos
+        __f_unlock_pos(fd_file(f));               // 解锁文件位置
+    fdput(f);                                     // 释放 fd 引用
+}
+```
+
 ### 4.2 `vfs_write()`
 
 来源：linux/fs/read_write.c:vfs_write（节选：仅保留本链路相关分支，已按当前仓库源码核对）
@@ -296,7 +355,7 @@ ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_
     if (count > MAX_RW_COUNT)                    // 限制单次读写最大长度
         count = MAX_RW_COUNT;                    // 截断到内核允许的最大值
 
-    file_start_write(file);                      // 通知文件系统开始写
+    file_start_write(file);                      // 普通文件获取 freeze 写保护；/dev/ttyACM0 是字符设备，这里实际直接返回
     if (file->f_op->write)                       // 如果 file_operations 有老式 write
         ret = file->f_op->write(file, buf, count, pos); // 调老式 write
     else if (file->f_op->write_iter)             // tty_fops 使用 write_iter
@@ -308,12 +367,109 @@ ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_
         add_wchar(current, ret);                 // 统计当前任务写入的字节数
     }
     inc_syscw(current);                          // 统计当前任务 write 系统调用次数
-    file_end_write(file);                        // 通知文件系统写结束
+    file_end_write(file);                        // 普通文件释放 freeze 写保护；/dev/ttyACM0 是字符设备，这里实际直接返回
     return ret;                                  // 返回实际写入字节数
 }
 ```
 
-### 4.3 `new_sync_write()`
+### 4.3 VFS 辅助检查、通知和统计
+
+`access_ok()`、`rw_verify_area()`、`fsnotify_modify()`、`add_wchar()` 和 `inc_syscw()` 都是 VFS 通用框架的辅助动作，不是 TTY/USB 数据分发点。它们分别负责用户地址范围检查、读写权限/LSM 检查、文件修改通知和任务 I/O 统计。
+
+来源：linux/arch/arm64/include/asm/uaccess.h:access_ok / linux/fs/read_write.c:rw_verify_area（节选：保留 write 链路相关检查，已按当前仓库源码核对）
+```c
+// linux/arch/arm64/include/asm/uaccess.h
+static inline int access_ok(const void __user *addr, unsigned long size) // 检查用户态指针范围是否可能合法
+{
+    if (IS_ENABLED(CONFIG_ARM64_TAGGED_ADDR_ABI) && // ARM64 tagged address ABI 开启时
+        (current->flags & PF_KTHREAD || test_thread_flag(TIF_TAGGED_ADDR))) // 需要处理 tagged 用户地址
+        addr = untagged_addr(addr);                // 去掉地址 tag 后再检查范围
+
+    return likely(__access_ok(addr, size));        // 判断 addr+size 是否落在用户态地址空间
+}
+
+// linux/fs/read_write.c
+int rw_verify_area(int read_write, struct file *file, const loff_t *ppos, size_t count) // 检查读写范围和权限
+{
+    int mask = read_write == READ ? MAY_READ : MAY_WRITE; // write 链路使用 MAY_WRITE
+    int ret;                                      // 保存权限检查结果
+
+    if (unlikely((ssize_t) count < 0))            // count 被解释成负数时非法
+        return -EINVAL;                           // 返回参数错误
+
+    if (ppos) {                                   // 普通文件才检查偏移范围
+        loff_t pos = *ppos;                       // 读取当前位置
+        if (unlikely(pos < 0)) {                  // 负偏移需要额外判断
+            if (!unsigned_offsets(file))          // 文件不允许无符号偏移
+                return -EINVAL;                   // 返回参数错误
+            if (count >= -pos)                    // 写入长度会越过可表示范围
+                return -EOVERFLOW;                // 返回溢出
+        } else if (unlikely((loff_t) (pos + count) < 0)) { // 正偏移加 count 后溢出
+            if (!unsigned_offsets(file))          // 文件不允许无符号偏移
+                return -EINVAL;                   // 返回参数错误
+        }
+    }
+
+    ret = security_file_permission(file, mask);   // LSM/security 层检查是否允许写
+    if (ret)                                      // 权限检查失败
+        return ret;                               // 直接返回错误
+
+    return fsnotify_file_area_perm(file, mask, ppos, count); // 通知/检查文件区域权限
+}
+```
+
+来源：linux/include/linux/fsnotify.h:fsnotify_modify / linux/include/linux/sched/xacct.h:add_wchar,inc_syscw（节选：保留 write 统计相关分支，已按当前仓库源码核对）
+```c
+// linux/include/linux/fsnotify.h
+static inline void fsnotify_modify(struct file *file) // VFS 写成功后的修改通知
+{
+    fsnotify_file(file, FS_MODIFY);               // 通知 inotify/fanotify 等观察者文件被修改
+}
+
+// linux/include/linux/sched/xacct.h
+static inline void add_wchar(struct task_struct *tsk, ssize_t amt) // 统计当前任务写入的字符数
+{
+    tsk->ioac.wchar += amt;                       // 增加 task extended accounting 的写字节计数
+}
+
+static inline void inc_syscw(struct task_struct *tsk) // 统计当前任务 write 类系统调用次数
+{
+    tsk->ioac.syscw++;                            // write syscall 计数加一
+}
+```
+
+### 4.4 `file_start_write()` / `file_end_write()`
+
+`file_start_write()` 是 VFS 通用写路径里的文件系统 freeze 保护。它只对普通文件生效：如果目标是 regular file，就进入 `sb_start_write()`，增加 superblock 的 writer 计数，防止文件系统 freeze 和当前写入并发冲突。
+
+但本链路写的是 `/dev/ttyACM0`，它是字符设备，不是普通文件。因此 `file_start_write()` 和后面的 `file_end_write()` 在这里都会因为 `!S_ISREG(...)` 直接返回，不会进入 `sb_start_write()`，也不会影响后面的 TTY/USB 数据提交链路。
+
+来源：linux/include/linux/fs.h:file_start_write,file_end_write,sb_start_write（节选：保留本链路判断和普通文件分支，已按当前仓库源码核对）
+```c
+// linux/include/linux/fs.h
+static inline void file_start_write(struct file *file) // VFS 写路径开始时调用的 freeze 写保护入口
+{
+    if (!S_ISREG(file_inode(file)->i_mode))       // /dev/ttyACM0 是字符设备，不是 regular file
+        return;                                   // 串口链路在这里直接返回，不拿 superblock freeze 锁
+    sb_start_write(file_inode(file)->i_sb);       // 普通文件才增加 superblock writer 计数
+}
+
+static inline void file_end_write(struct file *file) // 和 file_start_write() 配对的结束入口
+{
+    if (!S_ISREG(file_inode(file)->i_mode))       // 字符设备同样不参与 regular file freeze 保护
+        return;                                   // 串口链路在这里直接返回
+    sb_end_write(file_inode(file)->i_sb);         // 普通文件才释放 superblock writer 计数
+}
+
+static inline void sb_start_write(struct super_block *sb) // 普通文件写入时的 superblock freeze 保护
+{
+    __sb_start_write(sb, SB_FREEZE_WRITE);        // 增加当前 superblock 的写者计数，和 freeze 流程互斥
+}
+```
+
+所以，对 `writePort()` 来说，这一对函数是“VFS 通用框架经过的保护点”，不是协议帧复制点，也不是进入 TTY 的关键跳转点。真正分发到 TTY 是下一行的 `new_sync_write()`。
+
+### 4.5 `new_sync_write()`
 
 `new_sync_write()` 是 `vfs_write()` 和 `tty_fops.write_iter` 之间容易漏掉的一层。它不再重新解释串口协议，而是把用户态 `buf/count` 包装成同步 `kiocb` 和 `iov_iter`，然后调用 `/dev/ttyACM0` 的 `write_iter`，也就是 `tty_write()`。
 
@@ -394,6 +550,25 @@ static ssize_t file_tty_write(struct file *file, struct kiocb *iocb, struct iov_
 
 `struct tty_ldisc` 是 TTY 行规程。pyserial 会把串口配置成原始模式，通常仍使用默认的 `N_TTY` 行规程，但关闭输出后处理。
 
+#### 5.1.1 `tty_ldisc_ref_wait()`
+
+`tty_ldisc_ref_wait()` 是 TTY 层保护行规程生命周期的等待/引用函数。它保证当前线程拿到的 `tty->ldisc` 不会在本次 `write()` 中途被切换或释放。对本链路来说，它通常拿到的就是 N_TTY；它本身不复制协议帧，只是在进入 `iterate_tty_write()` 前稳定行规程对象。
+
+来源：linux/drivers/tty/tty_ldisc.c:tty_ldisc_ref_wait（已按当前仓库源码核对）
+```c
+// linux/drivers/tty/tty_ldisc.c
+struct tty_ldisc *tty_ldisc_ref_wait(struct tty_struct *tty) // 等待并获取当前 tty line discipline
+{
+    struct tty_ldisc *ld;                         // 保存当前行规程指针
+
+    ldsem_down_read(&tty->ldisc_sem, MAX_SCHEDULE_TIMEOUT); // 以读模式锁住 ldisc 生命周期
+    ld = tty->ldisc;                              // 读取当前行规程，通常是 N_TTY
+    if (!ld)                                      // 如果行规程已经不存在
+        ldsem_up_read(&tty->ldisc_sem);           // 释放刚拿到的读锁
+    return ld;                                    // 返回行规程指针或 NULL
+}
+```
+
 ### 5.2 `iterate_tty_write()`
 
 `iterate_tty_write()` 是本次 `write()` 路径里第一次真正的数据复制位置。VFS 传下来的 `iov_iter` 仍然指向用户态缓冲，TTY core 不能把用户态指针直接交给底层驱动，所以先把用户缓冲里的协议帧复制到 `tty->write_buf` 这个内核临时缓冲，再调用行规程的 `ld->ops->write()`。
@@ -441,6 +616,32 @@ static ssize_t iterate_tty_write(struct tty_ldisc *ld, struct tty_struct *tty,  
 
     tty_write_unlock(tty);                           // 释放 TTY 写锁
     return written ? written : ret;  // 把本层处理结果或错误码返回上一层
+}
+```
+
+`tty_write_lock()` 和 `copy_from_iter()` 是这个阶段最容易漏看的两个 helper。前者串行化同一个 TTY 的写入，后者才是真正把用户态协议帧复制进 TTY 内核临时缓冲的动作。
+
+来源：linux/drivers/tty/tty_io.c:tty_write_lock / linux/include/linux/uio.h:copy_from_iter（已按当前仓库源码核对）
+```c
+// linux/drivers/tty/tty_io.c
+int tty_write_lock(struct tty_struct *tty, bool ndelay) // 串行化同一个 tty 的写路径
+{
+    if (!mutex_trylock(&tty->atomic_write_lock)) { // 尝试获取 tty 写锁
+        if (ndelay)                                // 非阻塞写不能等待锁
+            return -EAGAIN;                        // 立即返回稍后再试
+        if (mutex_lock_interruptible(&tty->atomic_write_lock)) // 阻塞等待写锁，可被信号打断
+            return -ERESTARTSYS;                   // 等锁期间被信号打断
+    }
+    return 0;                                      // 成功获得写锁
+}
+
+// linux/include/linux/uio.h
+static __always_inline __must_check
+size_t copy_from_iter(void *addr, size_t bytes, struct iov_iter *i) // 从 iov_iter 指向的用户缓冲复制到内核缓冲
+{
+    if (check_copy_size(addr, bytes, false))       // 检查目标内核缓冲大小是否可信
+        return _copy_from_iter(addr, bytes, i);    // 执行真正的用户态到内核态复制
+    return 0;                                      // 检查失败则不复制
 }
 ```
 

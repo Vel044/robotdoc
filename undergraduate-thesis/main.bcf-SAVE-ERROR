@@ -2961,42 +2961,15 @@
     <bcf:citekey order="5" intorder="1">ams</bcf:citekey>
     <bcf:citekey order="6" intorder="1">ros2</bcf:citekey>
     <bcf:citekey order="7" intorder="1">houguowei2023weldingrobot</bcf:citekey>
-    <bcf:citekey order="7" intorder="2">linxuebin2020shotcreterobot</bcf:citekey>
-    <bcf:citekey order="8" intorder="1">ros2composition</bcf:citekey>
-    <bcf:citekey order="9" intorder="1">ros2ddsrpi</bcf:citekey>
-    <bcf:citekey order="10" intorder="1">ros2tracing</bcf:citekey>
-    <bcf:citekey order="11" intorder="1">tflite</bcf:citekey>
-    <bcf:citekey order="12" intorder="1">onnxruntime</bcf:citekey>
-    <bcf:citekey order="13" intorder="1">pytorch</bcf:citekey>
-    <bcf:citekey order="14" intorder="1">lerobot</bcf:citekey>
-    <bcf:citekey order="15" intorder="1">perfbook</bcf:citekey>
-    <bcf:citekey order="16" intorder="1">lerobot</bcf:citekey>
-    <bcf:citekey order="17" intorder="1">rt2</bcf:citekey>
-    <bcf:citekey order="18" intorder="1">openvla</bcf:citekey>
-    <bcf:citekey order="19" intorder="1">strace</bcf:citekey>
-    <bcf:citekey order="20" intorder="1">ftrace</bcf:citekey>
-    <bcf:citekey order="21" intorder="1">realtimechunking</bcf:citekey>
-    <bcf:citekey order="22" intorder="1">smolvla</bcf:citekey>
-    <bcf:citekey order="23" intorder="1">remac</bcf:citekey>
-  </bcf:section>
-  <!-- SORTING TEMPLATES -->
-  <bcf:sortingtemplate name="none">
-    <bcf:sort order="1">
-      <bcf:sortitem order="1">citeorder</bcf:sortitem>
-    </bcf:sort>
-    <bcf:sort order="2">
-      <bcf:sortitem order="1">intciteorder</bcf:sortitem>
-    </bcf:sort>
-  </bcf:sortingtemplate>
-  <!-- DATALISTS -->
-  <bcf:datalist section="0"
-                name="none/global//global/global/global"
-                type="entry"
-                sortingtemplatename="none"
-                sortingnamekeytemplatename="global"
-                labelprefix=""
-                uniquenametemplatename="global"
-                labelalphanametemplatename="global"
-                namehashtemplatename="global">
-  </bcf:datalist>
-</bcf:controlfile>
+    <bcf:citekey order="8" intorder="1">linxuebin2020shotcreterobot</bcf:citekey>
+    <bcf:citekey order="9" intorder="1">ros2composition</bcf:citekey>
+    <bcf:citekey order="10" intorder="1">ros2ddsrpi</bcf:citekey>
+    <bcf:citekey order="11" intorder="1">ros2tracing</bcf:citekey>
+    <bcf:citekey order="12" intorder="1">tflite</bcf:citekey>
+    <bcf:citekey order="13" intorder="1">onnxruntime</bcf:citekey>
+    <bcf:citekey order="14" intorder="1">pytorch</bcf:citekey>
+    <bcf:citekey order="15" intorder="1">lerobot</bcf:citekey>
+    <bcf:citekey order="16" intorder="1">perfbook</bcf:citekey>
+    <bcf:citekey order="17" intorder="1">lerobot</bcf:citekey>
+    <bcf:citekey order="18" intorder="1">rt2</bcf:citekey>
+    <bcf:citekey order="19" intorder="1">openvla</bcf:citekey>
