@@ -22,7 +22,7 @@ V4L2: video_usercopy()                  # 什么：V4L2 ioctl 参数边界函数
 V4L2: __video_do_ioctl()                # 什么：V4L2 ioctl 分发中枢；为什么：查 v4l2_ioctls[] 表找到 v4l_dqbuf
   │  VIDIOC_DQBUF → v4l_dqbuf() → uvc_ioctl_dqbuf()
   ▼
-UVC: uvc_ioctl_dqbuf()                   # 什么：UVC 驱动的 DQBUF 实现；为什么：检查权限后入 videobuf2 队列
+UVC: uvc_ioctl_dqbuf()                   # 什么：UVC 驱动的 DQBUF 实现；为什么：检查权限后入 videobuf2 队列 UVC=USB Video Class
   │  uvc_has_privileges() 检查，uvc_dequeue_buffer() 加锁调用 vb2
   ▼
 vb2: vb2_core_dqbuf()                   # 什么：videobuf2 出队核心；为什么：统一视频 buffer 管理
@@ -797,10 +797,10 @@ video_usercopy()                          → video_put_user 拷贝回用户态
 
 ## 9. VIDIOC_DQBUF 和 VIDIOC_QBUF 的区别
 
-| 操作 | ioctl | 含义 |
-|------|-------|------|
-| QBUF | `VIDIOC_QBUF` | 把 buffer 入队到驱动队列，等待填充（初始化时每 buffer 调用一次） |
-| DQBUF | `VIDIOC_DQBUF` | 从完成队列取出已填充的 buffer（每读一帧调用一次） |
+| 操作  | ioctl          | 含义                                                             |
+| ----- | -------------- | ---------------------------------------------------------------- |
+| QBUF  | `VIDIOC_QBUF`  | 把 buffer 入队到驱动队列，等待填充（初始化时每 buffer 调用一次） |
+| DQBUF | `VIDIOC_DQBUF` | 从完成队列取出已填充的 buffer（每读一帧调用一次）                |
 
 在 OpenCV 典型的 `V4L2_MEMORY_MMAP` 模式下，初始化时会做一次 `REQBUFS`（分配 buffer） + 多次 `QBUF`（入队到驱动），然后循环调用 `DQBUF`（取完成帧） + `QBUF`（重新入队供驱动下次填充）。
 

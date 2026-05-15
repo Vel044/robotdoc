@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1580" height="260" viewBox="0 0 1580 260" role="img" aria-labelledby="title desc">
   <title id="title">read syscall chain</title>
-  <desc id="desc">Horizontal read syscall call path from glibc read to TTY copy_to_user.</desc>
+  <desc id="desc">Horizontal read syscall path from glibc read to user buffer.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
       <path d="M 0 0 L 10 5 L 0 10 z" fill="#111111"/>
@@ -21,9 +21,6 @@
       }
       .kernel-bg {
         fill: #f7f7f7;
-      }
-      .hardware-bg {
-        fill: #f3f3f3;
       }
       .label {
         fill: #111111;
@@ -60,68 +57,67 @@
         stroke-width: 2;
         stroke-dasharray: 8 7;
       }
-      .hw-boundary {
-        stroke: #777777;
-        stroke-width: 1.6;
-        stroke-dasharray: 7 6;
-      }
     </style>
   </defs>
 
   <rect width="1580" height="260" fill="#ffffff"/>
   <rect class="user-bg" x="18" y="42" width="208" height="168" rx="6"/>
-  <rect class="kernel-bg" x="236" y="42" width="1326" height="168" rx="6"/>
+  <rect class="kernel-bg" x="236" y="42" width="1084" height="168" rx="6"/>
+  <rect class="user-bg" x="1330" y="42" width="232" height="168" rx="6"/>
 
   <text class="region" x="122" y="58">glibc / 用户态</text>
-  <text class="region" x="899" y="58">kernel / 内核态</text>
+  <text class="region" x="778" y="58">kernel / 内核态</text>
+  <text class="region" x="1446" y="58">user buffer / 用户态缓冲</text>
 
-  <rect class="node" x="35" y="76" width="170" height="104" rx="4"/>
-  <text class="label" x="120" y="106">read()</text>
-  <text class="sub" x="120" y="144">用户态调用入口</text>
+  <rect class="node" x="35" y="78" width="170" height="92" rx="4"/>
+  <text class="label" x="120" y="111">read()</text>
+  <text class="sub" x="120" y="143">用户态系统调用封装</text>
 
   <line class="boundary" x1="231" y1="42" x2="231" y2="210"/>
-  <line class="arrow" x1="205" y1="128" x2="250" y2="128"/>
+  <line class="arrow" x1="205" y1="124" x2="250" y2="124"/>
 
-  <rect class="node" x="250" y="76" width="165" height="104" rx="4"/>
-  <text class="label" x="332.5" y="100">read() / VFS</text>
-  <text class="sub" x="332.5" y="130">通用文件读入口</text>
-  <text class="sub" x="332.5" y="152">分发到 TTY</text>
+  <rect class="node" x="250" y="78" width="165" height="92" rx="4"/>
+  <text class="label" x="332.5" y="103">read() / VFS</text>
+  <text class="sub" x="332.5" y="132">通用文件读入口</text>
+  <text class="sub" x="332.5" y="153">分发到 TTY</text>
 
-  <line class="arrow" x1="415" y1="128" x2="460" y2="128"/>
+  <line class="arrow" x1="415" y1="124" x2="460" y2="124"/>
 
-  <rect class="node" x="460" y="76" width="170" height="104" rx="4"/>
-  <text class="label" x="545" y="100">tty_read()</text>
-  <text class="sub" x="545" y="130">TTY 读入口</text>
-  <text class="sub" x="545" y="152">进入 N_TTY</text>
+  <rect class="node" x="460" y="78" width="170" height="92" rx="4"/>
+  <text class="label" x="545" y="103">TTY core</text>
+  <text class="sub" x="545" y="132">tty_read()</text>
+  <text class="sub" x="545" y="153">获取 N_TTY</text>
 
-  <line class="arrow" x1="630" y1="128" x2="675" y2="128"/>
+  <line class="arrow" x1="630" y1="124" x2="675" y2="124"/>
 
-  <rect class="node" x="675" y="76" width="170" height="104" rx="4"/>
-  <text class="label" x="760" y="100">n_tty_read()</text>
-  <text class="sub" x="760" y="130">消费 read_buf</text>
-  <text class="sub" x="760" y="152">准备拷贝数据</text>
+  <rect class="node" x="675" y="78" width="170" height="92" rx="4"/>
+  <text class="label" x="760" y="103">N_TTY</text>
+  <text class="sub" x="760" y="132">n_tty_read()</text>
+  <text class="sub" x="760" y="153">消费 read_buf</text>
 
-  <line class="arrow" x1="845" y1="128" x2="890" y2="128"/>
+  <line class="arrow" x1="845" y1="124" x2="890" y2="124"/>
 
-  <rect class="node" x="890" y="76" width="170" height="104" rx="4"/>
-  <text class="label" x="975" y="96">
+  <rect class="node" x="890" y="78" width="170" height="92" rx="4"/>
+  <text class="label" x="975" y="101">
     <tspan x="975" dy="0">copy_from_</tspan>
     <tspan x="975" dy="24">read_buf()</tspan>
   </text>
-  <text class="sub" x="975" y="152">read_buf -&gt; 内核缓冲</text>
+  <text class="sub" x="975" y="153">read_buf -&gt; kernel_buf</text>
 
-  <line class="arrow" x1="1060" y1="128" x2="1105" y2="128"/>
+  <line class="arrow" x1="1060" y1="124" x2="1105" y2="124"/>
 
-  <rect class="node" x="1105" y="76" width="185" height="104" rx="4"/>
-  <text class="label" x="1197.5" y="96">
+  <rect class="node" x="1105" y="78" width="185" height="92" rx="4"/>
+  <text class="label" x="1197.5" y="101">
     <tspan x="1197.5" dy="0">copy_to_</tspan>
-    <tspan x="1197.5" dy="24">user()</tspan>
+    <tspan x="1197.5" dy="24">iter()</tspan>
   </text>
-  <text class="sub" x="1197.5" y="152">内核缓冲 -&gt; 用户态</text>
-  <line class="arrow" x1="1290" y1="128" x2="1345" y2="128"/>
+  <text class="sub" x="1197.5" y="153">kernel_buf -&gt; 用户态</text>
 
-  <rect class="node-alt" x="1345" y="76" width="200" height="104" rx="4"/>
-  <text class="label" x="1445" y="100">返回用户态</text>
-  <text class="sub" x="1445" y="130">glibc / CPython</text>
-  <text class="sub" x="1445" y="152">收到 bytes</text>
+  <line class="boundary" x1="1320" y1="42" x2="1320" y2="210"/>
+  <line class="arrow" x1="1290" y1="124" x2="1345" y2="124"/>
+
+  <rect class="node-alt" x="1345" y="78" width="200" height="92" rx="4"/>
+  <text class="label" x="1445" y="104">Python bytes</text>
+  <text class="sub" x="1445" y="132">用户态接收缓冲</text>
+  <text class="sub" x="1445" y="153">read() 返回字节数</text>
 </svg>

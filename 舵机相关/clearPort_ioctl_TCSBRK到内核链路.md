@@ -347,6 +347,531 @@ void tty_wait_until_sent(struct tty_struct *tty, long timeout)  // 定义当前�
 }
 ```
 
+`wait_event_interruptible_timeout()` 本身是宏，不是普通函数。它把“等待队列 + 条件表达式 + 超时时间”展开成一段固定等待模板：先检查条件，不满足就把当前任务挂进等待队列，并通过 `schedule_timeout()` 让出 CPU。
+
+来源：linux/include/linux/wait.h:wait_event_interruptible_timeout / __wait_event_interruptible_timeout / ___wait_event（节选：仅保留本链路相关分支，已按当前仓库源码核对）
+```c
+// linux/include/linux/wait.h（加注释版）
+#define wait_event_interruptible_timeout(wq_head, condition, timeout) \
+({                                                                    \
+    long __ret = timeout;                                             /* 保存剩余等待时间，单位是 jiffies */ \
+    might_sleep();                                                    /* 标记这里可能睡眠，调试时可检查非法睡眠场景 */ \
+    if (!___wait_cond_timeout(condition))                             /* 先立即检查一次条件；已经满足就不睡 */ \
+        __ret = __wait_event_interruptible_timeout(                   /* 条件不满足，进入真正的等待循环 */ \
+            wq_head, condition, timeout);                             /* wq_head 是等待队列，condition 会被反复求值 */ \
+    __ret;                                                            /* 返回剩余时间、0、1 或 -ERESTARTSYS */ \
+})
+
+#define ___wait_cond_timeout(condition)                               \
+({                                                                    \
+    bool __cond = (condition);                                        /* 重新计算等待条件，比如 !tty_chars_in_buffer(tty) */ \
+    if (__cond && !__ret)                                             /* 条件刚好在超时边界成立 */ \
+        __ret = 1;                                                    /* 返回 1，表示条件成立但没有剩余时间 */ \
+    __cond || !__ret;                                                 /* 条件成立或已经超时，都让外层跳出等待 */ \
+})
+
+#define __wait_event_interruptible_timeout(wq_head, condition, timeout) \
+    ___wait_event(                                                      /* 调用通用等待模板 */ \
+        wq_head,                                                        /* 等待队列：本链路是 tty->write_wait */ \
+        ___wait_cond_timeout(condition),                                /* 等待条件：本链路是 !tty_chars_in_buffer(tty) */ \
+        TASK_INTERRUPTIBLE,                                             /* 可被信号打断的睡眠状态 */ \
+        0,                                                              /* 非 exclusive waiter，唤醒时不独占事件 */ \
+        timeout,                                                        /* 初始最大等待时间 */ \
+        __ret = schedule_timeout(__ret))                                /* 真正睡眠：让出 CPU，等待唤醒或超时 */
+
+#define ___wait_event(wq_head, condition, state, exclusive, ret, cmd) \
+({                                                                   \
+    __label__ __out;                                                 /* 宏内部跳转出口 */ \
+    struct wait_queue_entry __wq_entry;                              /* 当前任务挂入等待队列用的节点 */ \
+    long __ret = ret;                                                /* 本层返回值，初始为 timeout */ \
+                                                                     \
+    init_wait_entry(&__wq_entry, exclusive ? WQ_FLAG_EXCLUSIVE : 0);  /* 初始化等待节点 */ \
+    for (;;) {                                                       /* 被唤醒后还会回到这里重新检查条件 */ \
+        long __int = prepare_to_wait_event(                          /* 把当前任务加入等待队列，并设置任务状态 */ \
+            &wq_head, &__wq_entry, state);                           /* state 是 TASK_INTERRUPTIBLE */ \
+                                                                     \
+        if (condition)                                               /* 条件成立：本链路就是输出缓冲已经排空 */ \
+            break;                                                   /* 跳出等待循环 */ \
+                                                                     \
+        if (___wait_is_interruptible(state) && __int) {              /* 如果睡眠可中断且当前有信号待处理 */ \
+            __ret = __int;                                           /* 通常是 -ERESTARTSYS */ \
+            goto __out;                                              /* 被信号打断，直接退出 */ \
+        }                                                            \
+                                                                     \
+        cmd;                                                         /* 执行 schedule_timeout()：当前任务真正睡眠 */ \
+    }                                                                \
+    finish_wait(&wq_head, &__wq_entry);                              /* 恢复 TASK_RUNNING，并从等待队列移除 */ \
+__out:                                                              \
+    __ret;                                                           /* 把等待结果返回给调用者 */ \
+})
+```
+
+套回本链路后，宏里的关键参数就是：
+
+```c
+wq_head   = tty->write_wait
+condition = !tty_chars_in_buffer(tty)
+state     = TASK_INTERRUPTIBLE
+cmd       = __ret = schedule_timeout(__ret)
+```
+
+所以这里的“等待”具体就是：`prepare_to_wait_event()` 把当前 `clearPort()` 所在线程挂到 `tty->write_wait`，`schedule_timeout()` 让当前线程睡眠，后续 CDC ACM 写完成回调通过 `tty_wakeup()` 唤醒它；醒来后宏会重新计算 `!tty_chars_in_buffer(tty)`，只有条件成立才退出循环。
+
+#### 5.2.1 为什么调用这个宏就能睡眠等待 event
+
+先把话说白：这里的 “event” 不是一个单独的 `struct event` 对象，也不是“直接等硬件中断”。Linux 这里的 event 是：
+
+```text
+等待队列 tty->write_wait 被 wake_up，
+并且条件 !tty_chars_in_buffer(tty) 重新检查为 true。
+```
+
+所以它等的是两个东西配合：
+
+```text
+1. 有人唤醒 tty->write_wait
+2. 醒来后发现 tty_chars_in_buffer(tty) == 0
+```
+
+套进 `clearPort()` 这条链路，宏展开后可以近似看成下面这段代码：
+
+```c
+// wait_event_interruptible_timeout(
+//     tty->write_wait,
+//     !tty_chars_in_buffer(tty),
+//     timeout)
+// 展开后的关键逻辑，省略少量宏细节。
+
+struct wait_queue_entry wait;                         // 当前线程要挂到等待队列里的节点
+long ret = timeout;                                   // 剩余等待时间
+
+init_wait_entry(&wait, 0);                            // wait.private = current
+
+for (;;) {
+    long signal_ret;
+
+    signal_ret = prepare_to_wait_event(               // 把当前线程挂到 tty->write_wait
+        &tty->write_wait,
+        &wait,
+        TASK_INTERRUPTIBLE);                          // 把当前线程状态设成可被信号打断的睡眠态
+
+    if (!tty_chars_in_buffer(tty))                    // 每次睡前/醒后都重新检查：输出缓冲是否已经空
+        break;                                        // 条件成立，说明不用再等
+
+    if (signal_ret) {                                 // 有信号打断
+        ret = signal_ret;                             // 通常是 -ERESTARTSYS
+        goto out;
+    }
+
+    ret = schedule_timeout(ret);                      // 真正睡眠：当前 clearPort 线程让出 CPU
+}
+
+finish_wait(&tty->write_wait, &wait);                 // 从等待队列移除，并恢复 TASK_RUNNING
+
+out:
+return ret;
+```
+
+上面这段里面，`init_wait_entry()` 让等待节点记住“睡的是谁”：
+
+来源：linux/kernel/sched/wait.c:init_wait_entry（节选）
+```c
+void init_wait_entry(struct wait_queue_entry *wq_entry, int flags)
+{
+    wq_entry->flags = flags;
+    wq_entry->private = current;                      // 关键：保存当前 clearPort 线程
+    wq_entry->func = autoremove_wake_function;        // 关键：被 wake_up 时调用这个函数
+    INIT_LIST_HEAD(&wq_entry->entry);
+}
+```
+
+`prepare_to_wait_event()` 让当前线程正式“睡到这个队列上”：
+
+来源：linux/kernel/sched/wait.c:prepare_to_wait_event（节选）
+```c
+long prepare_to_wait_event(struct wait_queue_head *wq_head,
+                           struct wait_queue_entry *wq_entry,
+                           int state)
+{
+    unsigned long flags;
+    long ret = 0;
+
+    spin_lock_irqsave(&wq_head->lock, flags);         // 锁住等待队列
+    if (signal_pending_state(state, current)) {
+        list_del_init(&wq_entry->entry);              // 如果已有信号，取消等待
+        ret = -ERESTARTSYS;
+    } else {
+        if (list_empty(&wq_entry->entry))
+            __add_wait_queue(wq_head, wq_entry);      // 关键：把 wait 节点挂进 tty->write_wait
+        set_current_state(state);                     // 关键：current->__state = TASK_INTERRUPTIBLE
+    }
+    spin_unlock_irqrestore(&wq_head->lock, flags);
+
+    return ret;
+}
+```
+
+到这里还没有真正切走 CPU。真正切走 CPU 是下一句：
+
+```c
+ret = schedule_timeout(ret);                          // 进入调度器，当前线程不再继续运行
+```
+
+所以“睡”的代码层事实是：
+
+```text
+wait.private = current
+wait.func = autoremove_wake_function
+__add_wait_queue(&tty->write_wait, &wait)
+set_current_state(TASK_INTERRUPTIBLE)
+schedule_timeout()
+```
+
+那它怎么醒？写完成后，CDC ACM 先释放写缓冲，然后一路调用到 `tty_wakeup()`：
+
+来源：linux/drivers/usb/class/cdc-acm.c:acm_write_bulk / acm_softint（节选）
+```c
+static void acm_write_bulk(struct urb *urb)
+{
+    struct acm_wb *wb = urb->context;
+    struct acm *acm = wb->instance;
+    unsigned long flags;
+
+    spin_lock_irqsave(&acm->write_lock, flags);
+    acm_write_done(acm, wb);                          // 关键：wb->use = false，写缓冲释放
+    spin_unlock_irqrestore(&acm->write_lock, flags);
+
+    set_bit(EVENT_TTY_WAKEUP, &acm->flags);           // 标记需要唤醒 TTY 写等待者
+    schedule_delayed_work(&acm->dwork, 0);            // 把唤醒动作交给 workqueue
+}
+
+static void acm_softint(struct work_struct *work)
+{
+    struct acm *acm = container_of(work, struct acm, dwork.work);
+
+    if (test_and_clear_bit(EVENT_TTY_WAKEUP, &acm->flags))
+        tty_port_tty_wakeup(&acm->port);              // 进入 TTY port 唤醒路径
+}
+```
+
+来源：linux/drivers/tty/tty_port.c:tty_port_tty_wakeup / tty_port_default_wakeup（节选）
+```c
+void tty_port_tty_wakeup(struct tty_port *port)
+{
+    port->client_ops->write_wakeup(port);             // 默认就是 tty_port_default_wakeup()
+}
+
+static void tty_port_default_wakeup(struct tty_port *port)
+{
+    struct tty_struct *tty = tty_port_tty_get(port);
+
+    if (tty) {
+        tty_wakeup(tty);                              // 终于调用到 tty_wakeup()
+        tty_kref_put(tty);
+    }
+}
+```
+
+`tty_wakeup()` 最后唤醒 `tty->write_wait`：
+
+来源：linux/drivers/tty/tty_io.c:tty_wakeup（节选）
+```c
+void tty_wakeup(struct tty_struct *tty)
+{
+    struct tty_ldisc *ld;
+
+    if (test_bit(TTY_DO_WRITE_WAKEUP, &tty->flags)) {
+        ld = tty_ldisc_ref(tty);
+        if (ld) {
+            if (ld->ops->write_wakeup)
+                ld->ops->write_wakeup(tty);
+            tty_ldisc_deref(ld);
+        }
+    }
+
+    wake_up_interruptible_poll(&tty->write_wait, EPOLLOUT); // 关键：唤醒睡在 write_wait 上的任务
+}
+```
+
+`wake_up_interruptible_poll()` 又是宏，最终进入 `__wake_up()`：
+
+来源：linux/include/linux/wait.h:wake_up_interruptible_poll（节选）
+```c
+#define wake_up_interruptible_poll(x, m) \
+    __wake_up(x, TASK_INTERRUPTIBLE, 1, poll_to_key(m))
+```
+
+`__wake_up()` 会遍历等待队列，调用每个等待节点的 `func`：
+
+来源：linux/kernel/sched/wait.c:__wake_up / __wake_up_common_lock / autoremove_wake_function（节选）
+```c
+int __wake_up(struct wait_queue_head *wq_head,
+              unsigned int mode,
+              int nr_exclusive,
+              void *key)
+{
+    return __wake_up_common_lock(wq_head, mode, nr_exclusive, 0, key);
+}
+
+static int __wake_up_common_lock(struct wait_queue_head *wq_head,
+                                 unsigned int mode,
+                                 int nr_exclusive,
+                                 int wake_flags,
+                                 void *key)
+{
+    unsigned long flags;
+    int remaining;
+
+    spin_lock_irqsave(&wq_head->lock, flags);         // 锁住 tty->write_wait
+    remaining = __wake_up_common(wq_head, mode, nr_exclusive,
+                                 wake_flags, key);    // 遍历等待队列，调用 wait.func
+    spin_unlock_irqrestore(&wq_head->lock, flags);
+
+    return nr_exclusive - remaining;
+}
+
+int autoremove_wake_function(struct wait_queue_entry *wq_entry,
+                             unsigned mode,
+                             int sync,
+                             void *key)
+{
+    int ret = default_wake_function(wq_entry, mode, sync, key);
+
+    if (ret)
+        list_del_init_careful(&wq_entry->entry);      // 唤醒成功后，从等待队列移除
+
+    return ret;
+}
+```
+
+`default_wake_function()` 会把当初睡下去的 `current` 重新唤醒：
+
+来源：linux/kernel/sched/core.c:default_wake_function / try_to_wake_up（节选）
+```c
+int default_wake_function(wait_queue_entry_t *curr,
+                          unsigned mode,
+                          int wake_flags,
+                          void *key)
+{
+    return try_to_wake_up(curr->private, mode, wake_flags);
+    // curr->private 就是 init_wait_entry() 里保存的 current，
+    // 也就是睡在 tty->write_wait 上的 clearPort 线程。
+}
+
+int try_to_wake_up(struct task_struct *p,
+                   unsigned int state,
+                   int wake_flags)
+{
+    wake_flags |= WF_TTWU;
+
+    /*
+     * 真实源码很长，这里保留关键结果：
+     * 如果 p 当前状态匹配 TASK_INTERRUPTIBLE，
+     * 就把 p 改回可运行，并放回某个 CPU 的 runqueue。
+     */
+    cpu = select_task_rq(p, p->wake_cpu, &wake_flags);
+    ttwu_queue(p, cpu, wake_flags);                   // 关键：把被唤醒任务放回 runqueue
+    return success;
+}
+```
+
+所以“醒”的代码层事实是：
+
+```text
+tty_wakeup()
+  -> wake_up_interruptible_poll(&tty->write_wait, EPOLLOUT)
+  -> __wake_up(&tty->write_wait, TASK_INTERRUPTIBLE, ...)
+  -> 遍历 tty->write_wait 上的 wait_queue_entry
+  -> 调 wait.func，也就是 autoremove_wake_function()
+  -> default_wake_function()
+  -> try_to_wake_up(wait.private, TASK_INTERRUPTIBLE, ...)
+  -> wait.private 这个 clearPort 线程重新进入 runqueue
+```
+
+最后一定要注意：被唤醒不等于马上返回成功。它只是重新变成“可运行”。等调度器再次切回这个线程后，`schedule_timeout()` 返回，wait 宏会重新执行：
+
+```c
+if (!tty_chars_in_buffer(tty))
+    break;
+```
+
+只有这个条件成立，`clearPort()` 才真的结束等待。对 CDC ACM 来说，这个条件成立的原因是前面 `acm_write_done()` 已经把写缓冲标成空闲：
+
+```c
+wb->use = false;
+```
+
+因此整个闭环是：
+
+```text
+clearPort 线程睡到 tty->write_wait
+  -> 等待 “有人 wake_up tty->write_wait”
+  -> 写 URB 完成后 CDC ACM 调 tty_wakeup()
+  -> tty_wakeup 唤醒 tty->write_wait
+  -> clearPort 线程回到 runqueue
+  -> 被调度回来后重新检查 chars_in_buffer
+  -> chars_in_buffer == 0 才返回
+```
+
+#### 5.2.2 `schedule_timeout()` 到 `schedule()` 的调度链路
+
+上面的宏里，`cmd` 实际执行的是：
+
+```c
+__ret = schedule_timeout(__ret)
+```
+
+这一步才是真正“睡下去”的地方。`prepare_to_wait_event()` 只是把当前任务挂到 `tty->write_wait` 并把任务状态设置成 `TASK_INTERRUPTIBLE`；`schedule_timeout()` 会进入调度器，把 CPU 交给其他可运行任务。
+
+来源：linux/kernel/time/timer.c:schedule_timeout（节选：仅保留本链路相关分支，已按当前仓库源码核对）
+```c
+// linux/kernel/time/timer.c
+signed long __sched schedule_timeout(signed long timeout)  // 当前任务按 timeout 睡眠
+{
+    struct process_timer timer;                            // 有限超时时使用的内核定时器
+    unsigned long expire;                                  // 超时到期的 jiffies
+
+    switch (timeout) {
+    case MAX_SCHEDULE_TIMEOUT:                             // clearPort/tcdrain 常走这里：无限等待
+        schedule();                                        // 不设置定时器，直接进入调度器睡眠
+        goto out;                                          // 被 wake_up 唤醒后从这里返回
+    default:
+        if (timeout < 0) {                                 // 防御非法 timeout
+            __set_current_state(TASK_RUNNING);             // 恢复运行态
+            goto out;
+        }
+    }
+
+    expire = timeout + jiffies;                            // 有限等待：计算到期时间
+    timer.task = current;                                  // 定时器到期时唤醒当前任务
+    timer_setup_on_stack(&timer.timer, process_timeout, 0);
+    __mod_timer(&timer.timer, expire, MOD_TIMER_NOTPENDING);
+
+    schedule();                                            // 进入调度器，当前任务让出 CPU
+
+    del_timer_sync(&timer.timer);                          // 被提前唤醒时删除定时器
+    destroy_timer_on_stack(&timer.timer);
+    timeout = expire - jiffies;                            // 返回剩余等待时间
+
+out:
+    return timeout < 0 ? 0 : timeout;                      // 超时返回 0，提前唤醒返回剩余 jiffies
+}
+```
+
+在本链路里，`tty_wait_until_sent(tty, 0)` 先把 `timeout=0` 转成 `MAX_SCHEDULE_TIMEOUT`，所以 `schedule_timeout()` 不会设置定时器，而是直接调用 `schedule()`。这表示：如果没有信号，也没有写完成唤醒，它可以一直睡。
+
+`schedule()` 的定义在调度器核心里：
+
+来源：linux/kernel/sched/core.c:schedule / __schedule_loop（节选：仅保留本链路相关分支，已按当前仓库源码核对）
+```c
+// linux/kernel/sched/core.c
+asmlinkage __visible void __sched schedule(void)  // 显式让当前任务进入一次调度
+{
+    struct task_struct *tsk = current;            // current 是当前 clearPort 所在线程
+
+    if (!task_is_running(tsk))                    // 前面已被设置成 TASK_INTERRUPTIBLE
+        sched_submit_work(tsk);                   // 睡眠前提交可能积压的工作
+
+    __schedule_loop(SM_NONE);                     // 进入核心调度循环
+
+    sched_update_worker(tsk);                     // 如果是 worker 线程，恢复相关状态
+}
+
+static __always_inline void __schedule_loop(int sched_mode)
+{
+    do {
+        preempt_disable();                        // 调度切换期间禁止抢占
+        __schedule(sched_mode);                   // 选择下一个任务并做上下文切换
+        sched_preempt_enable_no_resched();        // 恢复抢占，但先不立即重调度
+    } while (need_resched());                     // 如果仍需要调度，继续循环
+}
+```
+
+真正决定“当前任务是不是要被拿下 CPU”的逻辑在 `__schedule()`：
+
+来源：linux/kernel/sched/core.c:__schedule（节选：仅保留本链路相关分支，已按当前仓库源码核对）
+```c
+// linux/kernel/sched/core.c
+static void __sched notrace __schedule(int sched_mode)
+{
+    struct task_struct *prev, *next;
+    unsigned long prev_state;
+    struct rq_flags rf;
+    struct rq *rq;
+
+    rq = cpu_rq(smp_processor_id());              // 当前 CPU 的 runqueue
+    prev = rq->curr;                              // 当前正在 CPU 上跑的任务，也就是 clearPort 线程
+
+    local_irq_disable();                          // 关闭本地中断，保护调度关键区
+    rq_lock(rq, &rf);                             // 锁住当前 CPU 的运行队列
+    update_rq_clock(rq);                          // 更新 runqueue 时钟
+
+    prev_state = READ_ONCE(prev->__state);        // 读取当前任务状态
+    if (sched_mode != SM_PREEMPT && prev_state) { // 非抢占调度，且当前任务不是 TASK_RUNNING
+        try_to_block_task(rq, prev, &prev_state); // 把当前任务从可运行队列转为阻塞/睡眠
+    }
+
+    next = pick_next_task(rq, prev, &rf);         // 从 runqueue 里选择下一个应该运行的任务
+
+    if (prev != next) {                           // 如果选出来的不是自己
+        RCU_INIT_POINTER(rq->curr, next);         // 当前 CPU 的 current 切到 next
+        trace_sched_switch(false, prev, next, prev_state);
+        rq = context_switch(rq, prev, next, &rf); // 真正切换地址空间、寄存器和内核栈
+    } else {
+        rq_unpin_lock(rq, &rf);                   // 如果还是自己，就解锁继续跑
+        raw_spin_rq_unlock_irq(rq);
+    }
+}
+```
+
+最后的 `context_switch()` 负责真正切换执行现场：
+
+来源：linux/kernel/sched/core.c:context_switch（节选：仅保留本链路相关分支，已按当前仓库源码核对）
+```c
+// linux/kernel/sched/core.c
+context_switch(struct rq *rq, struct task_struct *prev,
+               struct task_struct *next, struct rq_flags *rf)
+{
+    prepare_task_switch(rq, prev, next);          // 调度切换前的通用准备
+
+    if (next->mm)
+        switch_mm_irqs_off(prev->active_mm, next->mm, next); // 必要时切换用户地址空间
+    else
+        enter_lazy_tlb(prev->active_mm, next);    // 下一个是内核线程时使用 lazy TLB
+
+    prepare_lock_switch(rq, next, rf);            // 准备释放 runqueue 锁并切换任务
+
+    switch_to(prev, next, prev);                  // 架构相关：切换寄存器、栈指针、CPU 执行上下文
+    barrier();
+
+    return finish_task_switch(prev);              // 切回来后收尾，完成 prev 的切换后处理
+}
+```
+
+把这段和 `clearPort()` 合起来看，就是：
+
+```text
+prepare_to_wait_event()
+  -> 当前任务加入 tty->write_wait
+  -> 当前任务状态设为 TASK_INTERRUPTIBLE
+
+schedule_timeout(MAX_SCHEDULE_TIMEOUT)
+  -> schedule()
+  -> __schedule_loop()
+  -> __schedule()
+  -> try_to_block_task()      # 当前 clearPort 线程不再是可运行任务
+  -> pick_next_task()         # 选择别的任务运行
+  -> context_switch()
+  -> switch_to()              # CPU 真正切到别的任务
+
+CDC ACM 写完成后 tty_wakeup()
+  -> wake_up_interruptible_poll(&tty->write_wait, EPOLLOUT)
+  -> clearPort 线程重新进入 runqueue
+  -> 某次调度再切回 clearPort 线程
+  -> schedule_timeout() 返回
+  -> wait 宏重新检查 !tty_chars_in_buffer(tty)
+```
+
 核心是 `!tty_chars_in_buffer(tty)`。它会问具体驱动还有多少字节排在输出队列里。对 CDC ACM 来说，`acm_ops` 没有提供 `.wait_until_sent` 钩子，因此主要判断就落在 `chars_in_buffer` 是否变为 0。
 
 ### 5.3 `tty_chars_in_buffer()`

@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1580" height="260" viewBox="0 0 1580 260" role="img" aria-labelledby="title desc">
+  <title id="title">pselect6 kernel chain</title>
+  <desc id="desc">Horizontal pselect6 readiness check path from pyserial select to ready fd_set result.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#111111"/>
+    </marker>
+    <style>
+      .node {
+        fill: #ffffff;
+        stroke: #111111;
+        stroke-width: 2;
+      }
+      .node-alt {
+        fill: #f4f4f4;
+        stroke: #111111;
+        stroke-width: 2;
+      }
+      .user-bg {
+        fill: #eef5ff;
+      }
+      .kernel-bg {
+        fill: #f7f7f7;
+      }
+      .label {
+        fill: #111111;
+        font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+        font-size: 19px;
+        font-weight: 700;
+        text-anchor: middle;
+        dominant-baseline: middle;
+      }
+      .sub {
+        fill: #333333;
+        font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+        font-size: 15px;
+        font-weight: 500;
+        text-anchor: middle;
+        dominant-baseline: middle;
+      }
+      .region {
+        fill: #555555;
+        font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+        font-size: 21px;
+        font-weight: 600;
+        text-anchor: middle;
+        dominant-baseline: middle;
+      }
+      .arrow {
+        stroke: #111111;
+        stroke-width: 2.4;
+        fill: none;
+        marker-end: url(#arrow);
+      }
+      .boundary {
+        stroke: #4a6f9f;
+        stroke-width: 2;
+        stroke-dasharray: 8 7;
+      }
+    </style>
+  </defs>
+
+  <rect width="1580" height="260" fill="#ffffff"/>
+  <rect class="user-bg" x="18" y="42" width="208" height="168" rx="6"/>
+  <rect class="kernel-bg" x="236" y="42" width="1084" height="168" rx="6"/>
+  <rect class="user-bg" x="1330" y="42" width="232" height="168" rx="6"/>
+
+  <text class="region" x="122" y="58">glibc / 用户态</text>
+  <text class="region" x="778" y="58">kernel / 内核态</text>
+  <text class="region" x="1446" y="58">pyserial / 用户态</text>
+
+  <rect class="node" x="35" y="78" width="170" height="92" rx="4"/>
+  <text class="label" x="120" y="104">select()</text>
+  <text class="sub" x="120" y="132">fd_set + timeout</text>
+  <text class="sub" x="120" y="153">触发 pselect6</text>
+
+  <line class="boundary" x1="231" y1="42" x2="231" y2="210"/>
+  <line class="arrow" x1="205" y1="124" x2="245" y2="124"/>
+
+  <rect class="node" x="245" y="78" width="145" height="92" rx="4"/>
+  <text class="label" x="317.5" y="103">pselect6</text>
+  <text class="sub" x="317.5" y="132">syscall 入口</text>
+  <text class="sub" x="317.5" y="153">sigmask/timeout</text>
+
+  <line class="arrow" x1="390" y1="124" x2="425" y2="124"/>
+
+  <rect class="node" x="425" y="78" width="150" height="92" rx="4"/>
+  <text class="label" x="500" y="103">do_pselect()</text>
+  <text class="sub" x="500" y="132">处理超时</text>
+  <text class="sub" x="500" y="153">信号屏蔽</text>
+
+  <line class="arrow" x1="575" y1="124" x2="610" y2="124"/>
+
+  <rect class="node" x="610" y="78" width="155" height="92" rx="4"/>
+  <text class="label" x="687.5" y="103">select core</text>
+  <text class="sub" x="687.5" y="132">复制 fd_set</text>
+  <text class="sub" x="687.5" y="153">准备结果集</text>
+
+  <line class="arrow" x1="765" y1="124" x2="800" y2="124"/>
+
+  <rect class="node" x="800" y="78" width="145" height="92" rx="4"/>
+  <text class="label" x="872.5" y="103">do_select()</text>
+  <text class="sub" x="872.5" y="132">遍历 fd</text>
+  <text class="sub" x="872.5" y="153">可睡眠等待</text>
+
+  <line class="arrow" x1="945" y1="124" x2="980" y2="124"/>
+
+  <rect class="node" x="980" y="78" width="130" height="92" rx="4"/>
+  <text class="label" x="1045" y="103">VFS poll</text>
+  <text class="sub" x="1045" y="132">vfs_poll()</text>
+  <text class="sub" x="1045" y="153">分发 poll</text>
+
+  <line class="arrow" x1="1110" y1="124" x2="1145" y2="124"/>
+
+  <rect class="node" x="1145" y="78" width="145" height="92" rx="4"/>
+  <text class="label" x="1217.5" y="103">TTY/N_TTY</text>
+  <text class="sub" x="1217.5" y="132">tty_poll()</text>
+  <text class="sub" x="1217.5" y="153">read_buf/write_room</text>
+
+  <line class="boundary" x1="1320" y1="42" x2="1320" y2="210"/>
+  <line class="arrow" x1="1290" y1="124" x2="1345" y2="124"/>
+
+  <rect class="node-alt" x="1345" y="78" width="200" height="92" rx="4"/>
+  <text class="label" x="1445" y="104">ready fd_set</text>
+  <text class="sub" x="1445" y="132">返回可读/可写</text>
+  <text class="sub" x="1445" y="153">再决定 read/write</text>
+</svg>

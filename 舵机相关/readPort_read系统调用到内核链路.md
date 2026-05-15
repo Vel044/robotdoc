@@ -1,14 +1,12 @@
 # readPort：read 系统调用到 Linux 内核链路
 
-本文从 `scservo_sdk/port_handler.py` 的 `PortHandler.readPort(length)` 开始，重点解释它触发的 `read()` 系统调用：一次舵机回包如何从 USB CDC ACM 设备进入内核缓冲区，再被 pyserial 通过 `select + read` 取回 Python。
+本文从 `scservo_sdk/port_handler.py` 的 `PortHandler.readPort(length)` 开始，重点解释它触发的 `read()` 系统调用：一次已经进入 Linux TTY/N_TTY 缓冲区的舵机回包，如何被 `read()` 从内核复制回 Python。
 
-读路径可以分成一个后台接收阶段和两个用户态系统调用阶段：
+读方向完整讲起来是三条相关路径，它们发生在不同时间点：
 
-1. USB 后台接收：CDC ACM 驱动提前提交 bulk IN URB，xHCI 收到舵机回包后通过 DMA 写入 URB 缓冲，完成回调再把数据推入 TTY/N_TTY 接收缓冲。
-2. `select.select([fd, pipe], [], [], 0)`：检查 `/dev/ttyACM0` 是否已有数据可读，内核路径是 `pselect6 -> do_select -> vfs_poll -> tty_poll -> n_tty_poll`。
-3. `os.read(fd, size)`：真正把数据从 N_TTY 缓冲区复制到用户态，内核路径是 `read -> ksys_read -> vfs_read -> new_sync_read -> tty_read -> iterate_tty_read -> n_tty_read/copy_to_iter`。
-
-其中 `select()` 在 Linux 内核中通常表现为 `pselect6`，它只是 `read()` 之前的可读性检查；协议字节真正返回用户态发生在后面的 `read()` 中。`pselect6` 的公共链路单独见 [pyserial_select_pselect6到内核链路.md](pyserial_select_pselect6到内核链路.md)。
+1. `openat` syscall 准备路径：系统调用进入内核后，VFS/TTY/CDC ACM 激活端口，提前把 bulk IN 读 URB 提交到 USB core/xHCI。用户态叫 `open()` 也没关系，ARM64/现代 glibc 通常实际进入 `openat`。
+2. USB 异步接收路径：舵机回包到达后，xHCI 通过 DMA 写入 URB 缓冲，完成中断和回调再把数据推入 TTY/N_TTY 接收缓冲。
+3. `os.read(fd, size)` 同步取数路径：把已经到达 N_TTY 缓冲区的数据复制到用户态，内核路径是 `read -> ksys_read -> vfs_read -> new_sync_read -> tty_read -> iterate_tty_read -> n_tty_read/copy_to_iter`。
 
 本次源码核对后的补齐点：
 
@@ -16,33 +14,126 @@
 | --- | --- |
 | VFS 读分发 | 已补 `new_sync_read()`，明确 `vfs_read -> new_sync_read -> tty_fops.read_iter` |
 | 读 URB 预提交 | 已补 `acm_submit_read_urb -> usb_submit_urb -> usb_hcd_submit_urb -> xhci_urb_enqueue -> xhci_queue_bulk_tx` |
+| xHCI 完成中断 | 已补 `xhci_irq -> xhci_handle_events -> handle_tx_event -> usb_hcd_giveback_urb -> urb->complete` |
 | flip buffer 复制 | 已补 `tty_insert_flip_string()` 到 `__tty_insert_flip_string_flags()` 的复制路径 |
 | CPython 来源 | 来源标识覆盖 `os_read_impl/_Py_read`，不再只标入口函数 |
 
 ---
 
-## 图：read() syscall 调用路径
+## 图 1：openat syscall 后的接收准备路径
+
+![read open prepare chain](Picture/read_open_prepare_chain.svg)
+
+```text
+openat syscall
+  │  用户态参数已经进入内核；这里从 syscall 入口开始
+  ▼
+VFS open
+  │  do_sys_open() / do_filp_open()：路径解析，打开字符设备
+  ▼
+chrdev_open
+  │  字符设备通用 open，切到 tty_fops.open
+  ▼
+TTY core
+  │  tty_open()：创建/绑定 tty_struct，调用驱动 open
+  ▼
+CDC ACM
+  │  acm_tty_open() -> tty_port_open() -> acm_port_activate()
+  ▼
+USB core
+  │  acm_submit_read_urbs() -> usb_submit_urb()
+  ▼
+xHCI driver
+  │  xhci_urb_enqueue() -> xhci_queue_bulk_tx()
+  │  写 bulk IN TRB，并敲 doorbell
+  ▼
+xHCI hardware
+  │  接收请求已经挂好，等待设备从 bulk IN endpoint 回包
+```
+
+这张图画的是“准备接收”：从 `openat` syscall 进入内核后，TTY/CDC ACM 激活端口，并把一批空的 bulk IN 读 URB 提交到 USB core/xHCI。此时不一定已经有舵机回包，内核只是把接收通道先布置好。
+
+## 图 2：舵机回包异步进入内核缓冲区
+
+![read async receive chain](Picture/read_async_receive_chain.svg)
 
 ```
-read(fd, buf, count)                    # Python/CPython 调用入口
-  │
+xHCI hardware
+  │  接收 USB bulk IN 数据，DMA 写入 CDC ACM 读 URB buffer
   ▼
-VFS: vfs_read()                         # 权限检查后分发到 tty_fops.read_iter
-  │
+xHCI driver
+  │  处理 transfer event，完成 bulk IN TRB
   ▼
-VFS: new_sync_read()                    # 包装 kiocb/iov_iter 后调用 read_iter
-  │
+USB core
+  │  结束 URB，调用 urb->complete
   ▼
-TTY: tty_read()                         # TTY 读入口，获取当前 line discipline
-  │
+CDC ACM
+  │  acm_read_bulk_callback()：读 URB 完成回调
+  │  acm_process_read_urb()：处理 urb->actual_length
   ▼
-TTY: iterate_tty_read()                 # 准备 kernel_buf 并协调 N_TTY read 和用户态复制
-  ├─ N_TTY: n_tty_read()                # 从 ldata->read_buf 消费已经到达的字节
-  │    └─ copy_from_read_buf()          # 从 N_TTY 环形 read_buf 拷到 TTY 内核临时缓冲
-  └─ copy_to_iter()                     # n_tty_read 返回后复制到 CPython 分配的用户态 bytes 缓冲
+TTY flip buffer
+  │  tty_insert_flip_string()：URB buffer -> TTY flip buffer
+  │  tty_flip_buffer_push()：调度 TTY core 消费输入
+  ▼
+N_TTY
+  │  n_tty_receive_buf_common()：flip buffer -> N_TTY read_buf
+  │  wake_up_interruptible_poll()：唤醒可能阻塞在 read_wait 上的读取者
+  ▼
+N_TTY read_buf
+  │  舵机回包已经在内核中等待 read() 取走
 ```
 
-上面这张图只保留 `read syscall` 的同步调用路径，不再把 USB 回包进入 `read_buf` 的后台异步接收链路画进同一张图里；异步接收过程单独放在后文的“USB 回包进入内核缓冲区”一节说明。
+这张图画的是“数据真的传过来了”：xHCI 硬件收到 USB bulk IN 数据后，通过 DMA、Transfer Event、IRQ/MSI、USB core giveback 和 CDC ACM 完成回调，把字节放入 N_TTY `read_buf`。这不是用户态 `read()` 的同步调用栈，而是硬件到内核缓冲区的异步接收路径。
+
+## 图 3：read() syscall 从内核缓冲区取回用户态
+
+![read syscall chain](Picture/read_kernel_chain.svg)
+
+```
+sys_read / ksys_read
+  │  fdget_pos()：fd -> struct file；TTY 是 stream，通常不维护文件偏移
+  │
+  ▼
+VFS
+  │  vfs_read()：检查 FMODE_READ、FMODE_CAN_READ、access_ok、rw_verify_area
+  │  new_sync_read()：包装同步 kiocb + iov_iter
+  │
+  ▼
+TTY core
+  │  tty_read()：从 struct file 找到 tty_struct，获取当前 N_TTY 行规程
+  │  iterate_tty_read()：准备 64 字节 kernel_buf，协调行规程 read 和用户态复制
+  │
+  ▼
+N_TTY
+  │  n_tty_read()：从 N_TTY read_buf 消费已经到达的舵机回包字节
+  │  copy_from_read_buf()：read_buf -> kernel_buf
+  │
+  ▼
+TTY core
+  │  copy_to_iter()：kernel_buf -> 用户态 Python bytes 缓冲
+  ▼
+用户态缓冲
+  │  read() 返回本次实际读到的字节数
+```
+
+这张图画的是“程序把数据取走”：`read()` syscall 从 N_TTY `read_buf` 消费已经到达的舵机回包，并通过 `copy_to_iter()` 复制回用户态 Python bytes。它不直接进入 CDC ACM/USB/xHCI；这些模块已经在图 1 和图 2 中完成了接收准备与异步入缓冲。
+
+模块职责可以这样讲：
+
+| 模块 | 在 `readPort()` 读链路中的职责 |
+| --- | --- |
+| open/VFS/TTY open | 从 `openat` syscall 进入内核，把 fd 绑定到 TTY/CDC ACM 驱动，并触发端口激活。 |
+| xHCI / USB core | open 后提前挂起 bulk IN 读 URB；回包到达后处理完成事件，把 URB 还给 CDC ACM。 |
+| CDC ACM | 作为 USB 串口驱动，把 URB 接收缓冲中的字节推入 TTY flip buffer。 |
+| TTY flip buffer | 作为 TTY 输入中转缓冲，把驱动收到的数据交给当前行规程。 |
+| N_TTY receive | 把 TTY flip buffer 中的输入字节放进 N_TTY `read_buf`。 |
+| syscall / fd 层 | 接收 `read(fd, buf, count)`，把整数 fd 转成 `/dev/ttyACM0` 对应的 `struct file`。 |
+| VFS | 做通用读权限、用户态目标地址和范围检查，再通过 `tty_fops.read_iter` 分发到 TTY。 |
+| TTY core | 找到 `tty_struct`，稳定当前 N_TTY 行规程，准备内核临时缓冲，并负责最后的 `copy_to_iter()`。 |
+| N_TTY read | 从 `read_buf` 取出已经到达的串口字节。raw 模式下基本不解释舵机协议。 |
+| 用户态缓冲 | CPython 提前分配的 bytes 缓冲，`copy_to_iter()` 把内核读出的字节复制到这里。 |
+
+一句话：读方向要分成三张图看。图 1 解释“`openat` syscall 怎么先把接收请求挂好”，图 2 解释“舵机回包怎么异步进入 N_TTY `read_buf`”，图 3 解释“程序调用 `read()` 后怎么把 `read_buf` 中的数据复制回用户态”。
 
 ---
 
@@ -75,70 +166,235 @@ def readPort(self, length):                  # length 是本次最多希望读�
 
 ## 2. 完整调用栈
 
-读链路分三个阶段：USB 回包先通过预提交的 bulk IN URB 异步进入内核接收缓冲；随后 pyserial 通过 `select` 检查 fd 是否可读；最后通过 `read` 把已经到达 N_TTY 缓冲区的字节复制回用户态。内核外是 SDK → pyserial → CPython → glibc；`read syscall` 的同步调用主链是 VFS → TTY → `iterate_tty_read`，其中 `iterate_tty_read()` 先调 N_TTY 的 `read` 把 `read_buf` 复制到 `kernel_buf`，再调 `copy_to_iter()` 复制到用户态。异步接收链则是 xHCI → USB core → CDC ACM → TTY flip buffer → N_TTY read_buf。本节用五张调用栈图展示完整路径。
+读链路拆成三个调用栈最清楚：`openat` syscall 负责把接收请求挂好，USB/xHCI 完成中断负责把舵机回包放进内核缓冲区，`read()` 负责把已经进入 `read_buf` 的字节复制回用户态。
 
-### 2.1 就绪检查阶段：内核外调用栈
+### 2.1 open 接收准备路径（按模块拆分）
 
-```text
-PortHandler.readPort(length)
-│  SDK 串口封装层：请求最多读 length 字节；timeout=0，所以这次调用不能长期阻塞。
-└── serial.Serial.read(size)
-    │  pyserial 读逻辑：先 select 判断 fd 是否可读，避免直接 read 空转或阻塞。
-    └── select.select([fd, pipe_abort_read_r], [], [], 0)
-        │  用户态就绪检查：监视串口 fd 和取消读管道 fd，timeout=0 表示立即返回。
-        └── CPython select_select_impl()
-            │  把 Python fd 列表转成 fd_set 位图，计算 nfds=max(fd)+1。
-            └── glibc select()
-                │  libc select 包装：把 timeval {0,0} 转成 timespec {0,0}。
-                └── pselect6_time64 / pselect6 syscall
-                    │  用户态进入内核：__NR_pselect6=72，传入 fd_set、超时时间和 sigmask=NULL。
-                    └── syscall boundary
-                        │  从这里进入 Linux 内核。
-```
+这条路径不适合画成一条很长的调用栈。按模块拆开后，它实际做的是五件事：打开设备文件、分发到字符设备、进入 TTY、激活 CDC ACM 端口、把 bulk IN 读 URB 挂到 USB/xHCI。
 
-### 2.2 就绪检查阶段：内核内调用栈
+#### 2.1.1 syscall / VFS：打开设备文件并安装 fd
 
 ```text
-Linux SYSCALL_DEFINE6(pselect6, n, inp, outp, exp, tsp, sig)
-│  内核 syscall 入口：从用户态读取 sigmask 打包参数和 timespec。
-└── do_pselect()
-    │  处理 pselect 的时间和信号屏蔽语义，再进入 select 核心。
-    └── core_sys_select()
-        │  把用户态 fd_set 复制成内核 fd_set_bits，并准备结果位图。
-        └── do_select()
-            │  遍历被置位的 fd；timeout=0 时只轮询一遍，不睡眠。
-            └── vfs_poll(file, wait)
-                │  VFS poll 分发：调用 struct file 的 poll 方法。
-                └── file->f_op->poll()
-                    │  /dev/ttyACM0 的 file_operations 是 tty_fops，所以进入 tty_poll。
-                    └── tty_poll(file, wait)
-                        │  TTY poll 入口：获取当前 line discipline。
-                        └── ld->ops->poll()
-                            │  默认行规程 N_TTY 的 poll 方法。
-                            └── n_tty_poll(tty, file, wait)
-                                │  检查 N_TTY read_buf 是否已有数据；有则返回 EPOLLIN。
+Linux SYSCALL_DEFINE4(openat, dfd, filename, flags, mode)
+│  用户态参数是 /dev/ttyACM0、O_RDWR、O_NOCTTY、O_NONBLOCK；这里从内核 syscall 入口开始。
+└── do_sys_open(dfd, filename, flags, mode)
+    │  dfd 通常是 AT_FDCWD；构造 open_how，然后进入 openat2 共用实现。
+    └── do_sys_openat2(dfd, filename, &how)
+        ├── build_open_flags()
+        │   │  解析 O_RDWR/O_NOCTTY/O_NONBLOCK。
+        ├── getname(filename)
+        │   │  从用户态复制路径字符串 /dev/ttyACM0。
+        ├── get_unused_fd_flags()
+        │   │  从当前进程 fd 表中分配一个空闲 fd。
+        ├── do_filp_open(dfd, tmp, &op)
+        │   │  路径解析，找到 /dev/ttyACM0 对应的字符设备 inode，并创建 struct file。
+        └── fd_install(fd, file)
+            │  把 struct file 安装到进程 fd 表，openat 返回 fd。
 ```
 
-### 2.3 数据读取阶段：内核外调用栈
+这一段是 VFS 的职责：把路径字符串变成 `struct file` 和整数 fd。它还没有处理串口协议，只是找到 `/dev/ttyACM0` 这个字符设备。
+
+#### 2.1.2 字符设备层：把 cdev 分发到 TTY
 
 ```text
-select 返回 fd 可读
-│  pyserial 确认串口 fd 当前有数据，才进入真正 read。
-└── serial.Serial.read()
-    │  继续同一个 pyserial read 循环，准备从串口 fd 取 bytes。
-    └── os.read(fd, size)
-        │  Python 标准库入口：fd=/dev/ttyACM0，size=wait_length-rx_length。
-        └── CPython os_read_impl(fd, length)
-            │  分配 Python bytes 写入器，准备接收内核复制回来的数据。
-            └── _Py_read(fd, buf, count)
-                │  释放 GIL，处理 EINTR 重试，然后调用 libc read。
-                └── glibc read(fd, buf, count)
-                    │  libc syscall 包装：触发 __NR_read=63。
-                    └── syscall boundary
-                        │  从这里进入 Linux 内核。
+do_filp_open()
+│  已经找到 /dev/ttyACM0 对应的字符设备 inode。
+└── chrdev_open(inode, file)
+    │  通过 inode->i_rdev 在 cdev_map 中找到注册的 struct cdev。
+    └── fops_get(p->ops)
+        │  拿到这个字符设备注册的 file_operations。
+        └── replace_fops(file, fops)
+            │  把 file->f_op 从通用 chrdev 操作替换成 TTY 操作。
+            └── file->f_op->open(inode, file)
+                │  对 TTY 字符设备来说，这里进入 tty_open()。
 ```
 
-### 2.4 数据读取阶段：内核内调用栈
+这一段是“通用字符设备”到“TTY 子系统”的分发。也就是说，VFS 不知道 `/dev/ttyACM0` 的 USB 细节，它只通过字符设备号找到对应的 TTY open 函数。
+
+#### 2.1.3 TTY core：绑定 file 和 tty_struct
+
+```text
+tty_open(inode, file)
+│  nonseekable_open()：TTY 是流式设备，不能像普通文件一样 lseek。
+├── tty_alloc_file(file)
+│   │  为这个 struct file 准备 TTY 私有数据。
+├── tty_open_by_driver(device, file)
+│   │  根据设备号找到或创建 tty_struct。
+├── tty_add_file(tty, file)
+│   │  把当前打开的 file 挂到 tty_struct 上。
+└── tty->ops->open(tty, file)
+    │  调具体 TTY 驱动的 open；/dev/ttyACM0 对应 CDC ACM。
+```
+
+这一段建立了 `struct file -> tty_struct -> tty driver` 的关系。`O_NOCTTY` 也在这一层发挥作用：pyserial 打开串口时不把它设置成当前进程的控制终端。
+
+#### 2.1.4 CDC ACM / tty_port：激活串口端口
+
+```text
+acm_tty_open(tty, file)
+│  CDC ACM 的 TTY open 入口。
+└── tty_port_open(&acm->port, tty, file)
+    │  增加 port->count，把 tty_port 和 tty_struct 绑定。
+    ├── tty_port_tty_set(port, tty)
+    ├── port->ops->activate(port, tty)
+    │   │  首次打开时才真正初始化硬件侧端口。
+    │   └── acm_port_activate(port, tty)
+    └── tty_port_block_til_ready(port, tty, file)
+        │  pyserial 使用 O_NONBLOCK，所以这里不会长时间等待 carrier。
+```
+
+这一段把 TTY 抽象落到 CDC ACM 设备实例上。`tty_port_open()` 负责 open 计数、端口状态、是否第一次打开，以及非阻塞打开时快速返回。
+
+#### 2.1.5 CDC ACM / USB / xHCI：挂起 bulk IN 接收请求
+
+```text
+acm_port_activate(port, tty)
+│  usb_autopm_get_interface()：唤醒 USB 接口，避免设备运行时挂起。
+├── set_bit(TTY_NO_WRITE_SPLIT, &tty->flags)
+│   │  设置 TTY 写路径策略；虽在 open 中设置，但主要影响后续 write。
+├── usb_submit_urb(acm->ctrlurb, GFP_KERNEL)
+│   │  提交 CDC ACM 控制中断 URB，用于状态通知。
+├── acm_tty_set_termios(tty, NULL)
+│   │  把当前串口参数同步到 CDC ACM 设备。
+├── clear_bit(ACM_THROTTLED, &acm->flags)
+│   │  清除接收节流状态，允许继续收数据。
+└── acm_submit_read_urbs(acm, GFP_KERNEL)
+    │  遍历 CDC ACM 接收 URB 池。
+    └── acm_submit_read_urb(acm, index, GFP_KERNEL)
+        │  每个空闲 bulk IN URB 都提交给 USB core。
+        └── usb_submit_urb(read_urb)
+            │  USB core 校验 URB、处理 DMA 访问关系。
+            └── usb_hcd_submit_urb()
+                │  交给主机控制器驱动。
+                └── xhci_urb_enqueue()
+                    │  bulk IN endpoint 排进 xHCI transfer ring。
+                    └── xhci_queue_bulk_tx()
+                        │  写 IN TRB 并敲 doorbell，硬件开始等待设备回包。
+```
+
+这一段才是 read 方向和 USB 真正相关的准备动作：`openat()` 返回用户态之前，CDC ACM 已经把 bulk IN 接收 URB 挂到了 USB core/xHCI。后续舵机回包到达时，硬件可以直接把数据 DMA 到这些 URB 的接收缓冲。
+
+模块化总结：
+
+| 模块 | open `/dev/ttyACM0` 时做的事 |
+| --- | --- |
+| syscall / VFS | 复制路径和 flags，解析 `/dev/ttyACM0`，创建 `struct file` 并安装 fd。 |
+| chrdev | 根据字符设备号找到注册的 TTY `file_operations`，进入 `tty_open()`。 |
+| TTY core | 找到或创建 `tty_struct`，把当前 `struct file` 和 TTY 设备绑定。 |
+| CDC ACM / tty_port | 维护端口 open 计数，首次打开时激活 CDC ACM 端口。 |
+| USB core / xHCI | 提交控制 URB 和 bulk IN 读 URB，把 IN TRB 写入 xHCI transfer ring。 |
+
+这条路径回答“为什么用户还没 `read()`，内核就能收到回包”：因为打开串口时，CDC ACM 已经把接收 URB 提前提交给 USB core/xHCI。
+
+### 2.2 USB 回包异步入缓冲路径（按模块拆分）
+
+这条路径也不是一条普通进程上下文里的同步调用栈，而是硬件 DMA、IRQ/MSI、中断处理、URB 完成回调和 TTY workqueue 接在一起。按模块拆开后，它实际做的是五件事：硬件把 USB 包写入 URB buffer，xHCI 驱动解析完成事件，USB core 归还 URB，CDC ACM 把数据推入 TTY，N_TTY 把字节放进 `read_buf`。
+
+#### 2.2.1 xHCI hardware：DMA 写 URB buffer 并触发中断
+
+```text
+舵机回包到达 USB bulk IN endpoint
+│  硬件层：STS3215 回包经 USB CDC ACM 数据 IN 端点返回主机。
+└── xHCI hardware
+    ├── DMA 写 urb->transfer_buffer
+    │   │  把 USB 总线收到的字节写入 CDC ACM 读 URB 的接收缓冲。
+    ├── 写 event ring
+    │   │  产生 Transfer Event TRB，说明某个 bulk IN TD/URB 完成。
+    └── 触发 IRQ/MSI
+        │  向 CPU/中断控制器发 Interrupt Request，进入 Linux 中断框架。
+```
+
+这一段是物理硬件到内核的边界：数据边界是 DMA 写 `urb->transfer_buffer`，控制边界是 IRQ/MSI 让 CPU 进入中断处理。
+
+#### 2.2.2 xHCI driver：解析 event ring 并完成 TD
+
+```text
+Linux IRQ framework
+│  调用 xHCI 主控驱动初始化时注册好的中断处理函数。
+└── xhci_irq()
+    │  检查 xHCI status 里的 STS_EINT，并清除本次中断状态。
+    └── xhci_handle_events()
+        │  遍历 event ring 上归 OS 处理的 event TRB。
+        └── xhci_handle_event_trb()
+            │  识别 TRB_TRANSFER 事件。
+            └── handle_tx_event()
+                │  根据 event 找回 endpoint ring、TD 和 URB。
+                └── process_bulk_intr_td()
+                    │  根据 event 中的剩余长度计算 urb->actual_length。
+                    └── finish_td()
+                        │  TD 完成后准备归还 URB。
+                        └── xhci_giveback_urb_in_irq()
+                            │  从 endpoint 队列摘下 URB，交给 USB core。
+```
+
+这一段是 xHCI 驱动的职责：把硬件 event ring 里的 Transfer Event 翻译成 Linux USB core 能理解的“某个 URB 完成了，并且实际收到 `urb->actual_length` 字节”。
+
+#### 2.2.3 USB core：归还完成的 URB
+
+```text
+xhci_giveback_urb_in_irq()
+│  HCD 驱动层把完成的 URB 交回 USB core。
+└── usb_hcd_giveback_urb(hcd, urb, status)
+    │  处理 giveback 上下文，进入统一 URB 完成分发。
+    └── __usb_hcd_giveback_urb(urb)
+        ├── unmap_urb_for_dma()
+        │   │  按需解除或确认 DMA 映射关系。
+        ├── urb->status = status
+        │   │  写回本次 USB 传输完成状态。
+        └── urb->complete(urb)
+            │  调用提交该 URB 的驱动注册的完成函数。
+            └── acm_read_bulk_callback(urb)
+```
+
+这一段是 USB core 的职责：它不解释舵机协议，只负责把完成的 URB 归还给提交者。对 CDC ACM 来说，`urb->complete` 就是 `acm_read_bulk_callback()`。
+
+#### 2.2.4 CDC ACM：把 URB 数据推入 TTY flip buffer
+
+```text
+acm_read_bulk_callback(urb)
+│  CDC ACM 读完成回调：检查 urb->status 和 actual_length。
+├── acm_process_read_urb(acm, urb)
+│   │  处理收到的字节。
+│   └── tty_insert_flip_string(&acm->port, urb->transfer_buffer, urb->actual_length)
+│       │  CPU 复制：URB transfer_buffer -> TTY flip buffer。
+└── acm_submit_read_urb(acm, rb->index, GFP_ATOMIC)
+    │  重新提交同一个 read URB，让接收循环继续。
+```
+
+这一段是 CDC ACM 的职责：把 USB 层的接收缓冲变成 TTY 层的输入字节，并把刚完成的 read URB 再挂回去，继续等下一次 USB 回包。
+
+#### 2.2.5 TTY / N_TTY：从 flip buffer 进入 read_buf
+
+```text
+tty_flip_buffer_push(&acm->port)
+│  通知 TTY core 有新输入，调度 flip buffer 消费工作。
+└── queue_work(system_unbound_wq, &port->buf.work)
+    │  后续在 workqueue 上执行。
+    └── flush_to_ldisc()
+        │  把 TTY flip buffer 交给当前 line discipline。
+        └── n_tty_receive_buf_common()
+            │  原始模式下基本不解释字节，只做输入入队。
+            ├── N_TTY read_buf
+            │   │  舵机回包字节进入 read() 后续要消费的内核缓冲区。
+            └── wake_up_interruptible_poll(&tty->read_wait, EPOLLIN)
+                │  唤醒可能阻塞在 read() / poll() / select() 上的读取者。
+```
+
+这一段是 TTY/N_TTY 的职责：把驱动收到的字节放进 `read()` 真正读取的 `read_buf`，并唤醒等待输入的任务。
+
+模块化总结：
+
+| 模块 | 硬件回包进入内核缓冲区时做的事 |
+| --- | --- |
+| xHCI hardware | 接收 USB bulk IN 数据，DMA 写 URB buffer，写 Transfer Event，触发 IRQ/MSI。 |
+| xHCI driver | 处理中断和 event ring，找到完成的 TD/URB，计算 `urb->actual_length`。 |
+| USB core | 通过 `usb_hcd_giveback_urb()` 归还 URB，并调用 `urb->complete()`。 |
+| CDC ACM | 在 `acm_read_bulk_callback()` 中处理 URB 数据，复制到 TTY flip buffer，并重新提交 read URB。 |
+| TTY / N_TTY | 消费 flip buffer，把字节写入 N_TTY `read_buf`，唤醒等待读取的进程。 |
+
+这条路径回答“舵机真的回包后，字节怎么进入内核缓冲区”：硬件负责 DMA，xHCI 中断负责完成事件，USB core 负责 URB giveback，CDC ACM/TTY/N_TTY 负责把字节放进 `read_buf`。
+
+### 2.3 read syscall 同步取数路径
 
 ```text
 Linux SYSCALL_DEFINE3(read, fd, buf, count)
@@ -160,345 +416,18 @@ Linux SYSCALL_DEFINE3(read, fd, buf, count)
                         │   └── copy_from_read_buf()
                         │       │  memcpy()：从 N_TTY 环形 read_buf 复制到 kernel_buf。
                         └── copy_to_iter(kernel_buf, size, iter)
-                            │  n_tty_read 返回后，把 kernel_buf 中的字节复制到 CPython 分配的用户态 bytes 缓冲。
+                            │  n_tty_read 返回后，把 kernel_buf 中的字节复制到用户态 bytes 缓冲。
 ```
 
-### 2.5 USB 回包进入内核缓冲区
-
-```text
-tty 打开/激活
-│  CDC ACM 驱动提前准备接收通道，不等用户态 read() 才提交 USB 请求。
-└── acm_port_activate()
-    │  提交控制 URB，并批量提交 bulk IN 读 URB。
-    └── acm_submit_read_urbs()
-        │  遍历接收 URB 池。
-        └── acm_submit_read_urb()
-            │  每个空闲读 URB 都交给 USB core。
-            └── usb_submit_urb()
-                │  USB core 校验 URB 并设置 IN 方向。
-                └── usb_hcd_submit_urb()
-                    │  map_urb_for_dma() 处理 DMA 访问关系。
-                    └── xhci_urb_enqueue()
-                        │  bulk IN endpoint 也排进 xHCI transfer ring。
-                        └── xhci_queue_bulk_tx()
-                            │  写 TRB 并敲 doorbell，硬件随后等待设备回包。
-
-舵机回包到达 USB bulk IN endpoint
-│  硬件层：STS3215 回包经 USB CDC ACM 数据 IN 端点返回主机。
-└── xHCI 完成读 URB
-    │  USB 主控把收到的字节 DMA 到 URB transfer_buffer，并产生完成事件。
-    └── USB core 调用 urb->complete
-        │  USB core 统一回调提交者注册的完成函数。
-        └── acm_read_bulk_callback(urb)
-            │  CDC ACM 读完成回调：检查状态、统计活跃时间、处理收到的数据，并重新提交读 URB。
-            └── acm_process_read_urb(acm, urb)
-                │  把 USB 层收到的字节推入 TTY 接收路径。
-                ├── tty_insert_flip_string(&acm->port, urb->transfer_buffer, urb->actual_length)
-                │   │  复制 urb->transfer_buffer 中的 actual_length 字节到 TTY flip buffer。
-                └── tty_flip_buffer_push(&acm->port)
-                    │  通知 TTY core 有新输入，调度 line discipline 消费 flip buffer。
-                    └── flush_to_ldisc()
-                        │  workqueue 中把 flip buffer 交给当前行规程。
-                        └── n_tty_receive_buf_common()
-                            │  原始模式下基本不解释字节，复制/写入 N_TTY read_buf。
-                            └── wake_up_interruptible_poll(&tty->read_wait, EPOLLIN)
-                                │  唤醒等待读者；之后 n_tty_poll() 会看到 EPOLLIN。
-```
+这条栈回答“用户态 `read()` 在做什么”：它不去 USB 设备现场要数据，只从 N_TTY `read_buf` 里取已经到达的字节。
 
 ---
 
-## 3. pyserial 与 select 阶段
+## 3. USB CDC ACM 接收路径
 
-pyserial 的读逻辑是"先 poll 再 read"：先用 `select` 检查 `/dev/ttyACM0` 是否有数据，确认可读后再调用 `os.read()` 取数据。`timeout=0` 时 `select` 只做一次立即轮询，不会阻塞。本节解释 pyserial 的读循环、CPython 的 `select` 实现，以及 glibc 如何把 `select` 转成 `pselect6` 系统调用。
+与 write 不同，读 URB 是在串口打开时就预提交给 USB core 的。舵机回包到达 USB bulk IN endpoint 后，xHCI 通过 DMA 把收到的数据写入 URB 接收缓冲，并在 event ring 上产生 Transfer Event，再通过 IRQ/MSI 进入 xHCI 驱动。xHCI 驱动把完成的 URB 还给 USB core，USB core 才调用 CDC ACM 注册的完成回调。回调把数据推入 TTY flip buffer，再经 N_TTY 行规程放入 `read_buf`。只有数据进入 `read_buf` 后，后续 `read()` 才能从 N_TTY 中取到它。本节解释数据从 USB 线到内核缓冲区的完整路径。
 
-### 3.1 pyserial `read()`
-
-来源：serial/serialposix.py:read（节选：仅保留本链路相关分支，已按当前仓库源码核对）
-```python
-# venv/lib/python3.13/site-packages/serial/serialposix.py
-def read(self, size=1):                           # size 是 SDK 本次想读的最大字节数
-    if not self.is_open:                          # 串口必须打开
-        raise PortNotOpenError()                  # 未打开则报错
-    read = bytearray()                            # 用户态累积缓冲区
-    timeout = Timeout(self._timeout)              # self._timeout=0，表示非阻塞
-    while len(read) < size:                       # 没读够 size 时循环
-        ready, _, _ = select.select(              # 先问内核 fd 是否可读
-            [self.fd, self.pipe_abort_read_r],    # 读集合：串口 fd + 取消读的管道 fd
-            [],                                   # 写集合为空
-            [],                                   # 异常集合为空
-            timeout.time_left())                  # timeout=0，立即返回
-        if self.pipe_abort_read_r in ready:       # 如果取消读管道就绪
-            os.read(self.pipe_abort_read_r, 1000) # 清掉取消信号
-            break                                 # 退出
-        if not ready:                             # 没有任何 fd 就绪
-            break                                 # 非阻塞返回空 bytes
-        buf = os.read(self.fd, size - len(read))  # 串口 fd 可读，真正 read()
-        if not buf:                               # select 说可读但 read 返回空
-            raise SerialException(...)            # 通常表示设备断开或多进程抢占
-        read.extend(buf)                          # 累积读到的字节
-        if timeout.expired():                     # 超时保护
-            break                                 # 退出循环
-    return bytes(read)                            # 返回实际读到的字节，可能短于 size
-```
-
-`timeout=0` 时，pyserial 使用 `select()` 做一次立即轮询，不让 `read()` 长时间阻塞。
-
-### 3.2 CPython `select.select()`
-
-来源：cpython/Modules/selectmodule.c:select_select_impl（节选：仅保留本链路相关分支，已按当前仓库源码核对）
-```c
-// cpython/Modules/selectmodule.c
-static PyObject *  // 本行参与当前 C 层路径的控制流或数据准备
-select_select_impl(PyObject *module, PyObject *rlist, PyObject *wlist,  // 处理 fd 就绪检查和等待唤醒逻辑
-                   PyObject *xlist, PyObject *timeout_obj)  // 本行参与当前 C 层路径的控制流或数据准备
-{
-    pylist rfd2obj[FD_SETSIZE + 1];               // Python 对象和 fd 的映射表
-    pylist wfd2obj[FD_SETSIZE + 1];               // 写 fd 映射表，本链路为空
-    pylist efd2obj[FD_SETSIZE + 1];               // 异常 fd 映射表，本链路为空
-    fd_set ifdset, ofdset, efdset;                // 1024 bit fd 位图
-    struct timeval tv, *tvp;                      // 超时时间，timeout=0 时 tv={0,0}
-    int imax, omax, emax, max;                    // 最大 fd + 1
-    int n;                                        // select 返回值
-
-    rfd2obj[0].sentinel = -1;                     // 初始化读映射表
-    wfd2obj[0].sentinel = -1;                     // 初始化写映射表
-    efd2obj[0].sentinel = -1;                     // 初始化异常映射表
-    imax = seq2set(rlist, &ifdset, rfd2obj);      // 把 [fd, pipe] 转成 ifdset 位图
-    omax = seq2set(wlist, &ofdset, wfd2obj);      // 写集合为空，omax=0
-    emax = seq2set(xlist, &efdset, efd2obj);      // 异常集合为空，emax=0
-
-    max = imax;                                   // max 是最大监视 fd + 1
-
-    Py_BEGIN_ALLOW_THREADS                        // 释放 GIL
-    errno = 0;                                    // 清 errno
-    n = select(max, &ifdset, NULL, NULL, tvp);    // 调 libc select()
-    Py_END_ALLOW_THREADS                          // 恢复 GIL
-
-    return ret;                                   // 把就绪 fd 转回 Python list
-}
-```
-
-此时进入 libc 的参数含义：
-
-```text
-nfds    = max(self.fd, pipe_abort_read_r) + 1
-readfds = bit(self.fd)=1, bit(pipe_abort_read_r)=1
-writefds = NULL
-exceptfds = NULL
-timeout = {tv_sec=0, tv_usec=0}
-```
-
-### 3.3 glibc `select()` 到 `pselect6`
-
-来源：glibc-2.42/sysdeps/unix/sysv/linux/select.c:__select64（节选：仅保留本链路相关分支，已按当前仓库源码核对）
-```c
-// glibc-2.42/sysdeps/unix/sysv/linux/select.c
-int  // 本行参与当前 C 层路径的控制流或数据准备
-__select64 (int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,  // 处理 fd 就绪检查和等待唤醒逻辑
-            struct __timeval64 *timeout)  // 定义当前链路涉及的内核数据结构
-{
-  __time64_t s = timeout != NULL ? timeout->tv_sec : 0; // 秒
-  int32_t us = timeout != NULL ? timeout->tv_usec : 0;  // 微秒
-  int32_t ns;                                           // 纳秒
-
-  s += us / USEC_PER_SEC;                               // timeval 秒归一化
-  us = us % USEC_PER_SEC;                               // 剩余微秒
-  ns = us * NSEC_PER_USEC;                              // 微秒转纳秒
-
-  struct __timespec64 ts64, *pts64 = NULL;              // pselect6 使用 timespec
-  if (timeout != NULL) {                                // pyserial timeout=0，会传非 NULL
-    ts64.tv_sec = s;                                    // 0  // 更新当前层需要传递的状态、长度、指针或错误码
-    ts64.tv_nsec = ns;                                  // 0  // 更新当前层需要传递的状态、长度、指针或错误码
-    pts64 = &ts64;                                      // 指向栈上 timespec
-  }
-
-  int r = SYSCALL_CANCEL(pselect6_time64, nfds, readfds, writefds,  // 处理 fd 就绪检查和等待唤醒逻辑
-                         exceptfds, pts64, NULL);       // sigmask=NULL  // 更新当前层需要传递的状态、长度、指针或错误码
-  return r;                                             // 返回就绪 fd 数
-}
-```
-
-对本项目，内核看到的 `pselect6` 参数是：
-
-```text
-__NR_pselect6 = 72
-n    = max(fd, pipe_fd) + 1
-inp  = 用户态 fd_set 地址，里面置位了 ttyACM0 fd 和 pipe fd
-outp = NULL
-exp  = NULL
-tsp  = 用户态 timespec 地址，值为 {0, 0}
-sig  = NULL
-```
-
----
-
-## 4. Linux pselect6 与 TTY poll
-
-`pselect6` 进入内核后，VFS 遍历所有被监视的 fd，调用每个文件的 `poll` 方法。对 `/dev/ttyACM0`，最终调用的是 `n_tty_poll()`，它检查 N_TTY 的 `read_buf` 是否有数据。本节解释 Linux select 核心机制，以及 TTY 层如何判断串口 fd 是否可读。
-
-### 4.1 `pselect6` 入口
-
-来源：linux/fs/select.c:SYSCALL_DEFINE pselect6（节选：仅保留本链路相关分支，已按当前仓库源码核对）
-```c
-// linux/fs/select.c
-SYSCALL_DEFINE6(pselect6, int, n, fd_set __user *, inp, fd_set __user *, outp,  // 定义 Linux 系统调用入口，用户态 syscall 会进入这里
-                fd_set __user *, exp, struct __kernel_timespec __user *, tsp,  // 本行参与当前 C 层路径的控制流或数据准备
-                void __user *, sig)  // 本行参与当前 C 层路径的控制流或数据准备
-{
-    struct sigset_argpack x = {NULL, 0};          // pselect 的 sigmask 打包参数
-
-    if (get_sigset_argpack(&x, sig))              // sig=NULL 时不读取
-        return -EFAULT;                           // sig 指针非法才失败
-
-    return do_pselect(n, inp, outp, exp, tsp, x.p, x.size, PT_TIMESPEC);  // 定义当前层的 C 函数入口
-                                                   // 进入 select 核心
-}
-```
-
-`__user` 表示这些指针指向用户态内存，内核必须用 `copy_from_user()` 间接读取。
-
-### 4.2 `core_sys_select()`
-
-来源：linux/fs/select.c:core_sys_select（节选：仅保留本链路相关分支，已按当前仓库源码核对）
-```c
-// linux/fs/select.c
-int core_sys_select(int n, fd_set __user *inp, fd_set __user *outp,  // 定义当前层的 C 函数入口
-                    fd_set __user *exp, struct timespec64 *end_time)  // 本行参与当前 C 层路径的控制流或数据准备
-{
-    fd_set_bits fds;                              // 内核内部 fd 位图集合
-    void *bits;                                   // 位图内存
-    size_t size;                                  // 每个位图大小
-    long stack_fds[SELECT_STACK_ALLOC/sizeof(long)]; // 小 fd 集合用栈上空间
-
-    size = FDS_BYTES(n);                          // 计算 n 个 fd 需要多少字节
-    bits = stack_fds;                             // 默认使用栈上位图
-
-    fds.in      = bits;                           // 输入读集合
-    fds.out     = bits + size;                    // 输入写集合
-    fds.ex      = bits + 2*size;                  // 输入异常集合
-    fds.res_in  = bits + 3*size;                  // 输出读就绪集合
-    fds.res_out = bits + 4*size;                  // 输出写就绪集合
-    fds.res_ex  = bits + 5*size;                  // 输出异常就绪集合
-
-    get_fd_set(n, inp, fds.in);                   // 从用户态复制 readfds
-    get_fd_set(n, outp, fds.out);                 // outp=NULL 时结果为空
-    get_fd_set(n, exp, fds.ex);                   // exp=NULL 时结果为空
-
-    zero_fd_set(n, fds.res_in);                   // 清空输出读集合
-    zero_fd_set(n, fds.res_out);                  // 清空输出写集合
-    zero_fd_set(n, fds.res_ex);                   // 清空输出异常集合
-
-    return do_select(n, &fds, end_time);          // 执行真正轮询
-}
-```
-
-`fd_set_bits` 是内核内部结构，保存输入 fd 位图和结果 fd 位图。pyserial 只关心读集合。
-
-### 4.3 `do_select()`
-
-来源：linux/fs/select.c:do_select（节选：仅保留本链路相关分支，已按当前仓库源码核对）
-```c
-// linux/fs/select.c
-static int do_select(int n, fd_set_bits *fds, struct timespec64 *end_time)  // 定义当前层的 C 函数入口
-{
-    struct poll_wqueues table;                    // 保存 poll 等待队列
-    poll_table *wait;                             // 传给各 fd 的 poll 回调
-    int retval = 0;                               // 就绪 fd 数
-
-    poll_initwait(&table);                        // 初始化等待队列
-    wait = &table.pt;                             // 取 poll_table
-
-    if (end_time && !end_time->tv_sec && !end_time->tv_nsec) { // timeout={0,0}  // 检查状态或错误码，决定是否走异常/分支路径
-        wait->_qproc = NULL;                      // 不挂等待队列，只立即轮询
-    }
-
-    for (;;) {                                    // select 主循环
-        for (每一个被置位的 fd) {                 // 遍历 fd_set 中的 bit
-            struct fd f = fdget(i);               // fd -> struct file  // 定义当前链路涉及的内核数据结构
-            if (fd_file(f)) {                     // fd 有效
-                wait_key_set(wait, in, out, bit, 0); // 设置关心的事件类型
-                mask = vfs_poll(fd_file(f), wait); // 调具体文件的 poll
-                fdput(f);                         // 释放 fd 引用
-            }
-            if ((mask & POLLIN_SET) && (in & bit)) { // 如果读就绪
-                res_in |= bit;                    // 标记结果位图
-                retval++;                         // 就绪数加一
-            }
-        }
-        if (retval)                               // 有 fd 就绪
-            break;                                // 返回
-        if (timeout 已到)                         // pyserial timeout=0 立即到
-            break;                                // 返回 0
-        poll_schedule_timeout(...);               // 非零超时时才睡眠
-    }
-
-    poll_freewait(&table);                        // 释放等待队列资源
-    return retval;                                // 返回就绪 fd 数
-}
-```
-
-对于 `timeout=0`，`do_select()` 不睡眠，只检查一遍当前状态。
-
-### 4.4 `tty_poll()` 与 `n_tty_poll()`
-
-来源：linux/drivers/tty/tty_io.c:tty_poll（节选：仅保留本链路相关分支，已按当前仓库源码核对）
-```c
-// linux/drivers/tty/tty_io.c
-static __poll_t tty_poll(struct file *filp, poll_table *wait)  // 定义当前层的 C 函数入口
-{
-    struct tty_struct *tty = file_tty(filp);      // file -> tty_struct  // 定义当前链路涉及的内核数据结构
-    struct tty_ldisc *ld;                         // line discipline  // 定义当前链路涉及的内核数据结构
-    __poll_t ret = 0;                             // poll 结果掩码
-
-    ld = tty_ldisc_ref_wait(tty);                 // 获取 N_TTY 行规程
-    if (!ld)                                      // 如果没有行规程
-        return hung_up_tty_poll(filp, wait);      // 按挂起处理
-    if (ld->ops->poll)                            // N_TTY 提供 poll
-        ret = ld->ops->poll(tty, filp, wait);     // 调 n_tty_poll()
-    tty_ldisc_deref(ld);                          // 释放行规程引用
-    return ret;                                   // 返回 EPOLLIN 等 bit
-}
-```
-
-这里的 `tty_ldisc_ref_wait()` 和 read/write 主路径里的是同一个生命周期保护函数：它先稳定当前 N_TTY 行规程，再调用 `ld->ops->poll()`。它不是就绪判断本身；真正判断 `read_buf` 是否有数据的是下面的 `n_tty_poll()`。
-
-来源：linux/drivers/tty/n_tty.c:n_tty_poll（节选：仅保留本链路相关分支，已按当前仓库源码核对）
-```c
-// linux/drivers/tty/n_tty.c
-static __poll_t n_tty_poll(struct tty_struct *tty, struct file *file,  // 定义当前层的 C 函数入口
-                           poll_table *wait)  // 处理 fd 就绪检查和等待唤醒逻辑
-{
-    __poll_t mask = 0;                            // 就绪事件掩码
-
-    poll_wait(file, &tty->read_wait, wait);       // 注册读等待队列
-    poll_wait(file, &tty->write_wait, wait);      // 注册写等待队列
-
-    if (input_available_p(tty, 1))                // N_TTY read_buf 中有可读数据
-        mask |= EPOLLIN | EPOLLRDNORM;            // 返回读就绪
-    else {                                        // 暂时没看到数据
-        tty_buffer_flush_work(tty->port);         // 推动 flip buffer 工作处理
-        if (input_available_p(tty, 1))            // 再检查一次
-            mask |= EPOLLIN | EPOLLRDNORM;        // 有数据则读就绪
-    }
-
-    if (tty->ops->write && !tty_is_writelocked(tty) &&  // 检查状态或错误码，决定是否走异常/分支路径
-        tty_chars_in_buffer(tty) < WAKEUP_CHARS &&  // 调用 TTY 层接口处理串口设备语义
-        tty_write_room(tty) > 0)                  // 写侧也可写时
-        mask |= EPOLLOUT | EPOLLWRNORM;           // 返回写就绪
-
-    return mask;                                  // pyserial 只关心 EPOLLIN
-}
-```
-
-如果 `n_tty_poll()` 返回 `EPOLLIN`，CPython `select.select()` 会把串口 fd 放进 `ready` 列表，pyserial 随后调用 `os.read()`。
-
----
-
-## 5. USB CDC ACM 接收路径
-
-与 write 不同，读 URB 是在串口打开时就预提交给 USB core 的。舵机回包到达 USB bulk IN endpoint 后，xHCI 通过 DMA 把收到的数据写入 URB 接收缓冲，并触发 CDC ACM 驱动的完成回调。回调把数据推入 TTY flip buffer，再经 N_TTY 行规程放入 `read_buf`。只有数据进入 `read_buf` 后，上层的 `select` 和 `read` 才能看到它。本节解释数据从 USB 线到内核缓冲区的完整路径。
-
-### 5.1 打开 tty 时预提交读 URB
+### 3.1 打开 tty 时预提交读 URB
 
 来源：linux/drivers/usb/class/cdc-acm.c:acm_port_activate（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
@@ -516,7 +445,7 @@ static int acm_port_activate(struct tty_port *port, struct tty_struct *tty)  // 
 }
 ```
 
-### 5.2 提交读 URB
+### 3.2 提交读 URB
 
 来源：linux/drivers/usb/class/cdc-acm.c:acm_submit_read_urb（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
@@ -562,7 +491,7 @@ usb_fill_bulk_urb(urb, acm->dev, acm->in, rb->base,  // 调用下一层 C 函数
                   acm->readsize, acm_read_bulk_callback, rb);  // 调用下一层 C 函数继续完成当前路径
 ```
 
-### 5.3 读 URB 进入 USB core/xHCI 队列
+### 3.3 读 URB 进入 USB core/xHCI 队列
 
 `acm_submit_read_urb()` 调用的 `usb_submit_urb()` 和写路径共用 USB core/HCD/xHCI 入队逻辑。区别是这里的 endpoint 是 bulk IN，URB 被预先排到 xHCI transfer ring 后，硬件等待设备返回数据；后面的 `read()` 系统调用只是消费已经到达 TTY/N_TTY 缓冲区的数据，不会在当下才创建这条 USB 传输。
 
@@ -843,7 +772,104 @@ int xhci_queue_bulk_tx(struct xhci_hcd *xhci, gfp_t mem_flags, // 把 bulk URB �
 }
 ```
 
-### 5.4 URB 完成回调
+### 3.4 xHCI 完成中断与 USB core giveback
+
+`xhci_queue_bulk_tx()` 把 bulk IN 读 URB 写进 transfer ring 并敲 doorbell 之后，CPU 这条提交调用栈就结束了。真正收到舵机回包时，xHCI 硬件会把数据 DMA 到 `urb->transfer_buffer`，同时在 event ring 写入 Transfer Event 并触发 IRQ/MSI。Linux 从 `xhci_irq()` 进入 xHCI 驱动，处理 event ring，计算 `urb->actual_length`，最后通过 `usb_hcd_giveback_urb()` 进入 USB core 的 URB 完成分发。
+
+这一段是“硬件到内核”的临界点：数据边界是 DMA 写 `urb->transfer_buffer`，控制边界是 IRQ/MSI 让内核开始处理 xHCI event ring。
+
+调用链可以这样画：
+
+```text
+xHCI hardware DMA 写 urb->transfer_buffer
+  -> xHCI hardware 写 event ring / 触发 IRQ/MSI
+  -> xhci_irq()
+  -> xhci_handle_events()
+  -> xhci_handle_event_trb()
+  -> handle_tx_event()
+  -> process_bulk_intr_td()
+  -> finish_td()
+  -> xhci_giveback_urb_in_irq()
+  -> usb_hcd_giveback_urb()
+  -> __usb_hcd_giveback_urb()
+  -> urb->complete()
+```
+
+来源：linux/drivers/usb/host/xhci-ring.c:xhci_irq / xhci_handle_event_trb / process_bulk_intr_td / xhci_giveback_urb_in_irq，linux/drivers/usb/core/hcd.c:__usb_hcd_giveback_urb（节选：仅保留本链路相关分支，已按当前仓库源码核对）
+```c
+// linux/drivers/usb/host/xhci-ring.c
+irqreturn_t xhci_irq(struct usb_hcd *hcd)          // xHCI 中断入口，IRQ/MSI 最终进入这里
+{
+    struct xhci_hcd *xhci = hcd_to_xhci(hcd);      // USB HCD -> xHCI 私有结构
+    u32 status;                                    // xHCI 状态寄存器
+
+    spin_lock(&xhci->lock);                        // 中断上下文保护 xHCI 状态
+    status = readl(&xhci->op_regs->status);        // 读取 xHCI Operational Status
+    if (!(status & STS_EINT))                      // 不是 xHCI 事件中断
+        goto out;                                  // 可能是共享 IRQ，直接返回
+
+    status |= STS_EINT;                            // 写 1 清中断状态
+    writel(status, &xhci->op_regs->status);        // 确认本次 xHCI 中断
+
+    xhci_handle_events(xhci, xhci->interrupters[0]); // 处理 primary interrupter 的 event ring
+out:
+    spin_unlock(&xhci->lock);                      // 释放中断锁
+    return IRQ_HANDLED;                            // 中断处理结束
+}
+
+static int xhci_handle_event_trb(struct xhci_hcd *xhci, // 处理一个 event ring TRB
+                                 struct xhci_interrupter *ir,
+                                 union xhci_trb *event)
+{
+    u32 trb_type = TRB_FIELD_TO_TYPE(le32_to_cpu(event->event_cmd.flags)); // 读事件类型
+
+    switch (trb_type) {                             // 根据 event TRB 类型分发
+    case TRB_TRANSFER:                              // bulk IN/OUT 传输完成事件
+        handle_tx_event(xhci, ir, &event->trans_event); // 进入传输完成处理
+        break;                                     // 完成 transfer event 分发
+    }
+}
+
+static int process_bulk_intr_td(struct xhci_hcd *xhci, struct xhci_virt_ep *ep,
+        struct xhci_ring *ep_ring, struct xhci_td *td,
+        union xhci_trb *ep_trb, struct xhci_transfer_event *event)
+{
+    u32 trb_comp_code = GET_COMP_CODE(le32_to_cpu(event->transfer_len)); // Transfer Event 完成码
+    u32 remaining = EVENT_TRB_LEN(le32_to_cpu(event->transfer_len)); // 事件里记录的未传输长度
+    u32 requested = td->urb->transfer_buffer_length; // 这个 URB 原本请求接收的长度
+
+    if (ep_trb == td->last_trb)                    // 当前 TD 已到最后一个 TRB
+        td->urb->actual_length = requested - remaining; // 得到本次实际收到的字节数
+
+    return finish_td(xhci, ep, ep_ring, td, trb_comp_code); // 完成 TD，并可能归还 URB
+}
+
+static void xhci_giveback_urb_in_irq(struct xhci_hcd *xhci,
+                                     struct xhci_td *cur_td, int status)
+{
+    struct urb *urb = cur_td->urb;                 // 从 TD 找回原始 URB
+    struct usb_hcd *hcd = bus_to_hcd(urb->dev->bus); // 找到所属 USB HCD
+
+    xhci_urb_free_priv(urb->hcpriv);               // 释放 xHCI 私有 URB 跟踪结构
+    usb_hcd_unlink_urb_from_ep(hcd, urb);          // 从 endpoint 队列摘下已完成 URB
+    usb_hcd_giveback_urb(hcd, urb, status);        // 交还 USB core，后续调用 urb->complete
+}
+
+// linux/drivers/usb/core/hcd.c
+static void __usb_hcd_giveback_urb(struct urb *urb) // USB core 的 URB 完成分发
+{
+    struct usb_hcd *hcd = bus_to_hcd(urb->dev->bus); // 找回 HCD
+    int status = urb->unlinked;                    // 本次完成状态
+
+    unmap_urb_for_dma(hcd, urb);                   // 按需解除 DMA 映射；coherent buffer 基本是确认关系
+    urb->status = status;                          // 把完成状态写回 URB
+    urb->complete(urb);                            // 调用 CDC ACM 注册的 acm_read_bulk_callback()
+}
+```
+
+这一小节解释的是“为什么 CDC ACM 回调会被调用”：不是硬件直接调用 `acm_read_bulk_callback()`，而是 xHCI 硬件产生 Transfer Event 和中断，xHCI 驱动处理 event ring，USB core 最终执行 `urb->complete()`。
+
+### 3.5 CDC ACM URB 完成回调
 
 来源：linux/drivers/usb/class/cdc-acm.c:acm_read_bulk_callback（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
@@ -871,7 +897,7 @@ static void acm_read_bulk_callback(struct urb *urb)  // 定义当前层的 C 函
 }
 ```
 
-### 5.5 推入 TTY flip buffer
+### 3.6 推入 TTY flip buffer
 
 来源：linux/drivers/usb/class/cdc-acm.c:acm_process_read_urb（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
@@ -893,7 +919,7 @@ static void acm_process_read_urb(struct acm *acm, struct urb *urb)  // 定义当
 }
 ```
 
-这一步把 USB 层收到的舵机状态包变成 TTY 层可读数据。后续 N_TTY 的 receive buffer 有数据，`n_tty_poll()` 才会返回 `EPOLLIN`。
+这一步把 USB 层收到的舵机状态包变成 TTY 层可被 `read()` 消费的数据。
 
 `tty_insert_flip_string()` 是 CDC ACM 到 TTY flip buffer 的 CPU 复制点。它在头文件中是 inline 包装，最终进入 `__tty_insert_flip_string_flags()`，该函数按 TTY buffer 可用空间分段 `memcpy()`。
 
@@ -949,7 +975,7 @@ size_t __tty_insert_flip_string_flags(struct tty_port *port, const u8 *chars, //
 }
 ```
 
-### 5.6 从 flip buffer 到 N_TTY read_buf
+### 3.7 从 flip buffer 到 N_TTY read_buf
 
 `tty_flip_buffer_push()` 不是直接让用户态 `read()` 读取 URB 缓冲，而是把 TTY flip buffer 的处理工作放到 workqueue。`flush_to_ldisc()` 之后会把 flip buffer 中的数据交给当前行规程；本项目通常仍使用 N_TTY 行规程，并处于原始模式，因此 N_TTY 基本不解释舵机字节，只把它们写入自己的 `read_buf`，随后唤醒等待在 `read_wait` 上的读者。
 
@@ -992,15 +1018,15 @@ static size_t n_tty_receive_buf_common(struct tty_struct *tty, const u8 *cp,  //
 
     down_read(&tty->termios_rwsem);                // 读取 termios 配置
     __receive_buf(tty, cp, fp, count);             // 原始模式下把字节写入 read_buf
-    smp_store_release(&ldata->commit_head, ldata->read_head); // 发布给 read/poll 侧
-    wake_up_interruptible_poll(&tty->read_wait, EPOLLIN | EPOLLRDNORM);  // 处理 fd 就绪检查和等待唤醒逻辑
+    smp_store_release(&ldata->commit_head, ldata->read_head); // 发布给 read 侧
+    wake_up_interruptible_poll(&tty->read_wait, EPOLLIN | EPOLLRDNORM);  // 唤醒等待读取的任务
     up_read(&tty->termios_rwsem);  // 调用下一层 C 函数继续完成当前路径
 
     return count;  // 把本层处理结果或错误码返回上一层
 }
 ```
 
-`wake_up_interruptible_poll()` 是让 `select/poll/epoll` 重新检查 fd 状态的唤醒入口。CDC ACM 收到数据并推入 N_TTY `read_buf` 后，N_TTY 用它唤醒等待在 `tty->read_wait` 上的读者；因此后续 `n_tty_poll()` 才能返回 `EPOLLIN`，pyserial 的 `select.select()` 才会认为串口 fd 可读。
+`wake_up_interruptible_poll()` 在这里用来唤醒等待在 `tty->read_wait` 上的读取任务。CDC ACM 收到数据并推入 N_TTY `read_buf` 后，等待中的 `read()` 可以被唤醒并继续从 `read_buf` 取数。
 
 来源：linux/include/linux/wait.h:wake_up_interruptible_poll（已按当前仓库源码核对）
 ```c
@@ -1010,15 +1036,15 @@ static size_t n_tty_receive_buf_common(struct tty_struct *tty, const u8 *cp,  //
     __wake_up(x, TASK_INTERRUPTIBLE, 1, poll_to_key(m))
 ```
 
-这一段会引入从 TTY flip buffer 到 N_TTY `read_buf` 的内核内复制或逐字节入队。它发生在 USB 完成回调之后、用户态 `select()` 看到可读之前。
+这一段会引入从 TTY flip buffer 到 N_TTY `read_buf` 的内核内复制或逐字节入队。它发生在 USB 完成回调之后、用户态 `read()` 取走数据之前。
 
 ---
 
-## 6. read 系统调用取数据
+## 4. read 系统调用取数据
 
-pyserial 先用 `select` 确认 fd 可读，然后调用 `os.read()` 把数据从内核取回 Python。本章追踪 `read` 系统调用从 CPython 到 glibc、再到 Linux VFS、TTY 层、N_TTY 行规程的完整路径，解释内核如何把已经到达 `read_buf` 的字节复制到用户态。
+本章追踪 `read` 系统调用从 CPython 到 glibc、再到 Linux VFS、TTY 层、N_TTY 行规程的完整路径，解释内核如何把已经到达 `read_buf` 的字节复制到用户态。
 
-### 6.1 CPython 与 glibc
+### 4.1 CPython 与 glibc
 
 来源：cpython/Modules/posixmodule.c:os_read_impl / cpython/Python/fileutils.c:_Py_read（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
@@ -1062,7 +1088,7 @@ __libc_read (int fd, void *buf, size_t nbytes)  // 调用下一层 C 函数继�
 weak_alias (__libc_read, read)                   // read 是 __libc_read 的别名
 ```
 
-### 6.2 Linux VFS read
+### 4.2 Linux VFS read
 
 来源：linux/fs/read_write.c:SYSCALL_DEFINE read（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
@@ -1125,7 +1151,7 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 }
 ```
 
-#### 6.2.1 fd 引用、权限检查、通知和统计
+#### 4.2.1 fd 引用、权限检查、通知和统计
 
 这一段里的 `fdget_pos()`、`file_ppos()`、`fdput_pos()`、`access_ok()`、`rw_verify_area()`、`fsnotify_access()`、`add_rchar()`、`inc_syscr()` 都是 VFS 通用辅助动作。它们负责把 fd 变成 `struct file`、判断 TTY 是否需要文件偏移、检查用户态目标地址和读权限、记录访问通知与任务统计；真正把舵机回包字节复制到用户态的是后面的 `tty_read -> iterate_tty_read -> copy_to_iter`。
 
@@ -1221,7 +1247,7 @@ static inline void inc_syscr(struct task_struct *tsk) // 统计当前任务 read
 }
 ```
 
-### 6.3 `new_sync_read()`
+### 4.3 `new_sync_read()`
 
 `new_sync_read()` 是 `vfs_read()` 和 `tty_fops.read_iter` 之间的同步包装层。它把 CPython 传下来的用户态目标缓冲包装成 `iov_iter`，然后调用 `/dev/ttyACM0` 的 `read_iter`，也就是 `tty_read()`。
 
@@ -1246,7 +1272,7 @@ static ssize_t new_sync_read(struct file *filp, char __user *buf, size_t len, lo
 }
 ```
 
-### 6.4 TTY read 与 N_TTY read
+### 4.4 TTY read 与 N_TTY read
 
 来源：linux/drivers/tty/tty_io.c:tty_read（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
@@ -1413,19 +1439,17 @@ static bool copy_from_read_buf(const struct tty_struct *tty, u8 **kbp,  // 定�
 }
 ```
 
-在 `readPort(length)` 中，pyserial 已经用 `select()` 确认 fd 可读，因此正常情况下 `n_tty_read()` 会直接从 `ldata->read_buf` 复制数据并返回，不会睡眠。如果 select 之后数据被其他线程抢走或设备断开，非阻塞 read 可能返回 `EAGAIN` 或空读。
+在 `readPort(length)` 中，如果调用 `read()` 时 `ldata->read_buf` 已经有数据，`n_tty_read()` 会直接复制数据并返回。如果当时没有可消费的数据，非阻塞 read 可能返回 `EAGAIN` 或空读，阻塞 read 则会等待 `tty->read_wait` 被唤醒。
 
 ---
 
-## 7. 关键数据结构
+## 5. 关键数据结构
 
 | 结构 | 位置 | 本链路中的含义 |
 |------|------|----------------|
-| `fd_set` | 用户态 CPython/glibc | `select()` 的 bitset，bit N 表示 fd N |
-| `fd_set_bits` | `linux/fs/select.c` | 内核复制后的 read/write/except 输入集合和结果集合 |
 | `struct file` | VFS | 一个打开的 `/dev/ttyACM0` 文件实例，挂 `tty_fops` |
 | `struct tty_struct` | TTY core | 一个 tty 设备实例，保存 `tty->ops`、`tty->driver_data`、等待队列 |
-| `struct tty_ldisc` | TTY line discipline | 当前行规程，通常是 `N_TTY`，提供 `read/write/poll` |
+| `struct tty_ldisc` | TTY line discipline | 当前行规程，通常是 `N_TTY`，提供 `read/write` 等方法 |
 | `struct n_tty_data` | `n_tty.c` | N_TTY 私有缓冲，`read_buf` 保存已经收到但用户还没读走的字节 |
 | `struct acm` | `cdc-acm.c` | CDC ACM USB 串口设备，连接 USB 和 TTY |
 | `struct urb` | USB core | USB Request Block，bulk IN URB 收舵机回包 |
@@ -1434,7 +1458,7 @@ static bool copy_from_read_buf(const struct tty_struct *tty, u8 **kbp,  // 定�
 
 ---
 
-## 8. readPort 究竟完成了什么
+## 6. readPort 究竟完成了什么
 
 `readPort(length)` 完成的是“非阻塞取走当前已经进入 TTY 缓冲区的舵机回包字节”：
 
@@ -1442,9 +1466,8 @@ static bool copy_from_read_buf(const struct tty_struct *tty, u8 **kbp,  // 定�
 2. 舵机通过 USB 返回状态包，xHCI 完成 URB。
 3. `acm_read_bulk_callback()` 把 URB 数据推入 TTY flip buffer。
 4. N_TTY 把 flip buffer 数据放入 `n_tty_data.read_buf`。
-5. pyserial 先用 `pselect6` 立即检查 fd 是否可读。
-6. 如果可读，再用 `read(fd, buf, count)` 把数据复制回 Python。
-7. SDK 的 `rxPacket()` 把这些 bytes 拼成 Feetech 状态包并校验。
+5. `read(fd, buf, count)` 从 N_TTY `read_buf` 取走数据，并复制回 Python。
+6. SDK 的 `rxPacket()` 把这些 bytes 拼成 Feetech 状态包并校验。
 
 从“舵机回包进入主机”到“Python 拿到 bytes”，数据搬运可以分为下面几步：
 
@@ -1456,20 +1479,9 @@ static bool copy_from_read_buf(const struct tty_struct *tty, u8 **kbp,  // 定�
 | N_TTY 到 TTY 临时缓冲 | N_TTY `read_buf` | `iterate_tty_read()` 的 `kernel_buf` | `copy_from_read_buf()` | `read()` 同步路径中的第一次 CPU 复制 |
 | 内核到用户态 | `kernel_buf` | CPython `bytes` 缓冲 | `copy_to_iter()` | `read()` 同步路径中的第二次 CPU 复制 |
 
-`select()` 阶段也会复制 fd 位图等控制信息，但它不搬运舵机回包内容；真正把状态包字节带回 Python 的是后面的 `read()`。
-
 本链路最终涉及的系统调用参数是：
 
 ```text
-pselect6(
-    n=max(fd, pipe_fd)+1,
-    inp=包含 ttyACM0 fd 和 pipe fd 的 fd_set,
-    outp=NULL,
-    exp=NULL,
-    tsp={0,0},
-    sig=NULL
-)
-
 read(
     __NR_read=63,
     fd=/dev/ttyACM0,

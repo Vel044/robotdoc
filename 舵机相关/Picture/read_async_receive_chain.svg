@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1580" height="260" viewBox="0 0 1580 260" role="img" aria-labelledby="title desc">
+  <title id="title">read async receive chain</title>
+  <desc id="desc">Horizontal asynchronous receive path from xHCI hardware to N_TTY read buffer.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#111111"/>
+    </marker>
+    <style>
+      .node {
+        fill: #ffffff;
+        stroke: #111111;
+        stroke-width: 2;
+      }
+      .node-alt {
+        fill: #f4f4f4;
+        stroke: #111111;
+        stroke-width: 2;
+      }
+      .hardware-bg {
+        fill: #fff1e6;
+      }
+      .kernel-bg {
+        fill: #f7f7f7;
+      }
+      .label {
+        fill: #111111;
+        font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+        font-size: 22px;
+        font-weight: 700;
+        text-anchor: middle;
+        dominant-baseline: middle;
+      }
+      .sub {
+        fill: #333333;
+        font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+        font-size: 17px;
+        font-weight: 500;
+        text-anchor: middle;
+        dominant-baseline: middle;
+      }
+      .region {
+        fill: #555555;
+        font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+        font-size: 21px;
+        font-weight: 600;
+        text-anchor: middle;
+        dominant-baseline: middle;
+      }
+      .arrow {
+        stroke: #111111;
+        stroke-width: 2.4;
+        fill: none;
+        marker-end: url(#arrow);
+      }
+      .boundary {
+        stroke: #777777;
+        stroke-width: 1.8;
+        stroke-dasharray: 7 6;
+      }
+    </style>
+  </defs>
+
+  <rect width="1580" height="260" fill="#ffffff"/>
+  <rect class="hardware-bg" x="18" y="42" width="232" height="168" rx="6"/>
+  <rect class="kernel-bg" x="260" y="42" width="1302" height="168" rx="6"/>
+
+  <text class="region" x="134" y="58">hardware / 硬件</text>
+  <text class="region" x="911" y="58">kernel / 内核态</text>
+
+  <rect class="node-alt" x="35" y="78" width="200" height="92" rx="4"/>
+  <text class="label" x="135" y="104">xHCI hardware</text>
+  <text class="sub" x="135" y="132">接收 USB bulk IN</text>
+  <text class="sub" x="135" y="153">DMA 写 URB buffer</text>
+
+  <line class="boundary" x1="255" y1="42" x2="255" y2="210"/>
+  <line class="arrow" x1="235" y1="124" x2="285" y2="124"/>
+
+  <rect class="node" x="285" y="78" width="180" height="92" rx="4"/>
+  <text class="label" x="375" y="104">xHCI driver</text>
+  <text class="sub" x="375" y="132">处理完成事件</text>
+  <text class="sub" x="375" y="153">完成 IN TRB</text>
+
+  <line class="arrow" x1="465" y1="124" x2="510" y2="124"/>
+
+  <rect class="node" x="510" y="78" width="170" height="92" rx="4"/>
+  <text class="label" x="595" y="104">USB core</text>
+  <text class="sub" x="595" y="132">结束 URB</text>
+  <text class="sub" x="595" y="153">调用 complete</text>
+
+  <line class="arrow" x1="680" y1="124" x2="725" y2="124"/>
+
+  <rect class="node" x="725" y="78" width="170" height="92" rx="4"/>
+  <text class="label" x="810" y="104">CDC ACM</text>
+  <text class="sub" x="810" y="132">read callback</text>
+  <text class="sub" x="810" y="153">处理 actual_length</text>
+
+  <line class="arrow" x1="895" y1="124" x2="940" y2="124"/>
+
+  <rect class="node" x="940" y="78" width="185" height="92" rx="4"/>
+  <text class="label" x="1032.5" y="104">TTY flip buffer</text>
+  <text class="sub" x="1032.5" y="132">tty_insert_flip</text>
+  <text class="sub" x="1032.5" y="153">驱动输入中转</text>
+
+  <line class="arrow" x1="1125" y1="124" x2="1170" y2="124"/>
+
+  <rect class="node" x="1170" y="78" width="170" height="92" rx="4"/>
+  <text class="label" x="1255" y="104">N_TTY</text>
+  <text class="sub" x="1255" y="132">receive_buf</text>
+  <text class="sub" x="1255" y="153">原始模式入队</text>
+
+  <line class="arrow" x1="1340" y1="124" x2="1385" y2="124"/>
+
+  <rect class="node-alt" x="1385" y="78" width="160" height="92" rx="4"/>
+  <text class="label" x="1465" y="104">read_buf</text>
+  <text class="sub" x="1465" y="132">等待 read()</text>
+  <text class="sub" x="1465" y="153">取走回包</text>
+</svg>

@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1580" height="260" viewBox="0 0 1580 260" role="img" aria-labelledby="title desc">
+  <title id="title">read open syscall prepare chain</title>
+  <desc id="desc">Horizontal open syscall path that prepares CDC ACM bulk IN read URBs before read syscall.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#111111"/>
+    </marker>
+    <style>
+      .node {
+        fill: #ffffff;
+        stroke: #111111;
+        stroke-width: 2;
+      }
+      .node-alt {
+        fill: #f4f4f4;
+        stroke: #111111;
+        stroke-width: 2;
+      }
+      .kernel-bg {
+        fill: #f7f7f7;
+      }
+      .hardware-bg {
+        fill: #fff1e6;
+      }
+      .label {
+        fill: #111111;
+        font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+        font-size: 20px;
+        font-weight: 700;
+        text-anchor: middle;
+        dominant-baseline: middle;
+      }
+      .sub {
+        fill: #333333;
+        font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+        font-size: 15px;
+        font-weight: 500;
+        text-anchor: middle;
+        dominant-baseline: middle;
+      }
+      .region {
+        fill: #555555;
+        font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+        font-size: 21px;
+        font-weight: 600;
+        text-anchor: middle;
+        dominant-baseline: middle;
+      }
+      .arrow {
+        stroke: #111111;
+        stroke-width: 2.4;
+        fill: none;
+        marker-end: url(#arrow);
+      }
+      .hw-boundary {
+        stroke: #777777;
+        stroke-width: 1.6;
+        stroke-dasharray: 7 6;
+      }
+    </style>
+  </defs>
+
+  <rect width="1580" height="260" fill="#ffffff"/>
+  <rect class="kernel-bg" x="18" y="42" width="1302" height="168" rx="6"/>
+  <rect class="hardware-bg" x="1330" y="42" width="232" height="168" rx="6"/>
+
+  <text class="region" x="669" y="58">kernel / 内核态</text>
+  <text class="region" x="1446" y="58">hardware / 硬件</text>
+
+  <rect class="node" x="35" y="78" width="165" height="92" rx="4"/>
+  <text class="label" x="117.5" y="103">openat syscall</text>
+  <text class="sub" x="117.5" y="132">SYSCALL_DEFINE</text>
+  <text class="sub" x="117.5" y="153">进入内核</text>
+
+  <line class="arrow" x1="200" y1="124" x2="240" y2="124"/>
+
+  <rect class="node" x="240" y="78" width="165" height="92" rx="4"/>
+  <text class="label" x="322.5" y="103">VFS open</text>
+  <text class="sub" x="322.5" y="132">do_sys_open()</text>
+  <text class="sub" x="322.5" y="153">do_filp_open()</text>
+
+  <line class="arrow" x1="405" y1="124" x2="445" y2="124"/>
+
+  <rect class="node" x="445" y="78" width="160" height="92" rx="4"/>
+  <text class="label" x="525" y="103">chrdev_open</text>
+  <text class="sub" x="525" y="132">字符设备入口</text>
+  <text class="sub" x="525" y="153">切到 tty_fops</text>
+
+  <line class="arrow" x1="605" y1="124" x2="645" y2="124"/>
+
+  <rect class="node" x="645" y="78" width="160" height="92" rx="4"/>
+  <text class="label" x="725" y="103">TTY core</text>
+  <text class="sub" x="725" y="132">tty_open()</text>
+  <text class="sub" x="725" y="153">driver open</text>
+
+  <line class="arrow" x1="805" y1="124" x2="845" y2="124"/>
+
+  <rect class="node" x="845" y="78" width="160" height="92" rx="4"/>
+  <text class="label" x="925" y="103">CDC ACM</text>
+  <text class="sub" x="925" y="132">acm_tty_open()</text>
+  <text class="sub" x="925" y="153">port activate</text>
+
+  <line class="arrow" x1="1005" y1="124" x2="1045" y2="124"/>
+
+  <rect class="node" x="1045" y="78" width="160" height="92" rx="4"/>
+  <text class="label" x="1125" y="103">USB core</text>
+  <text class="sub" x="1125" y="132">usb_submit_urb()</text>
+  <text class="sub" x="1125" y="153">提交 bulk IN</text>
+
+  <line class="arrow" x1="1205" y1="124" x2="1245" y2="124"/>
+
+  <rect class="node" x="1245" y="78" width="75" height="92" rx="4"/>
+  <text class="label" x="1282.5" y="102">
+    <tspan x="1282.5" dy="0">xHCI</tspan>
+    <tspan x="1282.5" dy="23">drv</tspan>
+  </text>
+  <text class="sub" x="1282.5" y="153">TRB</text>
+
+  <line class="hw-boundary" x1="1320" y1="50" x2="1320" y2="198"/>
+  <line class="arrow" x1="1320" y1="124" x2="1345" y2="124"/>
+
+  <rect class="node-alt" x="1345" y="78" width="200" height="92" rx="4"/>
+  <text class="label" x="1445" y="104">xHCI hardware</text>
+  <text class="sub" x="1445" y="132">挂起接收请求</text>
+  <text class="sub" x="1445" y="153">等待 bulk IN 回包</text>
+</svg>
