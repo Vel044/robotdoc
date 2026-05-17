@@ -1,17 +1,36 @@
-# `lerobot.record` 调用链、Import 与工具链摸底
+# 从新内核出发的 LeRobot 工具链摸底
 
-本文目的：从这一条真实 `python -m lerobot.record` 命令出发，反推 LeRobot 在树莓派 5 上实际经过的源码文件、Python import、用户态库、设备节点和 kernel driver。这个文档服务于后续 Mac/QEMU/Rust kernel 工作：先搞清楚真实链路，QEMU 再决定哪些跑真用户态、哪些 mock 成设备。
+本文目的：不是先列 Python 包，而是从“我要写一个新的 kernel”出发，反推这个 kernel 如果要承载当前 SO101 + ACT LeRobot 机器人项目，必须满足哪些构建、启动、Linux ABI、驱动、设备节点和用户态运行条件。
+
+核心问题是：新的 kernel 最终不只是要启动，还要能让 `python -m lerobot.record` 这条真实机器人负载跑起来。因此本文从新 kernel 往上看：
+
+- kernel 怎么构建：`make/gmake`、GCC/binutils、LLVM/clang、Rust、bindgen、dtc、modules 工具。
+- kernel 怎么启动：Raspberry Pi 5 firmware / QEMU 加载 kernel image、dtb、initramfs、cmdline。
+- kernel 要提供什么接口：ARM64 ELF、glibc/Python 依赖的 syscall、VFS、`/dev`、`/proc`、`/sys`、`mmap`、`futex`、`ioctl`、`poll/select`、TTY、V4L2、USB。
+- kernel 要驱动什么硬件：UVC 摄像头、USB ACM 舵机串口、USB xHCI/RP1、设备树描述的 Pi 5 板级硬件。
+- LeRobot 这条命令实际压到哪些用户态库：Python、conda、torch、OpenCV、scservo/pyserial、datasets/PyAV 等。
 
 口径说明：
 
+- `python -m lerobot.record ...` 是验证新 kernel 的真实用户态负载，不是本文唯一目标。
 - `policy=ACT`，因为命令带 `--policy.path=/home/vel/so101-bottle/last/pretrained_model`。
 - 主循环动作来源是 `predict_action() -> ACTPolicy.select_action()`；`teleop` 仍然会构造和 `connect()`，但在本命令的主采集循环里不会走 `teleop.get_action()` 生成动作。
 - “所有 import”限定为本命令链路相关文件：入口、config/parser、ACT policy、processor、SO101 robot/teleop、OpenCV camera、Feetech motor、dataset、utils、`scservo_sdk`、`serial`，并补上 `record.py` 直接触发的 package re-export 文件。
 - runtime trace 只说明这次非硬件 trace 实际加载了什么；没有出现在 trace 里不等于永远没用到。
 
-## 0. Kernel 构建工具链：先看这里
+## 0. 从新内核反推工具链地图
 
-构建 kernel 的工具链和 LeRobot 的 Python 运行库不是一回事。LeRobot 运行库回答“`record.py` 跑起来要 import 什么”，kernel 构建工具链回答“怎么把 `linux/` 源码编译成 Raspberry Pi 5 能启动的 ARM64 kernel、dtb 和 modules”。
+如果新 kernel 要跑当前机器人项目，它不只要“能启动”，还要能承载一整套 Linux 用户态和硬件 I/O。当前工具链可以按下面这张表理解：
+
+| 从新 kernel 往上看 | 当前项目对应的东西 | 新 kernel 必须满足什么 |
+| --- | --- | --- |
+| 启动链 | `kernel_2712.img`、`bcm2712-rpi-5-b.dtb`、`initramfs_2712`、`config.txt`、`cmdline.txt` | 能被 Pi firmware 或 QEMU 加载，能接收 dtb/cmdline，能初始化 arm64 基础环境。 |
+| 构建链 | `make/gmake`、`gcc/binutils` 或 `clang/LLVM`、Rust 的 `rustc/bindgen/rust-src`、`dtc` | 能从源码产出 kernel image、dtb、modules；Rust kernel 还要通过 `rustavailable`。 |
+| Linux 用户态 ABI | `glibc`、Python、conda、PyTorch/OpenCV native `.so` | 至少兼容这些程序依赖的 Linux syscall、ELF、mmap、futex、thread、file、socket、ioctl、select/poll 等接口。 |
+| 设备文件模型 | `/dev/video*`、`/dev/ttyACM*`、`/proc`、`/sys`、`/lib/modules` | 用户态靠这些路径发现和打开设备；新 kernel 要么实现，要么在 QEMU 第一阶段 mock。 |
+| 摄像头驱动面 | OpenCV -> V4L2 -> UVC -> USB/xHCI/RP1 | 要支持 V4L2 ioctl、buffer queue、UVC timing；否则 LeRobot camera 只能 mock。 |
+| 舵机串口驱动面 | scservo_sdk -> pyserial -> TTY -> `cdc_acm` -> USB | 要支持 `open/read/write/ioctl/select/termios` 和 ACM tty；否则 motors bus 只能 mock。 |
+| LeRobot 验证负载 | ACT `record.py` 命令 | 用来验证新 kernel 的用户态 ABI、设备节点、driver 行为和实时性。 |
 
 ### 0.1 构建目标和输出物
 
@@ -34,7 +53,58 @@
 /lib/modules/6.12.75-v8-16k-TEST-PSELECT6+       # 当前 kernel 对应的驱动模块目录；uvcvideo、cdc_acm 等 .ko 模块要和 kernel 版本匹配。
 ```
 
-### 0.2 Kernel 构建工具链分层
+### 0.2 BCM2712 和设备树链路
+
+`BCM2712` 是 Raspberry Pi 5 的主 SoC。对新 kernel 来说，设备树不是附属文件，而是启动后认识硬件的入口：firmware/QEMU 把 dtb 传给 kernel，kernel 解析 dtb 后才知道内存、CPU、中断、timer、PCIe、RP1、USB host 等硬件在哪里。
+
+Pi 5 的设备树入口和 include 关系：
+
+```text
+linux/arch/arm64/boot/dts/broadcom/bcm2712-rpi-5-b.dts   # Raspberry Pi 5 B 板级入口；root compatible、memory、RP1 使能、USB 使能在这里。
+  -> linux/arch/arm64/boot/dts/broadcom/bcm2712-ds.dtsi   # Pi 5 共享补充；PMU、thermal、USB phy、系统 timer 等。
+     -> linux/arch/arm64/boot/dts/broadcom/bcm2712.dtsi   # BCM2712 SoC 本体；CPU、PSCI、GIC、timer、soc/axi、PCIe 控制器。
+  -> linux/arch/arm64/boot/dts/broadcom/rp1.dtsi          # RP1 I/O 芯片；GPIO、UART、I2C、SPI、DMA、CSI、USB host 等。
+  -> linux/arch/arm64/boot/dts/broadcom/bcm2712-rpi.dtsi  # Raspberry Pi 公共板级配置；chosen、aliases、firmware、RP1 细节。
+```
+
+对新 kernel 最关键的设备树节点：
+
+| 节点 / 属性 | 来自文件 | 中文含义 | 新 kernel 要用它干什么 |
+| --- | --- | --- | --- |
+| `/ compatible = "raspberrypi,5-model-b", "brcm,bcm2712"` | `bcm2712-rpi-5-b.dts` | 说明这是 Raspberry Pi 5 B，SoC 是 BCM2712。 | 选择 Pi 5/BCM2712 平台初始化路径。 |
+| `memory@0` | `bcm2712-rpi-5-b.dts` | 物理内存描述，实际会被 bootloader 填充。 | 建立物理内存管理，避开不可用区域。 |
+| `cpus` / `cpu@0..3` | `bcm2712.dtsi` | 4 个 `arm,cortex-a76` CPU，`enable-method = "psci"`。 | 初始化主核，后续通过 PSCI 启动其他 CPU。 |
+| `psci` | `bcm2712.dtsi` | ARM 固件调用接口，`method = "smc"`。 | 用 SMC 调用 firmware/EL3，做 CPU on/off、reset 等操作。 |
+| `reserved-memory` | `bcm2712.dtsi` / `bcm2712-ds.dtsi` | 保留内存，比如 ATF、CMA、bootloader 配置。 | 内存分配器不能覆盖这些区域。 |
+| `chosen` | `bcm2712-rpi.dtsi` | kernel 启动参数和默认 console，`stdout-path = "serial10:115200n8"`。 | 读取 bootargs、console、initramfs 相关信息。 |
+| `interrupt-parent = <&gicv2>` / `gicv2` | `bcm2712.dtsi` | 主中断控制器是 ARM GIC-400。 | 建立 IRQ 路由；USB、PCIe、timer、UART 都依赖它。 |
+| `timer` | `bcm2712.dtsi` | ARMv8 generic timer。 | 提供调度 tick、高精度时间、sleep、timeout。 |
+| `soc@107c000000` / `axi` | `bcm2712.dtsi` | BCM2712 片上总线和地址映射。 | 把外设 `reg` 物理地址映射到内核虚拟地址。 |
+| `pcie2` | `bcm2712.dtsi` / `bcm2712-rpi-5-b.dts` | BCM2712 PCIe 控制器，Pi 5 板级里作为 `rp1_target` 使能。 | RP1 通过 PCIe 挂到 BCM2712；没有这层就没有 RP1 外设。 |
+| `rp1` | `rp1.dtsi` / `bcm2712-rpi-5-b.dts` | Raspberry Pi 5 的 I/O 芯片。 | GPIO、UART、I2C、SPI、DMA、USB host 等大量外设都在 RP1 后面。 |
+| `rp1_usb0` / `rp1_usb1` | `rp1.dtsi` / `bcm2712-rpi-5-b.dts` | RP1 上的 DWC3 USB host 控制器，板级文件里设为 `okay`。 | LeRobot 的 USB 摄像头和 USB ACM 舵机串口最终都从这里枚举。 |
+| `aliases usb0/usb1` | `bcm2712-rpi.dtsi` | 给 RP1 USB host 起稳定别名。 | 帮助 Linux/用户态用稳定名字理解设备顺序。 |
+
+重要边界：设备树描述的是板级硬件和总线，不直接描述这次插上的 USB 摄像头和舵机控制板。
+
+```text
+设备树静态描述：
+BCM2712 -> PCIe pcie2 -> RP1 -> DWC3 USB host
+
+USB 运行时枚举：
+DWC3 USB host -> USB core -> UVC camera -> /dev/video0, /dev/video2
+DWC3 USB host -> USB core -> CDC ACM servo board -> /dev/ttyACM0, /dev/ttyACM1
+```
+
+所以新 kernel 分阶段看：
+
+| 阶段 | 必须搞清楚的设备树部分 | 目的 |
+| --- | --- | --- |
+| 最小启动 | `memory@0`、`cpus`、`psci`、`chosen`、`timer`、`gicv2`、console UART | kernel 能进 C/Rust 主体、打印日志、管理内存、处理中断和时间。 |
+| Pi 5 板级启动 | `reserved-memory`、`soc`、`axi`、firmware、mailbox、`pcie2`、`rp1` | kernel 能按 Pi 5 的真实硬件布局初始化，不踩 firmware/ATF 保留区。 |
+| LeRobot 真硬件 | `rp1_usb0`、`rp1_usb1`、RP1 interrupt、DMA、clock、USB power/phy | USB host 能工作，摄像头和舵机板才能被枚举成 `/dev/video*` 和 `/dev/ttyACM*`。 |
+
+### 0.3 Kernel 构建工具链分层
 
 | 层 | 必要工具 | 干什么 |
 | --- | --- | --- |
@@ -47,7 +117,7 @@
 | 证书/压缩/打包 | `openssl`、`cpio`、`tar`、`xz`、`zstd`、`rsync` | 模块签名/证书、initramfs、压缩内核或模块、拷贝到 rootfs/boot 分区。 |
 | QEMU 验证 | `qemu-system-aarch64`、`qemu-img` | 不负责构建 kernel，只负责在虚拟 ARM64 机器里启动 kernel/rootfs，验证启动链和 mock I/O。 |
 
-### 0.3 当前源码给出的最低版本线
+### 0.4 当前源码给出的最低版本线
 
 来自 `linux/scripts/min-tool-version.sh`：
 
@@ -67,7 +137,7 @@ make LLVM=1 rustavailable
 
 它会检查 `rustc`、`bindgen`、`libclang`、`rust-src` 等是否满足内核 Rust 构建条件。
 
-### 0.4 当前实践环境里已经确认的状态
+### 0.5 当前实践环境里已经确认的状态
 
 树莓派实践环境：
 
@@ -107,7 +177,7 @@ make LLVM=1 rustavailable
 | `llvm-*` / `ld.lld` | 当前 PATH 未找到 |
 | `pahole` | 当前 PATH 未找到 |
 
-### 0.5 构建命令骨架
+### 0.6 构建命令骨架
 
 Pi 5 对应的 defconfig 在本地源码中存在：
 
@@ -147,6 +217,21 @@ CONFIG_RUST=y
 ```
 
 并确保 `rustavailable` 通过。
+
+### 0.7 新 kernel 要跑 LeRobot 的硬性接口清单
+
+从新 kernel 角度看，下面这些不是“Python 包清单”，而是用户态会压到 kernel 的接口面：
+
+| 接口面 | 当前 LeRobot 触发来源 | 新 kernel 需要提供什么 |
+| --- | --- | --- |
+| 进程和 ELF 加载 | `python3`、conda 环境里的 native `.so`、`torch`、`cv2`、`av` | 能加载 ARM64 ELF，可运行动态链接程序，支持 `execve`、`mmap`、`mprotect`、`brk`、TLS、signals。 |
+| 文件系统和路径 | conda 包、模型目录、dataset 目录、`/dev`、`/proc`、`/sys` | VFS、目录遍历、权限、`stat/open/read/write/close`、挂载 rootfs、暴露 proc/sysfs/devtmpfs 或等价机制。 |
+| 线程和同步 | Python runtime、PyTorch、OpenCV、数据写入线程 | `clone`/线程、`futex`、信号、定时器、调度、CPU-only 计算路径。 |
+| 时间和等待 | `record_loop()`、`busy_wait()`、摄像头帧率、串口读写超时 | `clock_gettime`、`nanosleep`、高精度时间源、poll/select 超时语义。 |
+| 摄像头 I/O | `OpenCVCamera -> cv2.VideoCapture -> /dev/video0,/dev/video2` | V4L2 设备节点、`ioctl`、buffer queue、`mmap`/read buffer、UVC/USB 数据流。 |
+| 舵机串口 I/O | `FeetechMotorsBus -> scservo_sdk -> pyserial -> /dev/ttyACM0,/dev/ttyACM1` | TTY/termios、`cdc_acm` 或等价串口设备、`read/write/ioctl/select`。 |
+| USB 主机链路 | 摄像头和舵机都挂 USB | xHCI/USB host、枚举、interrupt/bulk/isochronous transfer、udev 可见设备信息。 |
+| 模块和驱动加载 | `uvcvideo`、`cdc_acm`、`videobuf2_*` 可能是模块 | kernel release 与 `/lib/modules/<uname -r>` 匹配，`modprobe`/udev 能找到依赖。 |
 
 ## 1. 真实运行命令
 

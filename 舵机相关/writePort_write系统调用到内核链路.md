@@ -835,9 +835,9 @@ static int acm_start_wb(struct acm *acm, struct acm_wb *wb)  // 定义当前层�
 
 CDC ACM 在创建写 URB 时已经设置了 `URB_NO_TRANSFER_DMA_MAP`，因为 `wb->buf` 来自 `usb_alloc_coherent()`，同时 `wb->dmah` 已经保存了 DMA 地址。因此后面的 USB core 虽然仍会走到 `map_urb_for_dma()`，但这一步不会再把协议帧复制到另一块普通 DMA 缓冲。
 
-### 6.3 USB core 与 xHCI
+### 6.3 USB core 提交 URB
 
-`usb_submit_urb()` 是 USB core 的入口。USB core 负责校验 URB 合法性、处理 DMA 访问关系，然后把 URB 交给具体的主机控制器驱动（HCD）。树莓派 5 的 USB 主控走 xHCI，所以最终进入 `xhci_urb_enqueue()`，由 xHCI 驱动把 URB 转成硬件可执行的 Transfer Request Block（TRB）。这里的 TRB 是 xHCI 规范里的传输请求描述符，多个 TRB 串在一起组成 transfer ring。
+`usb_submit_urb()` 是 USB core 的入口。USB core 负责校验 URB 合法性、记录 endpoint 状态，然后把 URB 交给通用 HCD 提交函数。树莓派 5 的 USB 主控走 xHCI，但这一小节先只看到 USB core/HCD 边界；xHCI 内部如何把 URB 转成 TRB、敲 doorbell 放到第 7 章展开。
 
 来源：linux/drivers/usb/core/urb.c:usb_submit_urb（节选：仅保留本链路相关分支，已按当前仓库源码核对）
 ```c
@@ -892,6 +892,8 @@ int usb_hcd_submit_urb(struct urb *urb, gfp_t mem_flags)  // 定义当前层的 
     return status;                                // 0 表示已经排入 HCD
 }
 ```
+
+### 6.4 DMA 映射与 transfer_dma
 
 `map_urb_for_dma()` 这一跳的真实分发也要算进完整链路。树莓派 5 使用 xHCI，`hcd->driver->map_urb_for_dma` 会先进入 `xhci_map_urb_for_dma()`；普通 CDC ACM 写包是 14/26 字节 bulk OUT，不满足 xHCI 的 Immediate Transfer（最多 8 字节 OUT）条件，最终落到通用 `usb_hcd_map_urb_for_dma()`。因为 CDC ACM 写 URB 的缓冲来自 `usb_alloc_coherent()` 并设置了 `URB_NO_TRANSFER_DMA_MAP`，通用映射函数会保留已有 `transfer_dma`，不会再复制协议帧。
 
@@ -953,6 +955,12 @@ int usb_hcd_map_urb_for_dma(struct usb_hcd *hcd, struct urb *urb, // 通用 HCD 
 }
 ```
 
+## 7. xHCI 主控写路径
+
+前面 USB core 已经把 CDC ACM 写 URB 交给 HCD。对树莓派 5 来说，具体 HCD 是 xHCI；从这里开始，重点从“USB core 提交”切换为“xHCI 如何把 URB 描述成硬件可执行任务，并通过 doorbell MMIO 寄存器通知控制器”。
+
+### 7.1 xHCI URB 入队
+
 `xhci_urb_enqueue()` 是 xHCI 驱动的入口。它为 URB 分配 `urb_priv` 跟踪结构，按 endpoint 类型分发到不同的传输队列。CDC ACM 的数据端点是 bulk，所以进入 `xhci_queue_bulk_tx()`，由它把 URB 数据转换成 xHCI 硬件能理解的 Transfer Request Block（TRB）。
 
 来源：linux/drivers/usb/host/xhci.c:xhci_urb_enqueue（节选：仅保留本链路相关分支，已按当前仓库源码核对）
@@ -1009,6 +1017,8 @@ free_priv:
     return ret;                                   // 0 表示 URB 已排进 xHCI ring
 }
 ```
+
+### 7.2 TRB 生成与 transfer ring
 
 `xhci_queue_bulk_tx()` 会把 URB 数据描述成 TRB，并把这些 TRB 放入 endpoint 对应的 xHCI transfer ring。对普通 bulk OUT 来说，它在循环中计算本段数据的 DMA 地址、长度字段和控制字段，然后调用 `queue_trb()` 写入当前 ring 槽位。
 
@@ -1083,6 +1093,8 @@ static void giveback_first_trb(struct xhci_hcd *xhci, int slot_id,  // 定义当
 }
 ```
 
+### 7.3 doorbell MMIO 寄存器
+
 真正的“敲门铃”发生在 `xhci_ring_ep_doorbell()`。它先定位当前 USB 设备 slot 对应的 doorbell 寄存器，再把 endpoint 编号和 stream id 编成 doorbell value 写进去。这个 `writel()` 是通知 xHCI 硬件的关键动作：告诉主控“这个 slot 的这个 endpoint 有新的 TRB 可以处理”。
 
 来源：linux/drivers/usb/host/xhci-ring.c:xhci_ring_ep_doorbell（节选：仅保留本链路相关分支，已按当前仓库源码核对）
@@ -1111,13 +1123,182 @@ struct xhci_doorbell_array {  // 定义当前链路涉及的内核数据结构
 #define DB_VALUE(ep, stream) ((((ep) + 1) & 0xff) | ((stream) << 16))  // 定义内核/库代码后续使用的常量或宏
 ```
 
+这里的 `doorbell` 不是普通内存里的状态变量，而是 xHCI 控制器暴露出来的一组 MMIO 寄存器。初始化时，xHCI 驱动从 Capability Register 的 `DBOFF` 字段读出 doorbell array 相对 capability register 基址的偏移，然后把 `xhci->dba` 指到这片 MMIO 区域。
+
+来源：linux/drivers/usb/host/xhci-mem.c:xhci_mem_init（节选：仅保留 doorbell array 初始化）
+```c
+// linux/drivers/usb/host/xhci-mem.c
+val = readl(&xhci->cap_regs->db_off);            // 读取 DBOFF：doorbell array offset
+val &= DBOFF_MASK;                               // 清掉低 2 个保留位
+xhci->dba = (void __iomem *) xhci->cap_regs + val; // doorbell array 的 MMIO 基址
+```
+
+因此，`__le32 __iomem *db_addr = &xhci->dba->doorbell[slot_id]` 得到的是一个 MMIO 寄存器地址。`writel(DB_VALUE(ep_index, stream_id), db_addr)` 会向这个寄存器写入 32 位 doorbell value：
+
+```text
+bits  0..7   Endpoint Target = ep_index + 1
+bits  8..15  Reserved = 0
+bits 16..31  Stream ID，普通 bulk OUT 通常为 0
+```
+
+对 CDC ACM 的普通 bulk OUT 写包来说，`stream_id` 通常是 0，所以这次写入主要表达“当前 slot 的某个 endpoint 有新的 transfer ring 条目”。它不携带舵机协议字节；舵机协议帧已经在前面放进 `wb->buf`，TRB 里保存的是该缓冲区的 DMA 地址和长度。doorbell 的作用只是通知 xHCI 硬件去取这些 TRB。
+
+### 7.4 writel 在 ARM64 上如何写寄存器
+
+`writel()` 在内核里是带 I/O 顺序约束的 MMIO 写。ARM64 上大致展开为：
+
+来源：linux/include/asm-generic/io.h:writel 与 linux/arch/arm64/include/asm/io.h:__raw_writel（节选）
+```c
+// linux/include/asm-generic/io.h
+static inline void writel(u32 value, volatile void __iomem *addr)
+{
+    __io_bw();                                   // 写 MMIO 前的顺序屏障
+    __raw_writel((u32 __force)__cpu_to_le32(value), addr);
+    __io_aw();                                   // 写 MMIO 后的顺序处理
+}
+
+// linux/arch/arm64/include/asm/io.h
+static __always_inline void __raw_writel(u32 val, volatile void __iomem *addr)
+{
+    volatile u32 __iomem *ptr = addr;
+    asm volatile("str %w0, %1" : : "rZ" (val), "Qo" (*ptr));
+}
+```
+
+注意：ARM64 上空操作的是 `__io_aw(v)`，不是 `__io_bw()`。`__io_bw()` 在 ARM64 上会继续展开成 DMA 写屏障。
+
+来源：linux/arch/arm64/include/asm/io.h:IO barriers（节选）
+```c
+// linux/arch/arm64/include/asm/io.h
+#define __io_bw()      dma_wmb()
+#define __io_br(v)
+#define __io_aw(v)
+```
+
+来源：linux/include/asm-generic/barrier.h:dma_wmb 与 linux/arch/arm64/include/asm/barrier.h:__dma_wmb（节选）
+```c
+// linux/include/asm-generic/barrier.h
+#define dma_wmb() do { kcsan_wmb(); __dma_wmb(); } while (0)
+
+// linux/arch/arm64/include/asm/barrier.h
+#define dmb(opt)      asm volatile("dmb " #opt : : : "memory")
+#define __dma_wmb()   dmb(oshst)
+```
+
+因此，在树莓派 5 的 ARM64 Linux 上，`writel()` 里的 `__io_bw()` 核心效果是执行一条 `dmb oshst`。它不是写寄存器本身，而是在写 doorbell 之前建立顺序：前面的普通内存写，尤其是 xHCI transfer ring 里的 TRB 写入，要先对设备可见；之后才允许 doorbell 这个 MMIO 写触发 xHCI 去 DMA 读取 TRB。`__io_aw(v)` 在 ARM64 这里展开为空，表示 `writel()` 写完后没有额外的架构后处理。
+
+`__raw_writel()` 前面的 `__always_inline` 也有定义：
+
+来源：linux/include/linux/compiler_attributes.h:__always_inline（节选）
+```c
+#define __always_inline inline __attribute__((__always_inline__))
+```
+
+这表示编译器应把 `__raw_writel()` 的函数体直接展开到调用点，而不是生成一次 `bl __raw_writel` 这样的函数调用。这样最终代码更接近：
+
+```text
+dmb oshst
+str wN, [db_addr]
+```
+
+而不是：
+
+```text
+dmb oshst
+bl  __raw_writel
+ret
+```
+
+`volatile u32 __iomem *ptr = addr;` 本身不读写硬件，只是在 C 类型层面把 `addr` 从“未知宽度的 MMIO 地址”变成“指向 32 位 MMIO 寄存器的指针”。其中：
+
+```text
+volatile  # 告诉编译器：这个对象有外部副作用，不要把访问随便优化掉、合并或假设它像普通内存一样稳定
+u32       # 这次访问宽度是 32 位
+__iomem   # 内核 sparse 静态检查标记：这是 I/O 内存地址，不是普通 RAM 指针
+```
+
+`__iomem` 和 `__force` 的定义也能看到它们主要服务于静态检查：
+
+来源：linux/include/linux/compiler_types.h:__iomem 与 __force（节选）
+```c
+#ifdef __CHECKER__
+# define __iomem  __attribute__((noderef, address_space(__iomem)))
+# define __force  __attribute__((force))
+#else
+# define __iomem
+# define __force
+#endif
+```
+
+最后这句内联汇编：
+
+```c
+asm volatile("str %w0, %1" : : "rZ" (val), "Qo" (*ptr));
+```
+
+可以按 GCC/Clang inline asm 格式拆开：
+
+```text
+asm volatile("汇编模板" : 输出操作数 : 输入操作数 : clobber 列表)
+```
+
+本句没有输出操作数，也没有显式 clobber 列表，只有两个输入操作数：
+
+```text
+"rZ" (val)    # 第 0 个输入操作数：要写出的 32 位值，放入通用寄存器；如果是 0，可用架构允许的 zero 形式
+"Qo" (*ptr)   # 第 1 个输入操作数：`str` 可以接受的内存操作数，地址来自 ptr 指向的 MMIO 寄存器
+```
+
+模板里的 `str %w0, %1` 会生成 ARM64 store 指令。`%w0` 表示第 0 个操作数的 32 位 W 寄存器形式，`%1` 表示第 1 个操作数对应的内存地址。最终效果类似：
+
+```asm
+str w8, [x9]
+```
+
+如果 `x9` 对应的虚拟地址是普通 RAM，它就是一次普通内存写；但这里的 `db_addr` 位于 xHCI doorbell MMIO 区域，所以这次 `str` 会经过设备内存映射通路，最终写到 xHCI 控制器的 doorbell 寄存器。
+
+这段代码里还有一个容易忽略的转换：
+
+```c
+__raw_writel((u32 __force)__cpu_to_le32(value), addr);
+```
+
+`__cpu_to_le32()` 的作用是把 CPU 内部的 32 位整数转换成 little-endian 形式。xHCI 规范要求寄存器和 TRB 字段按 little-endian 解释，所以内核在写入前统一使用这个宏。ARM64 树莓派 5 默认就是小端，因此这个宏基本只是类型标注，不会真正交换字节：
+
+来源：linux/include/uapi/linux/byteorder/little_endian.h:__cpu_to_le32（节选）
+```c
+#define __cpu_to_le32(x) ((__force __le32)(__u32)(x))
+```
+
+这个宏可以拆成三层理解：
+
+```text
+(__u32)(x)       # 先把 x 转成 32 位无符号整数
+(__le32)(...)    # 再把它标记为 little-endian 32-bit 值
+__force          # 告诉 sparse 静态检查器：这里是有意做 endian 类型转换
+```
+
+如果 CPU 是大端架构，同名宏会变成 `__swab32(x)` 字节交换，保证写到内存或 MMIO 后，硬件看到的字节顺序仍然是 little-endian。
+
+因此，`writel(DB_VALUE(ep_index, stream_id), db_addr)` 真正做的是：
+
+```text
+1. 计算 doorbell value：低 8 位是 endpoint target，高 16 位是 stream id。
+2. 用 __cpu_to_le32() 确保这个 32 位值按 little-endian 形式写出。
+3. 执行 __io_bw()，保证前面的普通内存写（尤其 TRB 写入）先完成。
+4. 执行 ARM64 的 `str wN, [db_addr]`，向 `db_addr` 这个 MMIO 地址写 32 位值。
+5. 这次 store 不落到普通 RAM，而是经过 SoC/PCIe/USB 主控的 MMIO 通路，最终到达 xHCI 的 doorbell 寄存器。
+```
+
+也就是说，落到 ARM64 指令层面就是一次 32 位 `str` 写 MMIO 地址；因为这段地址被内核映射为设备寄存器区域，所以 CPU 的 store 会变成设备寄存器写，而不是普通内存写。`xhci_ring_ep_doorbell()` 里 `writel()` 前后的 `readl(db_addr)` 也不是为了读协议数据：前一个 `readl()` 用来在 Pi 4/Pi 5 这类非一致性 DMA/PCIe 平台上序列化 CPU 状态，后一个 `readl()` 用来 flush posted MMIO write，确保 doorbell 写已经真正送到控制器侧。
+
 因此，xHCI 写链路更精确的最后几步是：
 
 ```text
 xhci_queue_bulk_tx()
   -> queue_trb()                      # 把 URB buffer 地址、长度、标志写成 TRB
   -> giveback_first_trb()             # 通过 cycle bit 把首个 TRB 交给硬件
-  -> xhci_ring_ep_doorbell()          # 写 doorbell[slot_id]
+  -> xhci_ring_ep_doorbell()          # writel() 写 doorbell[slot_id] 这个 MMIO 寄存器
   -> xHCI hardware DMA 读取 TRB 和数据缓冲，发出 USB bulk OUT
 ```
 
@@ -1125,7 +1306,7 @@ xhci_queue_bulk_tx()
 
 ---
 
-## 7. 写完成回调
+## 8. 写完成回调
 
 数据提交给 xHCI 后，`writePort()` 在 `acm_tty_write()` 返回时就已经结束了，它不会等待 USB 传输真正完成。当 xHCI 把 bulk OUT 数据发送出去后，USB 主控会产生完成中断，触发 `acm_write_bulk()` 回调。这个回调的职责是：释放写缓冲、标记传输完成、唤醒可能阻塞在 `write_wait` 上的进程。本节解释完成回调如何打扫战场。
 
@@ -1151,7 +1332,7 @@ static void acm_write_bulk(struct urb *urb)  // 定义当前层的 C 函数入�
 
 ---
 
-## 8. writePort 究竟完成了什么
+## 9. writePort 究竟完成了什么
 
 `writePort(packet)` 完成的是：
 
