@@ -104,6 +104,22 @@ DWC3 USB host -> USB core -> CDC ACM servo board -> /dev/ttyACM0, /dev/ttyACM1
 | Pi 5 板级启动 | `reserved-memory`、`soc`、`axi`、firmware、mailbox、`pcie2`、`rp1` | kernel 能按 Pi 5 的真实硬件布局初始化，不踩 firmware/ATF 保留区。 |
 | LeRobot 真硬件 | `rp1_usb0`、`rp1_usb1`、RP1 interrupt、DMA、clock、USB power/phy | USB host 能工作，摄像头和舵机板才能被枚举成 `/dev/video*` 和 `/dev/ttyACM*`。 |
 
+SSH 到当前树莓派真机核对结果：
+
+| 对比项 | 文档判断 | 树莓派真机结果 | 结论 |
+| --- | --- | --- | --- |
+| 板卡型号 | Raspberry Pi 5 / BCM2712 | `/proc/device-tree/model = Raspberry Pi 5 Model B Rev 1.1` | 一致。 |
+| root compatible | `"raspberrypi,5-model-b", "brcm,bcm2712"` | `/proc/device-tree/compatible` 正是这两个字符串 | 一致。 |
+| boot dtb | `/boot/firmware/bcm2712-rpi-5-b.dtb` | 文件存在，真机正在使用 Pi 5 对应 dtb | 一致。 |
+| console / chosen | `stdout-path = serial10:115200n8` | `/proc/device-tree/chosen/stdout-path = serial10:115200n8`；实际 cmdline 里 console 被展开为 `ttyAMA10,115200` | 一致，firmware 会把启动参数补全。 |
+| USB aliases | `usb0/usb1 -> RP1 USB host` | `usb0 -> /axi/pcie@1000120000/rp1/usb@200000`，`usb1 -> /axi/pcie@1000120000/rp1/usb@300000` | 一致。 |
+| PCIe 到 RP1 | `pcie2` 作为 RP1 目标 | `/proc/device-tree/axi/pcie@1000120000`：`compatible = brcm,bcm2712-pcie`，`status = okay` | 一致。 |
+| RP1 | RP1 是 Pi 5 I/O 芯片 | `/proc/device-tree/axi/pcie@1000120000/rp1`：`compatible = simple-bus` | 一致。 |
+| RP1 USB host | `rp1_usb0/rp1_usb1` 是 DWC3 USB host | `usb@200000`、`usb@300000`：`compatible = snps,dwc3`，`status = okay` | 一致。 |
+| UVC 摄像头 | USB 枚举后出现 `/dev/video0`、`/dev/video2` | 两个 `1bcf:2281` USB 2.0 Camera，driver `uvcvideo`；capture 节点是 `/dev/video0`、`/dev/video2` | 一致；`/dev/video1`、`/dev/video3` 是同两只相机的附加 video 节点。 |
+| 舵机串口 | USB CDC ACM 枚举后出现 `/dev/ttyACM0`、`/dev/ttyACM1` | 两个 `1a86:55d3` QinHeng USB Single Serial，driver `cdc_acm`；udev 链接为 `/dev/so101_follower_left`、`/dev/so101_leader_left` | 一致。 |
+| USB host 运行态 | 文档原写 `xhci_hcd on Raspberry Pi 5` | `lsusb -t` 显示 root hub driver 为 `xhci-hcd`，但设备树源头是 RP1 后面的 `snps,dwc3` | 需要精确表述为 `RP1 DWC3 host -> xhci-hcd root hub`。 |
+
 ### 0.3 Kernel 构建工具链分层
 
 | 层 | 必要工具 | 干什么 |
@@ -424,21 +440,27 @@ SO101Follower.get_observation()
   -> /dev/video0, /dev/video2
   -> uvcvideo
   -> V4L2 / videobuf2 / media controller
-  -> USB host: xhci_hcd on Raspberry Pi 5
+  -> USB host: RP1 DWC3 host -> xhci-hcd root hub on Raspberry Pi 5
 ```
 
 实际设备：
 
 | LeRobot camera | OpenCV index | 设备节点      | udev / driver            | 配置            |
 | -------------- | ------------ | ------------- | ------------------------ | --------------- |
-| `handeye`      | `0`          | `/dev/video0` | `ID_USB_DRIVER=uvcvideo` | `640x360@30fps` |
-| `fixed`        | `2`          | `/dev/video2` | `ID_USB_DRIVER=uvcvideo` | `640x360@30fps` |
+| `handeye`      | `0`          | `/dev/video0` | `ID_USB_DRIVER=uvcvideo`，USB id `1bcf:2281` | `640x360@30fps` |
+| `fixed`        | `2`          | `/dev/video2` | `ID_USB_DRIVER=uvcvideo`，USB id `1bcf:2281` | `640x360@30fps` |
 
-相关 kernel 模块：`uvcvideo`、`uvc`、`videobuf2_vmalloc`、`videobuf2_v4l2`、`videobuf2_common`、`videodev`、`mc`。
+相关 kernel 模块/驱动：`uvcvideo`、`uvc`、`videobuf2_vmalloc`、`videobuf2_v4l2`、`videobuf2_common`、`videodev`、`mc`；USB host 侧真机表现为 RP1 `snps,dwc3` 节点驱动出 `xhci-hcd` root hub。
 
 相关 kernel 源码文件：
 
 ```text
+linux/drivers/usb/dwc3/core.c
+linux/drivers/usb/dwc3/host.c
+linux/drivers/usb/host/xhci.c
+linux/drivers/usb/host/xhci-plat.c
+linux/drivers/usb/host/xhci-ring.c
+linux/drivers/usb/host/xhci-mem.c
 linux/drivers/media/usb/uvc/uvc_driver.c
 linux/drivers/media/usb/uvc/uvc_v4l2.c
 linux/drivers/media/usb/uvc/uvc_video.c
@@ -487,14 +509,16 @@ SO101Follower / SO101Leader
 | follower | `R12254705` | `/dev/ttyACM0` | `/dev/so101_follower_left -> ttyACM0` | `cdc_acm` | `1a86:55d3` QinHeng USB Single Serial |
 | leader   | `R07254705` | `/dev/ttyACM1` | `/dev/so101_leader_left -> ttyACM1`   | `cdc_acm` | `1a86:55d3` QinHeng USB Single Serial |
 
-相关 kernel 模块：`cdc_acm`、`xhci_hcd`，树莓派 5/RP1 侧还加载了 `rp1_pio`、`rp1_fw`、`rp1_mailbox`、`pisp_be`。
+相关 kernel 模块/驱动：`cdc_acm`、`xhci_hcd`；树莓派 5/RP1 侧还加载了 `rp1_pio`、`rp1_fw`、`rp1_mailbox`、`pisp_be`。真机设备树显示 USB host 源头是 RP1 的 `snps,dwc3` 节点，运行态 root hub driver 是 `xhci-hcd`。
 
 相关 kernel 源码文件：
 
 ```text
 linux/drivers/usb/class/cdc-acm.c
+linux/drivers/usb/dwc3/core.c
+linux/drivers/usb/dwc3/host.c
 linux/drivers/usb/host/xhci.c
-linux/drivers/usb/host/xhci-pci.c
+linux/drivers/usb/host/xhci-plat.c
 linux/drivers/usb/host/xhci-ring.c
 linux/drivers/usb/host/xhci-mem.c
 linux/drivers/mfd/rp1.c

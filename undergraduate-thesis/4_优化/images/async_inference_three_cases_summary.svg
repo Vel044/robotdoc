@@ -1,0 +1,189 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="540" viewBox="0 0 1800 540">
+  <defs>
+    <style>
+      .bg { fill: #ffffff; }
+      .title { font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 34px; font-weight: 800; fill: #111827; }
+      .subtitle { font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 20px; font-weight: 500; fill: #4b5563; }
+      .panel { fill: #fbfdff; stroke: #d1d5db; stroke-width: 2; rx: 18; }
+      .panel-title { font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 28px; font-weight: 800; fill: #111827; }
+      .case-tag { font-family: "Inter", "Helvetica Neue", Arial, sans-serif; font-size: 42px; font-weight: 800; fill: #ffffff; }
+      .case-circle-a { fill: #2563eb; }
+      .case-circle-b { fill: #f59e0b; }
+      .case-circle-c { fill: #dc2626; }
+      .cond { font-family: "Inter", "Helvetica Neue", Arial, sans-serif; font-size: 22px; font-weight: 700; fill: #1f2937; }
+      .note { font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 19px; font-weight: 500; fill: #374151; }
+      .axis { stroke: #9ca3af; stroke-width: 2; }
+      .tick { stroke: #9ca3af; stroke-width: 1.4; }
+      .tick-text { font-family: "Inter", "Helvetica Neue", Arial, sans-serif; font-size: 15px; font-weight: 500; fill: #6b7280; }
+      .marker { stroke: #6b7280; stroke-width: 1.4; stroke-dasharray: 5 5; }
+      .row-label { font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 18px; font-weight: 700; fill: #374151; }
+      .bar-exec { fill: #2563eb; }
+      .bar-infer { fill: #7c3aed; }
+      .bar-ens { fill: #f59e0b; }
+      .bar-valid { fill: #22c55e; }
+      .bar-drop { fill: #ef4444; }
+      .bar-stall { fill: #cbd5e1; }
+      .bar-text { font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 15px; font-weight: 700; fill: #111827; }
+      .bar-text-white { font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 15px; font-weight: 700; fill: #ffffff; }
+      .bar-text-ens { font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 15px; font-weight: 800; fill: #78350f; }
+      .legend-text { font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 17px; font-weight: 600; fill: #374151; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1800" height="540"/>
+
+  <text class="title" x="60" y="56">异步推理三种稳态情况（N=100，F=30FPS，h=0.5）</text>
+  <text class="subtitle" x="60" y="88">判断标准：新动作chunk能否在旧动作队列耗尽前返回；D表示推理期间消耗的帧数。</text>
+
+  <g transform="translate(1020,26)">
+    <rect class="bar-exec" x="0" y="0" width="26" height="15" rx="4"/>
+    <text class="legend-text" x="36" y="14">正常执行</text>
+    <rect class="bar-infer" x="126" y="0" width="26" height="15" rx="4"/>
+    <text class="legend-text" x="162" y="14">推理</text>
+    <rect class="bar-ens" x="226" y="0" width="26" height="15" rx="4"/>
+    <text class="legend-text" x="262" y="14">动作融合</text>
+    <rect class="bar-valid" x="378" y="0" width="26" height="15" rx="4"/>
+    <text class="legend-text" x="414" y="14">有效动作</text>
+    <rect class="bar-drop" x="0" y="30" width="26" height="15" rx="4"/>
+    <text class="legend-text" x="36" y="44">丢弃帧</text>
+    <rect class="bar-stall" x="126" y="30" width="26" height="15" rx="4"/>
+    <text class="legend-text" x="162" y="44">stall</text>
+  </g>
+
+  <!-- Case A -->
+  <g transform="translate(50,118)">
+    <rect class="panel" x="0" y="0" width="530" height="390" rx="18"/>
+    <circle class="case-circle-a" cx="48" cy="48" r="32"/>
+    <text class="case-tag" x="48" y="63" text-anchor="middle">A</text>
+    <text class="panel-title" x="92" y="46">提前返回</text>
+    <text class="cond" x="92" y="78">D=30 ≤ 50，稳态30FPS</text>
+    <text class="note" x="34" y="118">队列B提前返回，末段与队列A做动作融合。</text>
+
+    <line class="axis" x1="95" y1="150" x2="470" y2="150"/>
+    <g>
+      <line class="tick" x1="95" y1="144" x2="95" y2="156"/>
+      <line class="tick" x1="220" y1="144" x2="220" y2="156"/>
+      <line class="tick" x1="345" y1="144" x2="345" y2="156"/>
+      <line class="tick" x1="470" y1="144" x2="470" y2="156"/>
+      <text class="tick-text" x="95" y="176" text-anchor="middle">0</text>
+      <text class="tick-text" x="220" y="176" text-anchor="middle">50</text>
+      <text class="tick-text" x="345" y="176" text-anchor="middle">100</text>
+      <text class="tick-text" x="470" y="176" text-anchor="middle">150</text>
+    </g>
+    <line class="marker" x1="345" y1="185" x2="345" y2="382"/>
+
+    <text class="row-label" x="34" y="218">执行</text>
+    <rect class="bar-exec" x="95" y="195" width="200" height="32" rx="7"/>
+    <rect class="bar-ens" x="295" y="195" width="50" height="32" rx="7"/>
+    <rect class="bar-exec" x="345" y="195" width="125" height="32" rx="7"/>
+    <text class="bar-text-white" x="195" y="217" text-anchor="middle">执行队列A</text>
+    <text class="bar-text-ens" x="320" y="217" text-anchor="middle">融合</text>
+    <text class="bar-text-white" x="407" y="217" text-anchor="middle">执行队列B</text>
+
+    <text class="row-label" x="34" y="268">推理</text>
+    <rect class="bar-infer" x="220" y="245" width="75" height="32" rx="7"/>
+    <text class="bar-text-white" x="257" y="267" text-anchor="middle">30帧</text>
+
+    <text class="row-label" x="34" y="318">队列A</text>
+    <rect class="bar-valid" x="95" y="295" width="250" height="32" rx="7"/>
+    <text class="bar-text-white" x="220" y="317" text-anchor="middle">A有效[0..99]</text>
+
+    <text class="row-label" x="34" y="368">队列B</text>
+    <rect class="bar-drop" x="220" y="345" width="75" height="32" rx="7"/>
+    <rect class="bar-ens" x="295" y="345" width="50" height="32" rx="7"/>
+    <rect class="bar-valid" x="345" y="345" width="125" height="32" rx="7"/>
+    <text class="bar-text-white" x="257" y="367" text-anchor="middle">丢弃</text>
+    <text class="bar-text-ens" x="320" y="367" text-anchor="middle">融合</text>
+    <text class="bar-text-white" x="407" y="367" text-anchor="middle">B新增</text>
+  </g>
+
+  <!-- Case B -->
+  <g transform="translate(635,118)">
+    <rect class="panel" x="0" y="0" width="530" height="390" rx="18"/>
+    <circle class="case-circle-b" cx="48" cy="48" r="32"/>
+    <text class="case-tag" x="48" y="63" text-anchor="middle">B</text>
+    <text class="panel-title" x="92" y="46">临界到达</text>
+    <text class="cond" x="92" y="78">D=50 = 50，无stall但无余量</text>
+    <text class="note" x="34" y="118">队列B刚好接上队列A，没有融合余量。</text>
+
+    <line class="axis" x1="95" y1="150" x2="470" y2="150"/>
+    <g>
+      <line class="tick" x1="95" y1="144" x2="95" y2="156"/>
+      <line class="tick" x1="220" y1="144" x2="220" y2="156"/>
+      <line class="tick" x1="345" y1="144" x2="345" y2="156"/>
+      <line class="tick" x1="470" y1="144" x2="470" y2="156"/>
+      <text class="tick-text" x="95" y="176" text-anchor="middle">0</text>
+      <text class="tick-text" x="220" y="176" text-anchor="middle">50</text>
+      <text class="tick-text" x="345" y="176" text-anchor="middle">100</text>
+      <text class="tick-text" x="470" y="176" text-anchor="middle">150</text>
+    </g>
+    <line class="marker" x1="345" y1="185" x2="345" y2="382"/>
+
+    <text class="row-label" x="34" y="218">执行</text>
+    <rect class="bar-exec" x="95" y="195" width="250" height="32" rx="7"/>
+    <rect class="bar-exec" x="345" y="195" width="125" height="32" rx="7"/>
+    <text class="bar-text-white" x="220" y="217" text-anchor="middle">执行队列A</text>
+    <text class="bar-text-white" x="407" y="217" text-anchor="middle">执行队列B</text>
+
+    <text class="row-label" x="34" y="268">推理</text>
+    <rect class="bar-infer" x="220" y="245" width="125" height="32" rx="7"/>
+    <text class="bar-text-white" x="282" y="267" text-anchor="middle">50帧</text>
+
+    <text class="row-label" x="34" y="318">队列A</text>
+    <rect class="bar-valid" x="95" y="295" width="250" height="32" rx="7"/>
+    <text class="bar-text-white" x="220" y="317" text-anchor="middle">A有效[0..99]</text>
+
+    <text class="row-label" x="34" y="368">队列B</text>
+    <rect class="bar-drop" x="220" y="345" width="125" height="32" rx="7"/>
+    <rect class="bar-valid" x="345" y="345" width="125" height="32" rx="7"/>
+    <text class="bar-text-white" x="282" y="367" text-anchor="middle">B丢弃[50..99]</text>
+    <text class="bar-text-white" x="407" y="367" text-anchor="middle">B新增</text>
+  </g>
+
+  <!-- Case C -->
+  <g transform="translate(1220,118)">
+    <rect class="panel" x="0" y="0" width="530" height="390" rx="18"/>
+    <circle class="case-circle-c" cx="48" cy="48" r="32"/>
+    <text class="case-tag" x="48" y="63" text-anchor="middle">C</text>
+    <text class="panel-title" x="92" y="46">返回过晚</text>
+    <text class="cond" x="92" y="78">D=70 &gt; 50，约21.4FPS</text>
+    <text class="note" x="34" y="118">队列A耗尽后仍未拿到队列B，出现stall。</text>
+
+    <line class="axis" x1="95" y1="150" x2="470" y2="150"/>
+    <g>
+      <line class="tick" x1="95" y1="144" x2="95" y2="156"/>
+      <line class="tick" x1="220" y1="144" x2="220" y2="156"/>
+      <line class="tick" x1="345" y1="144" x2="345" y2="156"/>
+      <line class="tick" x1="470" y1="144" x2="470" y2="156"/>
+      <text class="tick-text" x="95" y="176" text-anchor="middle">0</text>
+      <text class="tick-text" x="220" y="176" text-anchor="middle">50</text>
+      <text class="tick-text" x="345" y="176" text-anchor="middle">100</text>
+      <text class="tick-text" x="470" y="176" text-anchor="middle">150</text>
+    </g>
+    <line class="marker" x1="345" y1="185" x2="345" y2="382"/>
+
+    <text class="row-label" x="34" y="218">执行</text>
+    <rect class="bar-exec" x="95" y="195" width="250" height="32" rx="7"/>
+    <rect class="bar-stall" x="345" y="195" width="50" height="32" rx="7"/>
+    <rect class="bar-exec" x="395" y="195" width="75" height="32" rx="7"/>
+    <text class="bar-text-white" x="220" y="217" text-anchor="middle">执行队列A</text>
+    <text class="bar-text" x="370" y="217" text-anchor="middle">stall</text>
+    <text class="bar-text-white" x="432" y="217" text-anchor="middle">恢复</text>
+
+    <text class="row-label" x="34" y="268">推理</text>
+    <rect class="bar-infer" x="220" y="245" width="175" height="32" rx="7"/>
+    <text class="bar-text-white" x="307" y="267" text-anchor="middle">70帧</text>
+
+    <text class="row-label" x="34" y="318">队列A</text>
+    <rect class="bar-valid" x="95" y="295" width="250" height="32" rx="7"/>
+    <text class="bar-text-white" x="220" y="317" text-anchor="middle">A有效[0..99]</text>
+
+    <text class="row-label" x="34" y="368">队列B</text>
+    <rect class="bar-drop" x="220" y="345" width="125" height="32" rx="7"/>
+    <rect class="bar-stall" x="345" y="345" width="50" height="32" rx="7"/>
+    <rect class="bar-valid" x="395" y="345" width="75" height="32" rx="7"/>
+    <text class="bar-text-white" x="282" y="367" text-anchor="middle">B丢弃[50..99]</text>
+    <text class="bar-text" x="370" y="367" text-anchor="middle">未到</text>
+    <text class="bar-text-white" x="432" y="367" text-anchor="middle">B新增</text>
+  </g>
+</svg>

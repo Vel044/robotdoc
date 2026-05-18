@@ -5,11 +5,11 @@
       .stage { fill: #f8fbff; stroke: #2563eb; stroke-width: 2.4; }
       .wait { fill: #fffaf2; stroke: #f97316; stroke-width: 2.4; }
       .async { fill: #f9fafb; stroke: #6b7280; stroke-width: 1.8; stroke-dasharray: 7 5; }
-      .stage-cn { font: 700 34px "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #111827; }
-      .stage-en { font: 500 24px "Inter", "Helvetica Neue", Arial, sans-serif; fill: #4b5563; }
-      .small-cn { font: 600 22px "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #374151; }
-      .small-en { font: 500 18px "Inter", "Helvetica Neue", Arial, sans-serif; fill: #6b7280; }
-      .label { font: 400 18px "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #4b5563; }
+      .stage-cn { font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 40px; font-weight: 700; fill: #111827; }
+      .stage-en { font-family: "Inter", "Helvetica Neue", Arial, sans-serif; font-size: 28px; font-weight: 500; fill: #4b5563; }
+      .small-cn { font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 26px; font-weight: 600; fill: #374151; }
+      .small-en { font-family: "Inter", "Helvetica Neue", Arial, sans-serif; font-size: 21px; font-weight: 500; fill: #6b7280; }
+      .label { font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 21px; font-weight: 400; fill: #4b5563; }
       .arrow { stroke: #2563eb; stroke-width: 3.2; fill: none; stroke-linecap: round; }
       .loop { stroke: #64748b; stroke-width: 2.8; fill: none; stroke-linecap: round; stroke-linejoin: round; }
       .async-line { stroke: #6b7280; stroke-width: 2.2; fill: none; stroke-dasharray: 7 5; stroke-linecap: round; }
