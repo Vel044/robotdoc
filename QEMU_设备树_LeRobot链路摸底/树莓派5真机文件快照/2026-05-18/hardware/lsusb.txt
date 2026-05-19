@@ -1,11 +1,11 @@
-Bus 004 Device 001: ID 1d6b:0003 Linux Foundation 3.0 root hub
-Bus 003 Device 002: ID 276d:2233 Homertech Hexgears Gaming Keyboard
-Bus 003 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub
-Bus 002 Device 002: ID 35d6:3510 Bridgesil USB3.2 Hub
-Bus 002 Device 001: ID 1d6b:0003 Linux Foundation 3.0 root hub
-Bus 001 Device 006: ID 1a86:55d3 QinHeng Electronics USB Single Serial
-Bus 001 Device 005: ID 1a86:55d3 QinHeng Electronics USB Single Serial
-Bus 001 Device 004: ID 1bcf:2281 Sunplus Innovation Technology Inc. SPCA2281 Web Camera
-Bus 001 Device 003: ID 1bcf:2281 Sunplus Innovation Technology Inc. SPCA2281 Web Camera
-Bus 001 Device 002: ID 35d6:2510 Bridgesil USB2.1 Hub
-Bus 001 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub
+Bus 004 Device 001: ID 1d6b:0003 Linux Foundation 3.0 root hub                 # USB 3.0 根集线器；这是 Linux USB host 控制器暴露出来的根节点，不是外接设备。
+Bus 003 Device 002: ID 276d:2233 Homertech Hexgears Gaming Keyboard             # 外接机械键盘；和 LeRobot 机器人链路无关，只说明当时键盘插在 USB 上。
+Bus 003 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub                 # USB 2.0 根集线器；这是 Linux USB host 控制器暴露出来的根节点，不是外接设备。
+Bus 002 Device 002: ID 35d6:3510 Bridgesil USB3.2 Hub                          # 外接 USB 3.2 Hub；用于扩展 USB 口，本身不是 LeRobot 传感器/执行器。
+Bus 002 Device 001: ID 1d6b:0003 Linux Foundation 3.0 root hub                 # USB 3.0 根集线器；对应另一条 USB host/root hub 视图。
+Bus 001 Device 006: ID 1a86:55d3 QinHeng Electronics USB Single Serial          # SO101 舵机控制板之一；CDC ACM 串口设备，后续映射为 /dev/ttyACM0 或 /dev/ttyACM1。
+Bus 001 Device 005: ID 1a86:55d3 QinHeng Electronics USB Single Serial          # SO101 舵机控制板之一；CDC ACM 串口设备，后续映射为 /dev/ttyACM0 或 /dev/ttyACM1。
+Bus 001 Device 004: ID 1bcf:2281 Sunplus Innovation Technology Inc. SPCA2281 Web Camera # USB 摄像头之一；UVC 设备，后续由 uvcvideo 驱动生成 /dev/video0 或 /dev/video2。
+Bus 001 Device 003: ID 1bcf:2281 Sunplus Innovation Technology Inc. SPCA2281 Web Camera # USB 摄像头之一；UVC 设备，后续由 uvcvideo 驱动生成 /dev/video0 或 /dev/video2。
+Bus 001 Device 002: ID 35d6:2510 Bridgesil USB2.1 Hub                          # 外接 USB 2.1 Hub；两个摄像头和两个串口板很可能挂在这条 USB 2.0 Hub 链路下。
+Bus 001 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub                 # USB 2.0 根集线器；Bus 001 上所有设备最终挂在这个 root hub 下面。

@@ -1,15 +1,5 @@
 # 树莓派 5 真机文件快照：2026-05-18
 
-来源：
-
-```text
-ssh RaspberryPi
-HostName 192.168.2.2
-User vel
-```
-
-用途：保存当前 LeRobot 真机环境里和“新 kernel / QEMU / 设备树 / 硬件链路”直接相关的小文件和查询输出，后续分析时不用反复 SSH。
-
 ## 已复制的原始文件
 
 ```text
