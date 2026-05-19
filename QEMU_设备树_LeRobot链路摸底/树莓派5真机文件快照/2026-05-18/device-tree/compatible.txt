@@ -1,0 +1,2 @@
+raspberrypi,5-model-b
+brcm,bcm2712

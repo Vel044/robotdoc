@@ -1,0 +1,3 @@
+5d83a18b021adb57decbd3e7f2d3105e4614d98d156a67aef28b11c7d5134cdc  /boot/firmware/kernel_2712.img
+00165a91b70d04a8487b8807ea3e0b9533f7bb832745669f7fb214fb43dbaad4  /boot/firmware/initramfs_2712
+ae5722fdb6ba3fae63bf1161abfc17d64acc46d2bfe4b3c2f83fb88dd8a7a0cf  /boot/firmware/bcm2712-rpi-5-b.dtb

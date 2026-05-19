@@ -1,0 +1,13 @@
+modules.alias
+modules.alias.bin
+modules.builtin
+modules.builtin.alias.bin
+modules.builtin.bin
+modules.builtin.modinfo
+modules.dep
+modules.dep.bin
+modules.devname
+modules.order
+modules.softdep
+modules.symbols
+modules.symbols.bin

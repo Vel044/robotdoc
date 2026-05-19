@@ -1,0 +1,5 @@
+-rwxr-xr-x 1 root root    78744 Mar 23 16:07 /boot/firmware/bcm2712-rpi-5-b.dtb
+-rwxr-xr-x 1 root root      234 Sep 11  2025 /boot/firmware/cmdline.txt
+-rwxr-xr-x 1 root root     1247 May 13  2025 /boot/firmware/config.txt
+-rwxr-xr-x 1 root root 18075599 May 13  2025 /boot/firmware/initramfs_2712
+-rwxr-xr-x 1 root root 28115456 Mar 23 16:07 /boot/firmware/kernel_2712.img

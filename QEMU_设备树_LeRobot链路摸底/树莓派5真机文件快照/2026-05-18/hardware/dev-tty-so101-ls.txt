@@ -1,0 +1,4 @@
+lrwxrwxrwx 1 root root         7 May 18 14:17 /dev/so101_follower_left -> ttyACM0
+lrwxrwxrwx 1 root root         7 May 18 14:17 /dev/so101_leader_left -> ttyACM1
+crwxrwxrwx 1 root dialout 166, 0 May 18 15:14 /dev/ttyACM0
+crwxrwxrwx 1 root dialout 166, 1 May 18 15:06 /dev/ttyACM1

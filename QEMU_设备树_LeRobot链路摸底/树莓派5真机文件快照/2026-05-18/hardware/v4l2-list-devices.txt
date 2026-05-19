@@ -1,0 +1,34 @@
+pispbe (platform:1000880000.pisp_be):
+	/dev/video20
+	/dev/video21
+	/dev/video22
+	/dev/video23
+	/dev/video24
+	/dev/video25
+	/dev/video26
+	/dev/video27
+	/dev/video28
+	/dev/video29
+	/dev/video30
+	/dev/video31
+	/dev/video32
+	/dev/video33
+	/dev/video34
+	/dev/video35
+	/dev/media0
+	/dev/media1
+
+rpi-hevc-dec (platform:rpi-hevc-dec):
+	/dev/video19
+	/dev/media2
+
+USB 2.0 Camera: USB 2.0 Camera (usb-xhci-hcd.0-1.1):
+	/dev/video0
+	/dev/video1
+	/dev/media3
+
+USB 2.0 Camera: USB 2.0 Camera (usb-xhci-hcd.0-1.2):
+	/dev/video2
+	/dev/video3
+	/dev/media4
+

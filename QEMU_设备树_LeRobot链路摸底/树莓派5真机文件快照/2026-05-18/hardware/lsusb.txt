@@ -1,0 +1,11 @@
+Bus 004 Device 001: ID 1d6b:0003 Linux Foundation 3.0 root hub
+Bus 003 Device 002: ID 276d:2233 Homertech Hexgears Gaming Keyboard
+Bus 003 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub
+Bus 002 Device 002: ID 35d6:3510 Bridgesil USB3.2 Hub
+Bus 002 Device 001: ID 1d6b:0003 Linux Foundation 3.0 root hub
+Bus 001 Device 006: ID 1a86:55d3 QinHeng Electronics USB Single Serial
+Bus 001 Device 005: ID 1a86:55d3 QinHeng Electronics USB Single Serial
+Bus 001 Device 004: ID 1bcf:2281 Sunplus Innovation Technology Inc. SPCA2281 Web Camera
+Bus 001 Device 003: ID 1bcf:2281 Sunplus Innovation Technology Inc. SPCA2281 Web Camera
+Bus 001 Device 002: ID 35d6:2510 Bridgesil USB2.1 Hub
+Bus 001 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub

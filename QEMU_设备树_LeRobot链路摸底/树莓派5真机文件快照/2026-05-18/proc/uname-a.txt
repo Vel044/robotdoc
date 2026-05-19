@@ -1,0 +1,1 @@
+Linux raspberrypi 6.12.75-v8-16k-TEST-PSELECT6+ #10 SMP PREEMPT Fri Mar 20 15:43:06 CST 2026 aarch64 GNU/Linux

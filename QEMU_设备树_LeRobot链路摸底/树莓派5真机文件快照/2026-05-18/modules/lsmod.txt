@@ -1,0 +1,105 @@
+Module                  Size  Used by
+tcp_diag               49152  0
+inet_diag              49152  1 tcp_diag
+tun                    98304  2
+xt_conntrack           49152  1
+nft_chain_nat          49152  3
+xt_MASQUERADE          49152  1
+nf_nat                 98304  2 nft_chain_nat,xt_MASQUERADE
+nf_conntrack_netlink    81920  0
+nf_conntrack          180224  4 xt_conntrack,nf_nat,nf_conntrack_netlink,xt_MASQUERADE
+nf_defrag_ipv6         49152  1 nf_conntrack
+nf_defrag_ipv4         49152  1 nf_conntrack
+xfrm_user              65536  1
+xfrm_algo              49152  1 xfrm_user
+xt_addrtype            49152  2
+nft_compat             49152  4
+nf_tables             327680  57 nft_compat,nft_chain_nat
+nfnetlink              49152  4 nft_compat,nf_conntrack_netlink,nf_tables
+br_netfilter           65536  0
+bridge                344064  1 br_netfilter
+stp                    49152  1 bridge
+llc                    49152  2 bridge,stp
+rfcomm                 81920  4
+snd_seq_dummy          49152  0
+snd_hrtimer            49152  1
+snd_seq                98304  7 snd_seq_dummy
+snd_seq_device         49152  1 snd_seq
+overlay               180224  0
+algif_hash             49152  1
+algif_skcipher         49152  1
+af_alg                 49152  6 algif_hash,algif_skcipher
+bnep                   49152  2
+binfmt_misc            49152  1
+uvcvideo              131072  4
+cdc_acm                49152  0
+videobuf2_vmalloc      49152  1 uvcvideo
+uvc                    49152  1 uvcvideo
+vc4                   425984  4
+brcmfmac_wcc           49152  0
+spidev                 49152  0
+brcmfmac              376832  1 brcmfmac_wcc
+joydev                 49152  0
+snd_soc_hdmi_codec     49152  2
+drm_display_helper     49152  1 vc4
+hci_uart               65536  0
+btbcm                  49152  1 hci_uart
+brcmutil               49152  1 brcmfmac
+aes_ce_blk             49152  4
+aes_ce_cipher          49152  1 aes_ce_blk
+cec                    65536  1 vc4
+ghash_ce               49152  0
+gf128mul               49152  1 ghash_ce
+drm_dma_helper         49152  1 vc4
+sha2_ce                49152  0
+cfg80211             1064960  1 brcmfmac
+bluetooth             671744  33 hci_uart,btbcm,bnep,rfcomm
+rpi_hevc_dec           65536  0
+sha256_arm64           49152  1 sha2_ce
+sha1_ce                49152  0
+snd_soc_core          327680  2 vc4,snd_soc_hdmi_codec
+pisp_be                49152  0
+ecdh_generic           49152  2 bluetooth
+snd_compress           49152  1 snd_soc_core
+ecc                    65536  1 ecdh_generic
+sha1_generic           49152  1 sha1_ce
+v4l2_mem2mem           65536  1 rpi_hevc_dec
+snd_pcm_dmaengine      49152  1 snd_soc_core
+rfkill                 49152  6 bluetooth,cfg80211
+snd_pcm               163840  4 snd_soc_hdmi_codec,snd_compress,snd_soc_core,snd_pcm_dmaengine
+videobuf2_dma_contig    49152  2 pisp_be,rpi_hevc_dec
+videobuf2_memops       49152  2 videobuf2_vmalloc,videobuf2_dma_contig
+libaes                 49152  4 aes_ce_cipher,bluetooth,ghash_ce,aes_ce_blk
+videobuf2_v4l2         49152  4 pisp_be,rpi_hevc_dec,uvcvideo,v4l2_mem2mem
+snd_timer              65536  3 snd_seq,snd_hrtimer,snd_pcm
+raspberrypi_hwmon      49152  0
+snd                   147456  9 snd_seq,snd_seq_device,snd_soc_hdmi_codec,snd_timer,snd_compress,snd_soc_core,snd_pcm
+v3d                   212992  0
+videodev              344064  5 pisp_be,rpi_hevc_dec,videobuf2_v4l2,uvcvideo,v4l2_mem2mem
+gpu_sched              98304  1 v3d
+videobuf2_common       98304  8 videobuf2_vmalloc,pisp_be,rpi_hevc_dec,videobuf2_dma_contig,videobuf2_v4l2,uvcvideo,v4l2_mem2mem,videobuf2_memops
+spi_bcm2835            49152  0
+drm_shmem_helper       49152  1 v3d
+i2c_brcmstb            49152  0
+mc                     81920  11 videodev,pisp_be,rpi_hevc_dec,videobuf2_v4l2,uvcvideo,videobuf2_common,v4l2_mem2mem
+drm_kms_helper        245760  3 drm_dma_helper,vc4,drm_shmem_helper
+rp1_pio                65536  0
+raspberrypi_gpiomem    49152  0
+rp1_fw                 49152  1 rp1_pio
+rp1_mailbox            49152  1
+rp1_adc                49152  0
+gpio_keys              49152  0
+pwm_fan                49152  0
+nvmem_rmem             49152  0
+uio_pdrv_genirq        49152  0
+uio                    49152  1 uio_pdrv_genirq
+i2c_dev                49152  0
+drm                   704512  8 gpu_sched,drm_kms_helper,drm_dma_helper,v3d,vc4,drm_shmem_helper,drm_display_helper
+ledtrig_pattern        49152  0
+drm_panel_orientation_quirks    65536  1 drm
+backlight              49152  2 drm_kms_helper,drm
+fuse                  196608  1
+dm_mod                180224  0
+ip_tables              65536  0
+x_tables               81920  5 xt_conntrack,nft_compat,xt_addrtype,ip_tables,xt_MASQUERADE
+ipv6                  606208  63 bridge,br_netfilter
