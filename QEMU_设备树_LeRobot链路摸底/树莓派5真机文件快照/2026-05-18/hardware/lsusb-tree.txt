@@ -1,17 +1,17 @@
-/:  Bus 04.Port 1: Dev 1, Class=root_hub, Driver=xhci-hcd/1p, 5000M              # USB 3.0 root hub；当前下面没有挂 LeRobot 设备。
-/:  Bus 03.Port 1: Dev 1, Class=root_hub, Driver=xhci-hcd/2p, 480M               # USB 2.0 root hub；下面挂了一个键盘。
-    |__ Port 2: Dev 2, If 0, Class=Human Interface Device, Driver=usbhid, 12M    # 同一个键盘的 If 0：通常是标准键盘按键接口。
-    |__ Port 2: Dev 2, If 1, Class=Human Interface Device, Driver=, 12M          # 同一个键盘的 If 1：可能是多媒体键、灯光、宏键等附加 HID 接口；当前没有绑定驱动。
-    |__ Port 2: Dev 2, If 2, Class=Human Interface Device, Driver=usbhid, 12M    # 同一个键盘的 If 2：另一个 HID 功能接口，可能用于额外按键或厂商功能。
-/:  Bus 02.Port 1: Dev 1, Class=root_hub, Driver=xhci-hcd/1p, 5000M              # USB 3.0 root hub。
-    |__ Port 1: Dev 2, If 0, Class=Hub, Driver=hub/4p, 5000M                     # 外接 USB 3.2 Hub；当前只是扩展口，不是 LeRobot 直接设备。
-/:  Bus 01.Port 1: Dev 1, Class=root_hub, Driver=xhci-hcd/2p, 480M               # USB 2.0 root hub；LeRobot 的摄像头和舵机串口都在这条树下。
-    |__ Port 1: Dev 2, If 0, Class=Hub, Driver=hub/4p, 480M                      # 外接 USB 2.1 Hub；LeRobot 外设挂在它下面。
-        |__ Port 1: Dev 3, If 0, Class=Video, Driver=uvcvideo, 480M              # 第一个 USB 摄像头的 If 0：UVC VideoControl 控制接口，用来设置格式、分辨率、帧率、曝光等。
-        |__ Port 1: Dev 3, If 1, Class=Video, Driver=uvcvideo, 480M              # 第一个 USB 摄像头的 If 1：UVC VideoStreaming 视频流接口，用来传输图像帧。
-        |__ Port 2: Dev 4, If 1, Class=Video, Driver=uvcvideo, 480M              # 第二个 USB 摄像头的 If 1：UVC VideoStreaming 视频流接口，用来传输图像帧。
-        |__ Port 2: Dev 4, If 0, Class=Video, Driver=uvcvideo, 480M              # 第二个 USB 摄像头的 If 0：UVC VideoControl 控制接口，用来设置格式、分辨率、帧率、曝光等。
-        |__ Port 3: Dev 5, If 0, Class=Communications, Driver=cdc_acm, 12M       # 第一个 SO101 串口板的 If 0：CDC ACM 通信控制接口，用来描述/控制这个虚拟串口。
-        |__ Port 3: Dev 5, If 1, Class=CDC Data, Driver=cdc_acm, 12M             # 第一个 SO101 串口板的 If 1：CDC 数据接口，实际串口读写数据走这里。
-        |__ Port 4: Dev 6, If 0, Class=Communications, Driver=cdc_acm, 12M       # 第二个 SO101 串口板的 If 0：CDC ACM 通信控制接口，用来描述/控制这个虚拟串口。
-        |__ Port 4: Dev 6, If 1, Class=CDC Data, Driver=cdc_acm, 12M             # 第二个 SO101 串口板的 If 1：CDC 数据接口，实际串口读写数据走这里。
+/:  Bus 04.Port 1: Dev 1, Class=root_hub, Driver=xhci-hcd/1p, 5000M              # xhci-hcd.1 的 USB3 root hub
+/:  Bus 03.Port 1: Dev 1, Class=root_hub, Driver=xhci-hcd/2p, 480M               # xhci-hcd.1 的 USB2 root hub，挂键盘
+    |__ Port 2: Dev 2, If 0, Class=Human Interface Device, Driver=usbhid, 12M    # 键盘 If 0：按键
+    |__ Port 2: Dev 2, If 1, Class=Human Interface Device, Driver=, 12M          # 键盘 If 1：附加 HID
+    |__ Port 2: Dev 2, If 2, Class=Human Interface Device, Driver=usbhid, 12M    # 键盘 If 2：附加 HID
+/:  Bus 02.Port 1: Dev 1, Class=root_hub, Driver=xhci-hcd/1p, 5000M              # xhci-hcd.0 的 USB3 root hub
+    |__ Port 1: Dev 2, If 0, Class=Hub, Driver=hub/4p, 5000M                     # 同一个物理 Hub 的 USB3 侧
+/:  Bus 01.Port 1: Dev 1, Class=root_hub, Driver=xhci-hcd/2p, 480M               # xhci-hcd.0 的 USB2 root hub，挂 LeRobot 外设
+    |__ Port 1: Dev 2, If 0, Class=Hub, Driver=hub/4p, 480M                      # 同一个物理 Hub 的 USB2 侧
+        |__ Port 1: Dev 3, If 0, Class=Video, Driver=uvcvideo, 480M              # 摄像头 1 If 0：控制
+        |__ Port 1: Dev 3, If 1, Class=Video, Driver=uvcvideo, 480M              # 摄像头 1 If 1：视频流
+        |__ Port 2: Dev 4, If 1, Class=Video, Driver=uvcvideo, 480M              # 摄像头 2 If 1：视频流
+        |__ Port 2: Dev 4, If 0, Class=Video, Driver=uvcvideo, 480M              # 摄像头 2 If 0：控制
+        |__ Port 3: Dev 5, If 0, Class=Communications, Driver=cdc_acm, 12M       # 串口板 1 If 0：控制
+        |__ Port 3: Dev 5, If 1, Class=CDC Data, Driver=cdc_acm, 12M             # 串口板 1 If 1：数据
+        |__ Port 4: Dev 6, If 0, Class=Communications, Driver=cdc_acm, 12M       # 串口板 2 If 0：控制
+        |__ Port 4: Dev 6, If 1, Class=CDC Data, Driver=cdc_acm, 12M             # 串口板 2 If 1：数据

@@ -1,51 +1,74 @@
 # For more options and information see
 # http://rptl.io/configtxt
 # Some settings may impact device functionality. See link above for details
+# 这是 Raspberry Pi firmware 启动前读取的配置文件，用来决定启用哪些 overlay、参数和启动行为
 
 # Uncomment some or all of these to enable the optional hardware interfaces
+# 下面三行如果取消注释，会启用板载 I2C / I2S / SPI 接口
 #dtparam=i2c_arm=on
 #dtparam=i2s=on
 #dtparam=spi=on
 
 # Enable audio (loads snd_bcm2835)
+# 启用音频，会让系统加载/使用树莓派音频相关驱动
 dtparam=audio=on
 
 # Additional overlays and parameters are documented
 # /boot/firmware/overlays/README
+# 更多 dtoverlay 和 dtparam 的说明在 boot 分区 overlays/README 里
 
 # Automatically load overlays for detected cameras
+# 让 firmware 自动检测树莓派相机并加载对应 overlay
 camera_auto_detect=1
 
 # Automatically load overlays for detected DSI displays
+# 让 firmware 自动检测 DSI 显示屏并加载对应 overlay
 display_auto_detect=1
 
 # Automatically load initramfs files, if found
+# 如果 boot 分区里存在匹配的 initramfs，就自动加载 early userspace
 auto_initramfs=1
 
 # Enable DRM VC4 V3D driver
+# 加载 VC4/KMS/V3D 显示 overlay，启用 Linux DRM 显示栈
 dtoverlay=vc4-kms-v3d
+# 最多准备两个 framebuffer，常见于桌面/双显示输出场景
 max_framebuffers=2
 
 # Don't have the firmware create an initial video= setting in cmdline.txt.
 # Use the kernel's default instead.
+# 不让 firmware 自动往 cmdline 里塞 video= 参数，显示模式交给 kernel 默认逻辑
 disable_fw_kms_setup=1
 
 # Run in 64-bit mode
+# 让 firmware 启动 64-bit ARM kernel，Pi 5 上对应 ARM64/AArch64
 arm_64bit=1
 
+# 指定要加载的 kernel 镜像文件名；Pi 5 默认会加载 kernel_2712.img
+# 测试新 kernel 时，可以把新镜像放到 /boot/firmware/kernel_2712-test.img
+# 然后取消下一行注释，让 firmware 改为加载这个文件
+#kernel=kernel_2712-test.img
+
 # Disable compensation for displays with overscan
+# 关闭 overscan 补偿，现代显示器一般不需要给画面留黑边
 disable_overscan=1
 
 # Run as fast as firmware / board allows
+# 允许 firmware 按板子能力启用更高性能模式
 arm_boost=1
 
 [cm4]
+# 下面这个块只对 Compute Module 4 生效，不是 Pi 5 Model B 的主路径
 # Enable host mode on the 2711 built-in XHCI USB controller.
 # This line should be removed if the legacy DWC2 controller is required
 # (e.g. for USB device mode) or if USB support is not required.
+# CM4 上让 BCM2711 内置 XHCI 控制器工作在 USB host 模式
 otg_mode=1
 
 [cm5]
+# 下面这个块只对 Compute Module 5 生效，Pi 5 Model B 不会执行这个条件块
+# CM5 上把 DWC2 overlay 配成 host 模式；这不是 Pi 5 Model B 的 RP1/DWC3 USB 主链路
 dtoverlay=dwc2,dr_mode=host
 
 [all]
+# 从这里开始后续配置对所有板型生效；当前文件后面没有更多配置

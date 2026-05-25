@@ -1093,108 +1093,719 @@ static void giveback_first_trb(struct xhci_hcd *xhci, int slot_id,  // 定义当
 }
 ```
 
-### 7.3 doorbell MMIO 寄存器
+### 7.3 xHCI doorbell 寄存器写全链路
 
-真正的“敲门铃”发生在 `xhci_ring_ep_doorbell()`。它先定位当前 USB 设备 slot 对应的 doorbell 寄存器，再把 endpoint 编号和 stream id 编成 doorbell value 写进去。这个 `writel()` 是通知 xHCI 硬件的关键动作：告诉主控“这个 slot 的这个 endpoint 有新的 TRB 可以处理”。
-
-来源：linux/drivers/usb/host/xhci-ring.c:xhci_ring_ep_doorbell（节选：仅保留本链路相关分支，已按当前仓库源码核对）
-```c
-// linux/drivers/usb/host/xhci-ring.c
-void xhci_ring_ep_doorbell(struct xhci_hcd *xhci,  // 定义当前层的 C 函数入口
-        unsigned int slot_id,  // 本行参与当前 C 层路径的控制流或数据准备
-        unsigned int ep_index,  // 本行参与当前 C 层路径的控制流或数据准备
-        unsigned int stream_id)  // 本行参与当前 C 层路径的控制流或数据准备
-{
-    __le32 __iomem *db_addr = &xhci->dba->doorbell[slot_id]; // 当前设备 slot 的 doorbell
-
-    readl(db_addr);                              // Pi 4/5 这类非一致性 DMA 平台上做一次序列化
-    writel(DB_VALUE(ep_index, stream_id), db_addr); // 写 doorbell 寄存器，通知 xHCI 硬件
-    readl(db_addr);                              // flush doorbell write  // 进入 xHCI 主控队列或门铃通知路径
-}
-```
-
-来源：linux/drivers/usb/host/xhci.h:DB_VALUE（节选：仅保留本链路相关分支，已按当前仓库源码核对）
-```c
-// linux/drivers/usb/host/xhci.h
-struct xhci_doorbell_array {  // 定义当前链路涉及的内核数据结构
-    __le32 doorbell[256];                        // doorbell[0] 是命令环，doorbell[slot_id] 是设备 endpoint
-};
-
-#define DB_VALUE(ep, stream) ((((ep) + 1) & 0xff) | ((stream) << 16))  // 定义内核/库代码后续使用的常量或宏
-```
-
-这里的 `doorbell` 不是普通内存里的状态变量，而是 xHCI 控制器暴露出来的一组 MMIO 寄存器。初始化时，xHCI 驱动从 Capability Register 的 `DBOFF` 字段读出 doorbell array 相对 capability register 基址的偏移，然后把 `xhci->dba` 指到这片 MMIO 区域。
-
-来源：linux/drivers/usb/host/xhci-mem.c:xhci_mem_init（节选：仅保留 doorbell array 初始化）
-```c
-// linux/drivers/usb/host/xhci-mem.c
-val = readl(&xhci->cap_regs->db_off);            // 读取 DBOFF：doorbell array offset
-val &= DBOFF_MASK;                               // 清掉低 2 个保留位
-xhci->dba = (void __iomem *) xhci->cap_regs + val; // doorbell array 的 MMIO 基址
-```
-
-因此，`__le32 __iomem *db_addr = &xhci->dba->doorbell[slot_id]` 得到的是一个 MMIO 寄存器地址。`writel(DB_VALUE(ep_index, stream_id), db_addr)` 会向这个寄存器写入 32 位 doorbell value：
+真正的“敲门铃”发生在 `xhci_ring_ep_doorbell()`。这一节只追一件事：CPU 到底怎样把一个 32 位 doorbell value 写进 xHCI 控制器的 MMIO 寄存器。完整展开链路如下：
 
 ```text
+xhci_ring_ep_doorbell()
+  -> 计算 db_addr = &xhci->dba->doorbell[slot_id]
+  -> 计算 value = DB_VALUE(ep_index, stream_id)
+  -> readl(db_addr)                 # 写前序列化，最终是 ldr/ldar
+  -> writel(value, db_addr)          # 真正写 MMIO，最终是 dmb oshst + str
+  -> readl(db_addr)                 # 写后读回，flush posted MMIO write
+```
+
+#### 7.3.1 函数入口参数与 endpoint 状态检查
+
+##### 7.3.1.1 函数入口总览
+
+来源：linux/drivers/usb/host/xhci-ring.c:xhci_ring_ep_doorbell（按当前仓库源码核对）
+```c
+// linux/drivers/usb/host/xhci-ring.c
+void xhci_ring_ep_doorbell(struct xhci_hcd *xhci,          // xHCI 主控的软件对象，保存寄存器基址、设备表和 ring 状态
+        unsigned int slot_id,                              // 当前 USB 设备在 xHCI 中的 slot 编号
+        unsigned int ep_index,                             // 当前 endpoint 在 xHCI 驱动内部的索引
+        unsigned int stream_id)                            // USB streams 的 stream 编号；普通 CDC ACM bulk OUT 通常为 0
+{
+    __le32 __iomem *db_addr = &xhci->dba->doorbell[slot_id]; // 计算当前 slot 的 doorbell MMIO 寄存器地址
+    struct xhci_virt_ep *ep = &xhci->devs[slot_id]->eps[ep_index]; // 找到当前 slot/endpoint 对应的软件状态对象
+    unsigned int ep_state = ep->ep_state;                   // 读取 endpoint 状态位，决定能不能敲 doorbell
+
+    if ((ep_state & EP_STOP_CMD_PENDING) || (ep_state & SET_DEQ_PENDING) || // 如果 endpoint 正在停止或正在设置 dequeue 指针
+        (ep_state & EP_HALTED) || (ep_state & EP_CLEARING_TT))              // 或者 endpoint 已 halt / 正在清 TT 状态
+        return;                                             // 此时不能敲 doorbell，直接返回，不写寄存器
+
+    trace_xhci_ring_ep_doorbell(slot_id, DB_VALUE(ep_index, stream_id)); // 记录 tracepoint，只用于追踪，不通知硬件
+
+    readl(db_addr);                                         // 写前读 doorbell，做 PCIe/MMIO 序列化
+    writel(DB_VALUE(ep_index, stream_id), db_addr);          // 把 doorbell value 写入 xHCI doorbell MMIO 寄存器
+    readl(db_addr);                                         // 写后读 doorbell，flush posted MMIO write
+}
+```
+
+##### 7.3.1.2 四个入口参数
+
+入口参数逐个拆开：
+
+```text
+xhci       # 当前 xHCI 主控的软件对象，里面保存 MMIO 基址、设备表、transfer ring 等状态
+slot_id    # xHCI 给当前 USB 设备分配的 slot 编号；doorbell[slot_id] 就是该设备的门铃寄存器
+ep_index   # xHCI 驱动内部的 endpoint 索引；DB_VALUE 会把它转换成 doorbell 的 Endpoint Target
+stream_id  # USB streams 的 stream 编号；CDC ACM 普通 bulk OUT 通常为 0
+```
+
+##### 7.3.1.3 `ep` 是什么，为什么要先取它
+
+`ep` 是 `endpoint` 的缩写。这里的 `ep` 不是 USB 设备本身，也不是舵机，而是“当前 USB 设备里某一条 endpoint 通道”在 xHCI 驱动里的软件状态对象。`writePort` 写舵机时，最终走的是 CDC ACM 数据接口的 bulk OUT endpoint，所以这里的 `ep` 可以理解成“这个 USB 串口板的 bulk OUT 传输通道状态”。
+
+这一行按层级拆开是：
+
+```text
+xhci                              # xHCI 主控对象
+xhci->devs                        # xHCI 维护的 slot_id -> USB 设备对象数组
+xhci->devs[slot_id]               # 当前 slot_id 对应的 USB 设备对象
+xhci->devs[slot_id]->eps          # 当前 USB 设备的 endpoint 软件状态数组
+xhci->devs[slot_id]->eps[ep_index] # 当前 endpoint 的软件状态对象
+&xhci->devs[slot_id]->eps[ep_index] # 取这个 endpoint 状态对象的地址
+ep                                # 用 ep 指针保存这个地址，后面读 ep->ep_state
+```
+
+对应的结构关系在源码里是这样定义的：
+
+来源：linux/drivers/usb/host/xhci.h:xhci_hcd / xhci_virt_device / xhci_virt_ep（节选）
+```c
+// linux/drivers/usb/host/xhci.h
+struct xhci_hcd {                                      // xHCI 主控的软件总对象
+    struct xhci_virt_device *devs[MAX_HC_SLOTS];       // slot_id 到 USB 设备软件对象的映射表
+};
+
+#define EP_CTX_PER_DEV 31                              // 每个 xHCI 设备最多跟踪 31 个 endpoint context
+
+struct xhci_virt_device {                              // xHCI 中一个 USB 设备的软件对象
+    int slot_id;                                       // 这个 USB 设备在 xHCI 里的 slot 编号
+    struct usb_device *udev;                           // USB core 层的 USB 设备对象
+    struct xhci_container_ctx *out_ctx;                // 硬件输出 context，xHCI 会更新它
+    struct xhci_container_ctx *in_ctx;                 // 给 xHCI 命令使用的输入 context
+    struct xhci_virt_ep eps[EP_CTX_PER_DEV];           // 这个 USB 设备的 endpoint 软件状态数组
+};
+
+struct xhci_virt_ep {                                  // xHCI 中一个 endpoint 的软件状态对象
+    struct xhci_virt_device *vdev;                     // parent：指回所属 USB 设备对象
+    unsigned int ep_index;                             // 当前 endpoint 在 eps[] 数组里的索引
+    struct xhci_ring *ring;                            // 当前 endpoint 的 transfer ring，TRB 就排在这里
+    struct xhci_stream_info *stream_info;              // streams 模式的信息；普通 CDC ACM bulk OUT 通常不用
+    struct xhci_ring *new_ring;                        // 配置 endpoint 失败时用于恢复状态的临时 ring
+    unsigned int err_count;                            // endpoint 相关错误计数
+    unsigned int ep_state;                             // endpoint 软件状态位，决定能不能继续排 URB / 敲 doorbell
+#define SET_DEQ_PENDING      (1 << 0)                  // 正在设置 transfer ring dequeue pointer
+#define EP_HALTED            (1 << 1)                  // endpoint halt/stall，通常需要错误恢复
+#define EP_STOP_CMD_PENDING  (1 << 2)                  // Stop Endpoint 命令已经挂起，常见于取消 URB
+#define EP_GETTING_STREAMS   (1 << 3)                  // 正在切到 streams 模式，暂时不要 enqueue URB
+#define EP_HAS_STREAMS       (1 << 4)                  // endpoint 当前已经使用 streams
+#define EP_GETTING_NO_STREAMS (1 << 5)                 // 正在退出 streams 模式，暂时不要 enqueue URB
+#define EP_HARD_CLEAR_TOGGLE (1 << 6)                  // 需要硬清 data toggle 状态
+#define EP_SOFT_CLEAR_TOGGLE (1 << 7)                  // 需要软清 data toggle 状态
+#define EP_CLEARING_TT       (1 << 8)                  // 正在清 hub Transaction Translator 缓冲
+    struct list_head cancelled_td_list;                // 已取消 TD 链表，取消 URB 时会用到
+    struct xhci_hcd *xhci;                             // 指回 xHCI 主控对象
+    struct xhci_segment *queued_deq_seg;               // 已提交 Set TR Dequeue 命令对应的 ring segment
+    union xhci_trb *queued_deq_ptr;                    // 已提交 Set TR Dequeue 命令对应的 dequeue TRB 指针
+};
+```
+
+这些 `eps[]` 元素是在分配 xHCI 虚拟设备时初始化的：
+
+来源：linux/drivers/usb/host/xhci-mem.c:xhci_alloc_virt_device（节选）
+```c
+// linux/drivers/usb/host/xhci-mem.c
+for (i = 0; i < 31; i++) {                            // 遍历这个 USB 设备的 31 个 endpoint 软件槽位
+    dev->eps[i].ep_index = i;                         // 记录 endpoint 索引，后面 ep_index 就能反查自己
+    dev->eps[i].vdev = dev;                           // 记录 parent USB 设备对象
+    dev->eps[i].xhci = xhci;                          // 记录所属 xHCI 主控对象
+    INIT_LIST_HEAD(&dev->eps[i].cancelled_td_list);   // 初始化该 endpoint 的取消 TD 链表
+    INIT_LIST_HEAD(&dev->eps[i].bw_endpoint_list);    // 初始化该 endpoint 的带宽管理链表
+}
+
+dev->eps[0].ring = xhci_ring_alloc(xhci, 2, 1, TYPE_CTRL, 0, flags); // 给控制 endpoint 0 分配默认 control ring
+```
+
+所以，`struct xhci_virt_ep *ep = &xhci->devs[slot_id]->eps[ep_index];` 这一行的目的就是：先拿到“当前 slot 的当前 endpoint 状态对象”，后面才能检查 `ep->ep_state`，并且 xHCI 其他路径也能通过 `ep->ring` 找到这个 endpoint 的 transfer ring。
+
+##### 7.3.1.4 endpoint 状态检查
+
+`ep_state` 检查是为了避免在 endpoint 正处于停止、重设 dequeue、halt 或清 TT 状态时重新敲门铃：
+
+```text
+EP_STOP_CMD_PENDING  # 已经有 Stop Endpoint 命令挂起
+SET_DEQ_PENDING      # 正在设置 transfer ring dequeue pointer
+EP_HALTED            # endpoint 已 halt
+EP_CLEARING_TT       # 正在清 transaction translator 相关状态
+```
+
+这些分支如果命中，函数直接 `return`，不会写 doorbell 寄存器。真正会写寄存器的路径必须先通过这些状态检查。
+
+##### 7.3.1.5 tracepoint：源码怎么判断是否写入 buffer
+
+`trace_xhci_ring_ep_doorbell(slot_id, DB_VALUE(ep_index, stream_id))` 只记录 tracepoint。它会再次计算一次 doorbell value 供追踪使用，不负责通知硬件；真正通知硬件的是后面的 `writel()`。
+
+这一行也拆开看：
+
+```c
+trace_xhci_ring_ep_doorbell(slot_id, DB_VALUE(ep_index, stream_id)); // 把 slot_id 和 doorbell value 送进 Linux tracepoint 系统
+```
+
+其中 `DB_VALUE(ep_index, stream_id)` 还是前面那套 doorbell value 计算：
+
+```text
+doorbell = ((ep_index + 1) & 0xff) | (stream_id << 16)
+```
+
+这个 tracepoint 的定义在 `xhci-trace.h`：
+
+来源：linux/drivers/usb/host/xhci-trace.h:xhci_log_doorbell / xhci_ring_ep_doorbell（节选）
+```c
+// linux/drivers/usb/host/xhci-trace.h
+DECLARE_EVENT_CLASS(xhci_log_doorbell,                 // 定义一类 xHCI doorbell trace event 模板
+    TP_PROTO(u32 slot, u32 doorbell),                   // 这个 trace event 接收两个参数：slot 和 doorbell
+    TP_ARGS(slot, doorbell),                            // 调用 tracepoint 时传入的实参就是 slot、doorbell
+    TP_STRUCT__entry(                                   // 定义 trace ring buffer 里要保存哪些字段
+        __field(u32, slot)                              // 保存 slot_id
+        __field(u32, doorbell)                          // 保存 doorbell value
+    ),
+    TP_fast_assign(                                     // 定义 tracepoint 触发时如何把参数写入 trace entry
+        __entry->slot = slot;                           // 把函数参数 slot 存到 trace entry
+        __entry->doorbell = doorbell;                   // 把函数参数 doorbell 存到 trace entry
+    ),
+    TP_printk("Ring doorbell for %s",                   // 定义用户读取 trace 时怎么格式化显示
+          xhci_decode_doorbell(__get_buf(XHCI_MSG_MAX), // 申请一段临时字符串缓冲，用来生成可读文本
+                               __entry->slot,           // 把 trace entry 里的 slot 传给解码函数
+                               __entry->doorbell)       // 把 trace entry 里的 doorbell 传给解码函数
+    )
+);
+
+DEFINE_EVENT(xhci_log_doorbell, xhci_ring_ep_doorbell,  // 基于 doorbell 模板生成 xhci_ring_ep_doorbell 事件
+     TP_PROTO(u32 slot, u32 doorbell),                  // 生成的事件参数类型仍然是 slot、doorbell
+     TP_ARGS(slot, doorbell)                            // 生成的事件调用实参仍然是 slot、doorbell
+);
+```
+
+`DECLARE_EVENT_CLASS` 是“定义模板”：字段怎么存、怎么打印都写在这里。`DEFINE_EVENT` 是“用这个模板生成一个具体事件”。所以 `trace_xhci_ring_ep_doorbell()` 不是手写的普通函数，而是 Linux trace 宏根据 `DEFINE_EVENT(..., xhci_ring_ep_doorbell, ...)` 生成出来的 trace 调用入口。
+
+这个具体事件背后有一个 `struct tracepoint` 对象，里面最关键的是 `key` 和 `funcs`。`key` 用来快速判断这个 tracepoint 有没有打开；`funcs` 是打开后要调用的 probe/回调列表。
+
+来源：linux/include/linux/tracepoint-defs.h:struct tracepoint（节选）
+```c
+// linux/include/linux/tracepoint-defs.h
+struct tracepoint {                                  // 一个内核 tracepoint 的运行时对象
+    const char *name;                                // tracepoint 名字，例如 xhci_ring_ep_doorbell
+    struct static_key key;                           // static key：快速判断这个 tracepoint 当前是否启用
+    struct static_call_key *static_call_key;         // static call 优化用的 key，减少启用时的间接调用开销
+    void *static_call_tramp;                         // static call 跳板地址
+    void *iterator;                                  // 遍历 funcs 回调列表的函数
+    void *probestub;                                 // probe stub，给 ftrace/perf 等注册回调用
+    int (*regfunc)(void);                            // 第一次启用时的注册钩子
+    void (*unregfunc)(void);                         // 最后一次关闭时的注销钩子
+    struct tracepoint_func __rcu *funcs;             // 已注册的 trace 回调数组；未启用时通常是 NULL
+};
+```
+
+这个对象默认就是“关闭”的。源码里创建 tracepoint 时把 `.key` 初始化成 `STATIC_KEY_INIT_FALSE`，把 `.funcs` 初始化成 `NULL`：
+
+来源：linux/include/linux/tracepoint.h:DEFINE_TRACE_FN（节选）
+```c
+// linux/include/linux/tracepoint.h
+#define DEFINE_TRACE_FN(_name, _reg, _unreg, proto, args) /* 为 _name 生成 tracepoint 对象和迭代函数 */ \
+    static const char __tpstrtab_##_name[] /* 保存 tracepoint 名字字符串 */ \
+    __section("__tracepoints_strings") = #_name; /* 把名字放进 __tracepoints_strings section */ \
+    extern struct static_call_key STATIC_CALL_KEY(tp_func_##_name); /* 声明 static call key */ \
+    int __traceiter_##_name(void *__data, proto); /* 声明遍历 probe 回调的 iterator */ \
+    void __probestub_##_name(void *__data, proto); /* 声明 probe stub */ \
+    struct tracepoint __tracepoint_##_name __used /* 定义真正的 tracepoint 对象 */ \
+    __section("__tracepoints") = { /* 放进 __tracepoints section，供内核 tracing 框架发现 */ \
+        .name = __tpstrtab_##_name, /* tracepoint 名字 */ \
+        .key = STATIC_KEY_INIT_FALSE, /* 默认关闭：static_key_false() 初始不命中 */ \
+        .static_call_key = &STATIC_CALL_KEY(tp_func_##_name), /* static call 优化所需 key */ \
+        .static_call_tramp = STATIC_CALL_TRAMP_ADDR(tp_func_##_name), /* static call 跳板 */ \
+        .iterator = &__traceiter_##_name, /* 启用后用于遍历 funcs 回调列表 */ \
+        .probestub = &__probestub_##_name, /* ftrace/perf 注册 probe 用的 stub */ \
+        .regfunc = _reg, /* tracepoint 启用时的注册函数 */ \
+        .unregfunc = _unreg, /* tracepoint 关闭时的注销函数 */ \
+        .funcs = NULL }; /* 默认没有任何回调，所以不会写 trace buffer */ \
+    __TRACEPOINT_ENTRY(_name); /* 把该 tracepoint 放入 tracepoint 指针表 */
+```
+
+代入本事件名后，关键初始状态就是：
+
+```text
+__tracepoint_xhci_ring_ep_doorbell.name  = "xhci_ring_ep_doorbell"
+__tracepoint_xhci_ring_ep_doorbell.key   = false
+__tracepoint_xhci_ring_ep_doorbell.funcs = NULL
+```
+
+追到通用 tracepoint 宏，真实的判断在 `__DECLARE_TRACE` 里：
+
+来源：linux/include/linux/tracepoint.h:__DECLARE_TRACE（节选）
+```c
+// linux/include/linux/tracepoint.h
+#define __DECLARE_TRACE(name, proto, args, cond, data_proto) /* 声明并生成 trace_##name() 入口 */ \
+    extern int __traceiter_##name(data_proto); /* 声明 trace 回调 iterator */ \
+    DECLARE_STATIC_CALL(tp_func_##name, __traceiter_##name); /* 声明 static call 优化入口 */ \
+    extern struct tracepoint __tracepoint_##name; /* 声明这个 tracepoint 的运行时对象 */ \
+    static inline void trace_##name(proto) /* 生成 trace_xxx(...) 调用入口 */ \
+    { /* trace_##name 函数体开始 */ \
+        if (static_key_false(&__tracepoint_##name.key)) /* 判断该 tracepoint 当前是否启用 */ \
+            __DO_TRACE(name, /* 启用时才进入 __DO_TRACE，未启用则不写 buffer */ \
+                TP_ARGS(args), /* 把调用点参数传给 trace 回调 */ \
+                TP_CONDITION(cond), 0); /* 检查 trace 条件，普通路径 rcuidle=0 */ \
+    } /* trace_##name 函数体结束 */ \
+    static inline bool trace_##name##_enabled(void) /* 生成 trace_xxx_enabled() 查询入口 */ \
+    { /* enabled 查询函数体开始 */ \
+        return static_key_false(&__tracepoint_##name.key); /* 返回同一个 static key 状态 */ \
+    } /* enabled 查询函数体结束 */
+```
+
+把 `name` 代入 `xhci_ring_ep_doorbell` 后，调用点会生成这样的入口函数：
+
+来源：linux/include/linux/tracepoint.h:__DECLARE_TRACE（节选，按本事件名代入理解）
+```c
+// linux/include/linux/tracepoint.h
+static inline void trace_xhci_ring_ep_doorbell(u32 slot, u32 doorbell) // tracepoint 调用入口，参数就是 slot 和 doorbell
+{
+    if (static_key_false(&__tracepoint_xhci_ring_ep_doorbell.key))     // 只在 tracepoint 被启用时才进入 __DO_TRACE()
+        __DO_TRACE(xhci_ring_ep_doorbell,                              // 调用注册到该 tracepoint 上的回调
+            TP_ARGS(slot, doorbell),                                   // 把 slot、doorbell 作为回调参数
+            TP_CONDITION(true), 0);                                    // 条件为 true，普通非 rcuidle trace
+}
+```
+
+这就是“是否写入 trace buffer”的判断点。没有执行下面这种启用动作时：
+
+```bash
+echo 1 > /sys/kernel/debug/tracing/events/xhci-hcd/xhci_ring_ep_doorbell/enable
+```
+
+`static_key_false(&__tracepoint_xhci_ring_ep_doorbell.key)` 不命中，函数直接跳过，不进入 `__DO_TRACE()`，也就不会把 `slot_id` 和 `doorbell` 写进 trace buffer。启用之后，tracing 框架注册 probe，并把 static key 打开；下一次执行到这个调用点，才会进入 `__DO_TRACE()`。
+
+`__DO_TRACE()` 的核心动作是：
+
+来源：linux/include/linux/tracepoint.h:__DO_TRACE（节选）
+```c
+// linux/include/linux/tracepoint.h
+#define __DO_TRACE(name, args, cond, rcuidle) /* 定义真正执行 tracepoint 回调的宏 */ \
+    do { /* 用 do/while 包住多条语句 */                                      \
+        int __maybe_unused __idx = 0; /* rcuidle 路径用到的 SRCU 索引，普通路径基本不用 */ \
+        if (!(cond)) /* 如果 trace 条件不成立 */                             \
+            return; /* 直接返回，不记录 trace */                              \
+        preempt_disable_notrace(); /* 关闭抢占，避免 trace 回调执行中被普通调度打断 */ \
+        __DO_TRACE_CALL(name, TP_ARGS(args)); /* 调用注册到该 tracepoint 上的 probe/回调 */ \
+        preempt_enable_notrace(); /* 恢复抢占 */                              \
+    } while (0) /* 宏整体表现为一条语句 */
+```
+
+trace entry 最终怎么显示，靠 `xhci_decode_doorbell()`：
+
+来源：linux/drivers/usb/host/xhci.h:xhci_decode_doorbell（节选）
+```c
+// linux/drivers/usb/host/xhci.h
+static inline const char *xhci_decode_doorbell(char *str, u32 slot, u32 doorbell) // 把 slot/doorbell 转成人能看的字符串
+{
+    u8 ep;                                                // 保存 doorbell 低 8 位的 endpoint target
+    u16 stream;                                           // 保存 doorbell 高 16 位的 stream id
+    int ret;                                              // 保存 sprintf 已写入的字符数
+
+    ep = (doorbell & 0xff);                               // 取 bits 0..7：Endpoint Target
+    stream = doorbell >> 16;                              // 取 bits 16..31：Stream ID
+
+    if (slot == 0) {                                      // slot 0 表示 xHCI Command Ring doorbell
+        sprintf(str, "Command Ring %d", doorbell);        // 格式化命令环 doorbell
+        return str;                                       // 返回格式化后的字符串
+    }
+    ret = sprintf(str, "Slot %d ", slot);                 // 普通设备 doorbell：先写 Slot 编号
+    if (ep > 0 && ep < 32)                                // 合法 endpoint target 范围
+        ret = sprintf(str + ret, "ep%d%s",                // 继续拼 endpoint 编号和方向
+                  ep / 2,                                 // 把 xHCI doorbell endpoint target 转成显示用 endpoint 编号
+                  ep % 2 ? "in" : "out");                // 奇数显示 in，偶数显示 out
+    else if (ep == 0 || ep < 248)                         // 0 或部分值是保留范围
+        ret = sprintf(str + ret, "Reserved %d", ep);      // 显示 Reserved
+    else                                                  // 其他高值留给厂商定义
+        ret = sprintf(str + ret, "Vendor Defined %d", ep);// 显示 Vendor Defined
+    if (stream)                                           // 如果 stream id 非 0
+        ret = sprintf(str + ret, " Stream %d", stream);   // 继续追加 Stream 编号
+
+    return str;                                           // 返回最终字符串
+}
+```
+
+所以这行 trace 的真实作用是：
+
+```text
+输入：slot_id、doorbell value
+保存：slot 字段、doorbell 字段
+trace 输出格式：读取 /sys/kernel/debug/tracing/trace 或 trace_pipe 时显示为 Ring doorbell for Slot X epYin/epYout [Stream Z]
+硬件效果：没有
+寄存器效果：没有
+USB 传输效果：没有
+```
+
+它只是给调试工具看的记录点。真正让 xHCI 控制器动作起来的仍然是后面的：
+
+```c
+writel(DB_VALUE(ep_index, stream_id), db_addr); // 真正把 doorbell value 写入 MMIO 寄存器，通知硬件
+```
+
+#### 7.3.2 doorbell 寄存器地址怎么算出来
+
+`db_addr` 来自这一行：
+
+```c
+__le32 __iomem *db_addr = &xhci->dba->doorbell[slot_id]; // 取 doorbell array 中 slot_id 对应的 32 位 MMIO 寄存器地址
+```
+
+要理解它，先看 `xhci->dba` 怎样初始化。
+
+来源：linux/drivers/usb/host/xhci-mem.c:xhci_mem_init（节选）
+```c
+// linux/drivers/usb/host/xhci-mem.c
+val = readl(&xhci->cap_regs->db_off);              // 从 xHCI capability register 读取 DBOFF Doorbell Offset：doorbell array 偏移
+val &= DBOFF_MASK;                                 // 清除 DBOFF 低 2 个保留位，只保留有效偏移
+xhci->dba = (void __iomem *) xhci->cap_regs + val; // 用 capability register 基址加偏移，得到 doorbell array 的 MMIO 基址
+```
+
+来源：linux/drivers/usb/host/xhci-caps.h:DBOFF_MASK（节选）
+```c
+// linux/drivers/usb/host/xhci-caps.h
+/* db_off bitmask - bits 0:1 reserved */ // DBOFF 的低 2 位是保留位，不能参与地址计算
+#define DBOFF_MASK (~0x3)                 // 位掩码：把低 2 位清 0，保留高位偏移
+```
+
+这里的计算含义是：
+
+```text
+raw_db_off = readl(&xhci->cap_regs->db_off)
+val        = raw_db_off & ~0x3
+xhci->dba  = xhci->cap_regs + val
+```
+
+`xhci->cap_regs` 是 xHCI capability register 区域的 MMIO 基址，`db_off` 是 xHCI 规范给出的 Doorbell Array Offset。低 2 位是保留位，所以用 `DBOFF_MASK` 清掉。最终 `xhci->dba` 指向 xHCI doorbell array 的 MMIO 虚拟地址。
+
+doorbell array 的结构是：
+
+来源：linux/drivers/usb/host/xhci.h:xhci_doorbell_array（节选）
+```c
+// linux/drivers/usb/host/xhci.h
+struct xhci_doorbell_array {              // xHCI doorbell array 的内核映射结构
+    __le32 doorbell[256];                  // 256 个 32 位 little-endian doorbell 寄存器槽位
+};
+```
+
+因此：
+
+```c
+&xhci->dba->doorbell[slot_id]              // 取第 slot_id 个 doorbell 槽位的地址
+```
+
+按 C 指针运算展开就是：
+
+```text
+db_addr = (u8 __iomem *)xhci->dba + slot_id * sizeof(__le32)
+        = (u8 __iomem *)xhci->dba + slot_id * 4
+```
+
+这不是普通 RAM 地址，而是内核映射出来的设备寄存器地址。CPU 对这个地址执行 load/store，会经过设备内存/MMIO 通路到 xHCI 控制器，而不是写内存条。
+
+#### 7.3.3 doorbell value 怎么算出来
+
+写入 doorbell 寄存器的 32 位值来自 `DB_VALUE(ep_index, stream_id)`。
+
+来源：linux/drivers/usb/host/xhci.h:DB_VALUE（节选）
+```c
+// linux/drivers/usb/host/xhci.h
+#define DB_VALUE(ep, stream) ((((ep) + 1) & 0xff) | ((stream) << 16)) // 低 8 位写 Endpoint Target，高 16 位写 Stream ID
+```
+
+按位展开：
+
+```text
+value = (((ep_index + 1) & 0xff) | (stream_id << 16))
+
 bits  0..7   Endpoint Target = ep_index + 1
 bits  8..15  Reserved = 0
-bits 16..31  Stream ID，普通 bulk OUT 通常为 0
+bits 16..31  Stream ID
 ```
 
-对 CDC ACM 的普通 bulk OUT 写包来说，`stream_id` 通常是 0，所以这次写入主要表达“当前 slot 的某个 endpoint 有新的 transfer ring 条目”。它不携带舵机协议字节；舵机协议帧已经在前面放进 `wb->buf`，TRB 里保存的是该缓冲区的 DMA 地址和长度。doorbell 的作用只是通知 xHCI 硬件去取这些 TRB。
+对 CDC ACM 的普通 bulk OUT 来说，`stream_id` 通常是 0（这里面很长，反正只要是写就是0），所以：
 
-### 7.4 writel 在 ARM64 上如何写寄存器
+```text
+value = ((ep_index + 1) & 0xff) | (0 << 16)
+      = (ep_index + 1) & 0xff
+```
 
-`writel()` 在内核里是带 I/O 顺序约束的 MMIO 写。ARM64 上大致展开为：
+举例：
 
-来源：linux/include/asm-generic/io.h:writel 与 linux/arch/arm64/include/asm/io.h:__raw_writel（节选）
+```text
+假设 CDC ACM bulk OUT 是 endpoint 1 OUT：
+
+epnum     = 1
+direction = 0                 # OUT
+ep_index  = 1 * 2 + 0 - 1 = 1
+stream_id = 0
+
+Endpoint Target = (1 + 1) & 0xff = 2
+Stream ID       = 0 << 16 = 0
+value           = 0x00000002
+```
+
+
+这个 value 不携带舵机协议帧，也不携带数据地址。协议帧已经在 CDC ACM 的 `wb->buf` 里，TRB 里保存了 `wb->buf` 的 DMA 地址和长度。doorbell value 只告诉 xHCI：“哪个 slot 的哪个 endpoint/stream 有新的 transfer ring 条目要处理。”
+
+#### 7.3.4 第一次 readl：为什么写前还要读
+
+`xhci_ring_ep_doorbell()` 在 `writel()` 前先执行：
+
+```c
+readl(db_addr);                            // 从 doorbell MMIO 地址读 32 位值；这里主要用读操作做序列化
+```
+
+源码注释说得很直接：在 Pi 4/Pi 5 这类非一致性 DMA + PCIe 场景里，TRB 写入、屏障完成、doorbell MMIO 写到达 Root Complex、endpoint DMA engine 看到 system RAM 中的新 TRB，几件事之间存在理论竞态。写前读一次 doorbell MMIO 地址，可以制造一次跨链路 round-trip，用来序列化 CPU 状态。
+
+`readl()` 的通用定义是：
+
+来源：linux/include/asm-generic/io.h:readl（节选）
 ```c
 // linux/include/asm-generic/io.h
-static inline void writel(u32 value, volatile void __iomem *addr)
+static inline u32 readl(const volatile void __iomem *addr)      // 定义 32 位 MMIO 读函数，addr 是 I/O 内存地址
 {
-    __io_bw();                                   // 写 MMIO 前的顺序屏障
-    __raw_writel((u32 __force)__cpu_to_le32(value), addr);
-    __io_aw();                                   // 写 MMIO 后的顺序处理
-}
+    u32 val;                                                    // 保存从设备寄存器读出的 32 位值
 
-// linux/arch/arm64/include/asm/io.h
-static __always_inline void __raw_writel(u32 val, volatile void __iomem *addr)
-{
-    volatile u32 __iomem *ptr = addr;
-    asm volatile("str %w0, %1" : : "rZ" (val), "Qo" (*ptr));
+    if (rwmmio_tracepoint_enabled(rwmmio_read))                 // 如果启用了 MMIO read tracepoint
+        log_read_mmio(32, addr, _THIS_IP_, _RET_IP_);           // 记录一次 32 位 MMIO 读，便于调试追踪
+    __io_br();                                                  // 读前屏障/架构钩子；ARM64 当前为空
+    val = __le32_to_cpu((__le32 __force)__raw_readl(addr));      // 底层读取 MMIO，再从 little-endian 转成 CPU endian
+    __io_ar(val);                                               // 读后屏障/架构钩子；ARM64 上会处理 DMA/设备读后的顺序
+    if (rwmmio_tracepoint_enabled(rwmmio_post_read))            // 如果启用了 MMIO post-read tracepoint
+        log_post_read_mmio(val, 32, addr, _THIS_IP_, _RET_IP_); // 记录读完成后的值和地址
+    return val;                                                 // 返回读到的 32 位寄存器值
 }
 ```
 
-注意：ARM64 上空操作的是 `__io_aw(v)`，不是 `__io_bw()`。`__io_bw()` 在 ARM64 上会继续展开成 DMA 写屏障。
+ARM64 的底层读函数是：
+
+来源：linux/arch/arm64/include/asm/io.h:__raw_readl（节选）
+```c
+// linux/arch/arm64/include/asm/io.h
+static __always_inline u32 __raw_readl(const volatile void __iomem *addr) // ARM64 底层 32 位 MMIO 读，强制内联
+{
+    u32 val;                                                    // 保存汇编指令从 MMIO 地址读出的 32 位值
+    asm volatile(ALTERNATIVE("ldr %w0, [%1]",                   // 默认生成 ldr：从 addr 指向的设备地址读取 32 位
+                 "ldar %w0, [%1]",                              // 如果命中 workaround，则替换为 acquire load
+                 ARM64_WORKAROUND_DEVICE_LOAD_ACQUIRE)          // 控制是否把 ldr 替换成 ldar 的 ARM64 workaround 条件
+             : "=r" (val) : "r" (addr));                        // 输出 val 用通用寄存器，输入 addr 用通用寄存器
+    return val;                                                 // 把读出的值返回给 readl()
+}
+```
+
+正常情况下最终类似：
+
+```asm
+ldr w8, [x9]                            // 从 x9 指向的 MMIO 地址读 32 位到 w8
+```
+
+如果启用了对应 ARM64 workaround，可能替换成 acquire 语义的：
+
+```asm
+ldar w8, [x9]                           // acquire 语义读取：从 x9 指向的 MMIO 地址读 32 位到 w8
+```
+
+这里的 `x9` 是 `db_addr` 对应的 MMIO 虚拟地址。因为地址属于设备寄存器映射，这次 `ldr/ldar` 不是读普通内存，而是读 xHCI doorbell MMIO 寄存器。读出的值本身没有被业务使用；重要的是这次 MMIO 读造成的顺序化效果。
+
+#### 7.3.5 writel：真正写 doorbell 寄存器
+
+真正写寄存器的是：
+
+```c
+writel(DB_VALUE(ep_index, stream_id), db_addr); // 把计算出的 doorbell value 写入 db_addr 指向的 MMIO 寄存器
+```
+
+先把它拆成两个中间值：
+
+```text
+value   = DB_VALUE(ep_index, stream_id)
+db_addr = &xhci->dba->doorbell[slot_id]
+```
+
+然后进入 `writel()`。
+
+来源：linux/include/asm-generic/io.h:writel（节选）
+```c
+// linux/include/asm-generic/io.h
+static inline void writel(u32 value, volatile void __iomem *addr) // 定义 32 位 MMIO 写函数，value 是要写的值，addr 是设备寄存器地址
+{
+    if (rwmmio_tracepoint_enabled(rwmmio_write))                  // 如果启用了 MMIO write tracepoint
+        log_write_mmio(value, 32, addr, _THIS_IP_, _RET_IP_);     // 记录写入值、宽度、地址和调用位置
+    __io_bw();                                                    // 写前屏障：确保前面的 DMA/普通内存写先对设备可见
+    __raw_writel((u32 __force)__cpu_to_le32(value), addr);        // 转成 little-endian 32 位后，执行底层 MMIO store
+    __io_aw();                                                    // 写后架构钩子；ARM64 上为空操作
+    if (rwmmio_tracepoint_enabled(rwmmio_post_write))             // 如果启用了 MMIO post-write tracepoint
+        log_post_write_mmio(value, 32, addr, _THIS_IP_, _RET_IP_);// 记录 MMIO 写完成后的 trace 信息
+}
+```
+
+trace 分支只用于 MMIO 访问追踪。核心三步是：
+
+```text
+__io_bw()
+__raw_writel((u32 __force)__cpu_to_le32(value), addr)
+__io_aw()
+```
+
+ARM64 的 I/O barrier 定义是：
 
 来源：linux/arch/arm64/include/asm/io.h:IO barriers（节选）
 ```c
 // linux/arch/arm64/include/asm/io.h
-#define __io_bw()      dma_wmb()
-#define __io_br(v)
-#define __io_aw(v)
+#define __io_bw()      dma_wmb()       // MMIO 写前屏障：ARM64 上转到 DMA 写屏障
+#define __io_br(v)                     // MMIO 读前钩子：ARM64 这里为空
+#define __io_aw(v)                     // MMIO 写后钩子：ARM64 这里为空
 ```
+
+注意：ARM64 上空的是 `__io_aw(v)`，不是 `__io_bw()`。`__io_bw()` 会继续展开成 DMA 写屏障：
 
 来源：linux/include/asm-generic/barrier.h:dma_wmb 与 linux/arch/arm64/include/asm/barrier.h:__dma_wmb（节选）
 ```c
 // linux/include/asm-generic/barrier.h
-#define dma_wmb() do { kcsan_wmb(); __dma_wmb(); } while (0)
+#ifdef __dma_wmb                                      // 如果当前架构提供了底层 DMA 写屏障
+#define dma_wmb()  do { kcsan_wmb(); __dma_wmb(); } while (0) // 先通知 KCSAN，再执行真实架构屏障
+#endif                                                // 结束 __dma_wmb 条件定义
 
 // linux/arch/arm64/include/asm/barrier.h
-#define dmb(opt)      asm volatile("dmb " #opt : : : "memory")
-#define __dma_wmb()   dmb(oshst)
+#define dmb(opt)      asm volatile("dmb " #opt : : : "memory") // 生成 ARM64 dmb 屏障指令，并带 compiler memory clobber
+#define __dma_wmb()   dmb(oshst)                                // DMA 写屏障：Outer Shareable 域内排序 store
 ```
 
-因此，在树莓派 5 的 ARM64 Linux 上，`writel()` 里的 `__io_bw()` 核心效果是执行一条 `dmb oshst`。它不是写寄存器本身，而是在写 doorbell 之前建立顺序：前面的普通内存写，尤其是 xHCI transfer ring 里的 TRB 写入，要先对设备可见；之后才允许 doorbell 这个 MMIO 写触发 xHCI 去 DMA 读取 TRB。`__io_aw(v)` 在 ARM64 这里展开为空，表示 `writel()` 写完后没有额外的架构后处理。
+所以写前屏障主链路是：
 
-`__raw_writel()` 前面的 `__always_inline` 也有定义：
+```text
+__io_bw()
+  -> dma_wmb()
+      -> kcsan_wmb()      # 未开 KCSAN 时为空；开 KCSAN 时给竞态检测器建模
+      -> __dma_wmb()
+          -> dmb(oshst)
+```
+
+`dmb oshst` 的作用是：在 Outer Shareable 域内，对 store 建立顺序。放在 doorbell 前，就是保证前面写入 transfer ring 的 TRB 先对设备可见，然后才允许 CPU 发出后面的 MMIO doorbell 写。
+
+接着看字节序转换：
+
+来源：linux/include/uapi/linux/byteorder/little_endian.h:__cpu_to_le32（节选）
+```c
+// linux/include/uapi/linux/byteorder/little_endian.h
+#define __cpu_to_le32(x) ((__force __le32)(__u32)(x)) // 小端 CPU 上不换字节，只把 x 标记为 little-endian 32 位
+```
+
+树莓派 5 的 ARM64 Linux 通常是 little-endian，所以 `__cpu_to_le32(value)` 只是把 `value` 转成 `__le32` 类型标记，不会交换字节。若是 big-endian CPU，同名宏会执行字节交换，保证写给 xHCI 的 32 位寄存器值仍按 little-endian 解释。
+
+最后进入 ARM64 的底层写函数：
+
+来源：linux/arch/arm64/include/asm/io.h:__raw_writel（节选）
+```c
+// linux/arch/arm64/include/asm/io.h
+static __always_inline void __raw_writel(u32 val, volatile void __iomem *addr) // ARM64 底层 32 位 MMIO 写，强制内联
+{
+    volatile u32 __iomem *ptr = addr;                         // 把 void __iomem 地址转成 32 位 MMIO 指针
+    asm volatile("str %w0, %1" : : "rZ" (val), "Qo" (*ptr));  // 生成 str 指令，把 val 写到 ptr 指向的 MMIO 地址
+}
+```
+
+最终汇编效果类似：
+
+```asm
+dmb oshst                               // DMA 写屏障：保证前面的 TRB 写入先对设备可见
+str w8, [x9]                            // 把 w8 中的 32 位 doorbell value 写到 x9 指向的 MMIO 地址
+```
+
+其中：
+
+```text
+w8  # 存放 32 位 doorbell value
+x9  # 存放 db_addr，即 xHCI doorbell[slot_id] 的 MMIO 地址
+```
+
+如果 `x9` 指向普通 RAM，`str` 就是普通内存写；但这里 `x9` 指向 xHCI doorbell MMIO 区域，所以这次 store 通过设备内存映射通路到达 xHCI 控制器。硬件看到这个 32 位写入后，就知道对应 slot/endpoint 的 transfer ring 有新 TRB 可以取。
+
+#### 7.3.6 第二次 readl：flush posted MMIO write
+
+`writel()` 后还有一次：
+
+```c
+readl(db_addr);                         // 写后再次读同一个 MMIO 地址，用来 flush posted MMIO write
+```
+
+这次读不是为了使用 doorbell 的返回值，而是为了 flush posted MMIO write。很多 MMIO 写在总线/Root Complex 侧可能是 posted write：CPU 发出 store 后，写请求可能先进入中间缓冲，CPU 侧看起来已经完成，但设备侧未必立刻收到。紧跟一次对同一 MMIO 区域的读，会迫使系统把前面的 posted write 推到设备侧，因为读请求必须等前面的相关写到达后才能返回一致的设备状态。
+
+因此，三条 MMIO 操作的意义分别是：
+
+```text
+readl(db_addr)       # 写前序列化，确保 CPU/TRB/DMA 可见性状态更稳
+writel(value, addr)  # 真正写 xHCI doorbell 寄存器
+readl(db_addr)       # 写后 flush，确保 posted doorbell write 到达控制器
+```
+
+最终从 C 到汇编/计算可以压缩成：
+
+```text
+value   = ((ep_index + 1) & 0xff) | (stream_id << 16)
+db_addr = (u8 __iomem *)xhci->dba + slot_id * 4
+
+readl(db_addr)
+  -> __raw_readl(db_addr)
+  -> ldr/ldar wN, [db_addr]
+
+writel(value, db_addr)
+  -> __io_bw()
+      -> dma_wmb()
+          -> kcsan_wmb()
+          -> __dma_wmb()
+              -> dmb oshst
+  -> __cpu_to_le32(value)
+  -> __raw_writel(value, db_addr)
+      -> str wN, [db_addr]
+  -> __io_aw(v)     # ARM64 上为空
+
+readl(db_addr)
+  -> __raw_readl(db_addr)
+  -> ldr/ldar wN, [db_addr]
+```
+
+到这里，CPU 已经把一个 32 位 doorbell value 写进 xHCI 的 doorbell MMIO 寄存器。xHCI 硬件随后根据 slot/endpoint 去 DMA 读取 transfer ring 中的 TRB，再根据 TRB 里的 DMA 地址读取 `wb->buf`，最终发出 USB bulk OUT。
+
+### 7.4 ARM64 MMIO 访问宏与汇编补充
+
+这一节集中放 `7.3` 用到的通用宏和汇编语法，避免主链路被背景知识打断。
+
+#### 7.4.1 `volatile`、`__iomem`、`__force`
+
+`volatile u32 __iomem *ptr = addr;` 本身不读写硬件，只是在 C 类型层面把 `addr` 从“未知宽度的 MMIO 地址”变成“指向 32 位 MMIO 寄存器的指针”。其中：
+
+```text
+volatile  # 告诉编译器：这个对象有外部副作用，不要把访问随便优化掉、合并或假设它像普通内存一样稳定
+u32       # 这次访问宽度是 32 位
+__iomem   # 内核 sparse 静态检查标记：这是 I/O 内存地址，不是普通 RAM 指针
+```
+
+`__iomem` 和 `__force` 的定义主要服务于 sparse 静态检查：
+
+来源：linux/include/linux/compiler_types.h:__iomem 与 __force（节选）
+```c
+#ifdef __CHECKER__                                      // sparse 静态检查器启用时进入该分支
+# define __iomem  __attribute__((noderef, address_space(__iomem))) // 标记 I/O 内存地址空间，禁止当普通指针解引用
+# define __force  __attribute__((force))                // 允许显式强制转换，告诉 sparse 这是有意转换
+#else                                                   // 普通 C 编译器编译内核时进入该分支
+# define __iomem                                        // 普通编译时展开为空，不生成机器指令
+# define __force                                        // 普通编译时展开为空，不生成机器指令
+#endif                                                  // 结束 __CHECKER__ 条件分支
+```
+
+普通编译时，`__iomem` 和 `__force` 多数情况下展开为空；但在 sparse 检查下，它们能防止把普通内存指针和 I/O 内存指针混用。
+
+#### 7.4.2 `__always_inline`
 
 来源：linux/include/linux/compiler_attributes.h:__always_inline（节选）
 ```c
-#define __always_inline inline __attribute__((__always_inline__))
+#define __always_inline inline __attribute__((__always_inline__)) // 要求编译器尽量强制内联该函数
 ```
 
-这表示编译器应把 `__raw_writel()` 的函数体直接展开到调用点，而不是生成一次 `bl __raw_writel` 这样的函数调用。这样最终代码更接近：
+`__raw_writel()` 前面的 `__always_inline` 要求编译器把函数体直接展开到调用点，而不是生成一次 `bl __raw_writel` 这样的函数调用。因此最终代码更接近：
 
 ```text
 dmb oshst
@@ -1209,34 +1820,15 @@ bl  __raw_writel
 ret
 ```
 
-`volatile u32 __iomem *ptr = addr;` 本身不读写硬件，只是在 C 类型层面把 `addr` 从“未知宽度的 MMIO 地址”变成“指向 32 位 MMIO 寄存器的指针”。其中：
+#### 7.4.3 inline asm 约束怎么读
 
-```text
-volatile  # 告诉编译器：这个对象有外部副作用，不要把访问随便优化掉、合并或假设它像普通内存一样稳定
-u32       # 这次访问宽度是 32 位
-__iomem   # 内核 sparse 静态检查标记：这是 I/O 内存地址，不是普通 RAM 指针
-```
-
-`__iomem` 和 `__force` 的定义也能看到它们主要服务于静态检查：
-
-来源：linux/include/linux/compiler_types.h:__iomem 与 __force（节选）
-```c
-#ifdef __CHECKER__
-# define __iomem  __attribute__((noderef, address_space(__iomem)))
-# define __force  __attribute__((force))
-#else
-# define __iomem
-# define __force
-#endif
-```
-
-最后这句内联汇编：
+`__raw_writel()` 里的汇编是：
 
 ```c
-asm volatile("str %w0, %1" : : "rZ" (val), "Qo" (*ptr));
+asm volatile("str %w0, %1" : : "rZ" (val), "Qo" (*ptr)); // 内联汇编：把 val 用 32 位 store 写到 ptr 指向的地址
 ```
 
-可以按 GCC/Clang inline asm 格式拆开：
+GCC/Clang inline asm 的格式是：
 
 ```text
 asm volatile("汇编模板" : 输出操作数 : 输入操作数 : clobber 列表)
@@ -1249,60 +1841,125 @@ asm volatile("汇编模板" : 输出操作数 : 输入操作数 : clobber 列表
 "Qo" (*ptr)   # 第 1 个输入操作数：`str` 可以接受的内存操作数，地址来自 ptr 指向的 MMIO 寄存器
 ```
 
-模板里的 `str %w0, %1` 会生成 ARM64 store 指令。`%w0` 表示第 0 个操作数的 32 位 W 寄存器形式，`%1` 表示第 1 个操作数对应的内存地址。最终效果类似：
+模板里的 `str %w0, %1` 中：
+
+```text
+%w0  # 第 0 个操作数的 32 位 W 寄存器形式
+%1   # 第 1 个操作数对应的内存地址操作数
+```
+
+最终效果类似：
 
 ```asm
-str w8, [x9]
+str w8, [x9]                            // 把 w8 中的 32 位值写入 x9 指向的 MMIO 地址
 ```
 
-如果 `x9` 对应的虚拟地址是普通 RAM，它就是一次普通内存写；但这里的 `db_addr` 位于 xHCI doorbell MMIO 区域，所以这次 `str` 会经过设备内存映射通路，最终写到 xHCI 控制器的 doorbell 寄存器。
-
-这段代码里还有一个容易忽略的转换：
+`__raw_readl()` 的汇编是：
 
 ```c
-__raw_writel((u32 __force)__cpu_to_le32(value), addr);
+asm volatile(ALTERNATIVE("ldr %w0, [%1]",                  // 默认模板：用 ldr 从 addr 指向地址读 32 位
+             "ldar %w0, [%1]",                              // 替换模板：用 ldar 做 acquire 语义读取
+             ARM64_WORKAROUND_DEVICE_LOAD_ACQUIRE)          // ARM64 workaround 条件，决定是否替换为 ldar
+         : "=r" (val) : "r" (addr));                        // 输出到 val，输入是 addr
 ```
 
-`__cpu_to_le32()` 的作用是把 CPU 内部的 32 位整数转换成 little-endian 形式。xHCI 规范要求寄存器和 TRB 字段按 little-endian 解释，所以内核在写入前统一使用这个宏。ARM64 树莓派 5 默认就是小端，因此这个宏基本只是类型标注，不会真正交换字节：
+这里有一个输出操作数：
+
+```text
+"=r" (val)  # 输出：把读到的 32 位值放入通用寄存器，再写回 C 变量 val
+"r" (addr)  # 输入：把 MMIO 地址放入通用寄存器
+```
+
+正常生成 `ldr`；如果命中 `ARM64_WORKAROUND_DEVICE_LOAD_ACQUIRE`，运行时替换为 `ldar`。
+
+#### 7.4.4 `kcsan_wmb()`、`__dma_wmb()` 与 `do { } while (0)`
+
+`dma_wmb()` 的定义是：
+
+来源：linux/include/asm-generic/barrier.h:dma_wmb（节选）
+```c
+// linux/include/asm-generic/barrier.h
+#ifdef __dma_wmb                                      // 如果架构已经定义了底层 __dma_wmb()
+#define dma_wmb()  do { kcsan_wmb(); __dma_wmb(); } while (0) // 定义通用 dma_wmb：先给 KCSAN 建模，再执行真实 DMA 写屏障
+#endif                                                // 结束 __dma_wmb 条件分支
+```
+
+`do { ... } while (0)` 不是为了循环，而是把多条语句包成“像一条语句一样”的宏，避免 `if/else` 展开后语法错乱：
+
+```c
+if (cond)                                  // 如果条件成立
+    dma_wmb();                             // 宏展开后仍表现为一条语句
+else                                       // 否则分支能正确匹配这个 if
+    foo();                                 // 执行其他逻辑
+```
+
+`kcsan_wmb()` 是给 KCSAN 数据竞争检测器建模用的。普通未打开 KCSAN 弱内存检测时，它是空操作：
+
+来源：linux/include/linux/kcsan-checks.h:kcsan_wmb（节选）
+```c
+// linux/include/linux/kcsan-checks.h
+// 如果开启 KCSAN 弱内存模型，并且使用 ThreadSanitizer 插桩，就走 signal fence 建模路径。
+#if defined(CONFIG_KCSAN_WEAK_MEMORY) && defined(__SANITIZE_THREAD__)
+// 定义把内核屏障映射成 signal fence 的辅助宏；注意续行反斜杠必须在行尾。
+#define __KCSAN_BARRIER_TO_SIGNAL_FENCE(name) /* 定义 signal fence 辅助宏，name 决定 fence 类型 */ \
+    do { /* 用 do/while(0) 把多条语句包成一条宏语句 */                         \
+        barrier(); /* 编译器屏障：阻止这之前的 C 访问被编译器搬到后面 */          \
+        __atomic_signal_fence(__KCSAN_BARRIER_TO_SIGNAL_FENCE_##name); /* 给 ThreadSanitizer/KCSAN 一个屏障事件 */ \
+        barrier(); /* 编译器屏障：阻止这之后的 C 访问被编译器搬到前面 */          \
+    } while (0) /* 宏整体表现为一条语句，方便放进 if/else */
+// KCSAN 写屏障建模：把 kcsan_wmb() 映射成 wmb 类型 signal fence。
+#define kcsan_wmb()     __KCSAN_BARRIER_TO_SIGNAL_FENCE(wmb)
+// 如果开启 KCSAN 弱内存模型，并且使用显式 barrier 插桩，就绑定到 __kcsan_wmb。
+#elif defined(CONFIG_KCSAN_WEAK_MEMORY) && defined(__KCSAN_INSTRUMENT_BARRIERS__)
+// 把 kcsan_wmb 绑定到真实插桩函数/符号。
+#define kcsan_wmb       __kcsan_wmb
+// 普通构建或未开启 KCSAN 弱内存屏障建模时，走空操作。
+#else
+// 普通构建里为空操作，不生成硬件指令。
+#define kcsan_wmb()     do { } while (0)
+// 结束 KCSAN 条件分支。
+#endif
+```
+
+`__dma_wmb()` 才是 ARM64 上真正生成硬件屏障指令的部分：
+
+来源：linux/arch/arm64/include/asm/barrier.h:__dma_wmb（节选）
+```c
+// linux/arch/arm64/include/asm/barrier.h
+#define dmb(opt)      asm volatile("dmb " #opt : : : "memory") // 生成 ARM64 dmb 屏障，opt 被拼成屏障域/类型
+#define __dma_wmb()   dmb(oshst)                                // DMA 写屏障：Outer Shareable 域内对 store 排序
+```
+
+因此，`writel()` 写 doorbell 前的实际硬件顺序保障来自：
+
+```asm
+dmb oshst                               // ARM64 数据内存屏障：Outer Shareable 域内排序 store
+```
+
+#### 7.4.5 小端转换 `__cpu_to_le32()`
+
+`writel()` 里有：
+
+```c
+__raw_writel((u32 __force)__cpu_to_le32(value), addr); // 转成 little-endian 32 位后，写到 addr 指向的 MMIO 地址
+```
+
+小端 ARM64 上定义为：
 
 来源：linux/include/uapi/linux/byteorder/little_endian.h:__cpu_to_le32（节选）
 ```c
-#define __cpu_to_le32(x) ((__force __le32)(__u32)(x))
+#define __cpu_to_le32(x) ((__force __le32)(__u32)(x)) // 小端 CPU 上只做类型转换和 endian 标记，不交换字节
 ```
 
-这个宏可以拆成三层理解：
+拆开理解：
 
 ```text
 (__u32)(x)       # 先把 x 转成 32 位无符号整数
 (__le32)(...)    # 再把它标记为 little-endian 32-bit 值
-__force          # 告诉 sparse 静态检查器：这里是有意做 endian 类型转换
+__force          # 告诉 sparse：这里是有意做 endian 类型转换
 ```
 
-如果 CPU 是大端架构，同名宏会变成 `__swab32(x)` 字节交换，保证写到内存或 MMIO 后，硬件看到的字节顺序仍然是 little-endian。
-
-因此，`writel(DB_VALUE(ep_index, stream_id), db_addr)` 真正做的是：
-
-```text
-1. 计算 doorbell value：低 8 位是 endpoint target，高 16 位是 stream id。
-2. 用 __cpu_to_le32() 确保这个 32 位值按 little-endian 形式写出。
-3. 执行 __io_bw()，保证前面的普通内存写（尤其 TRB 写入）先完成。
-4. 执行 ARM64 的 `str wN, [db_addr]`，向 `db_addr` 这个 MMIO 地址写 32 位值。
-5. 这次 store 不落到普通 RAM，而是经过 SoC/PCIe/USB 主控的 MMIO 通路，最终到达 xHCI 的 doorbell 寄存器。
-```
-
-也就是说，落到 ARM64 指令层面就是一次 32 位 `str` 写 MMIO 地址；因为这段地址被内核映射为设备寄存器区域，所以 CPU 的 store 会变成设备寄存器写，而不是普通内存写。`xhci_ring_ep_doorbell()` 里 `writel()` 前后的 `readl(db_addr)` 也不是为了读协议数据：前一个 `readl()` 用来在 Pi 4/Pi 5 这类非一致性 DMA/PCIe 平台上序列化 CPU 状态，后一个 `readl()` 用来 flush posted MMIO write，确保 doorbell 写已经真正送到控制器侧。
-
-因此，xHCI 写链路更精确的最后几步是：
-
-```text
-xhci_queue_bulk_tx()
-  -> queue_trb()                      # 把 URB buffer 地址、长度、标志写成 TRB
-  -> giveback_first_trb()             # 通过 cycle bit 把首个 TRB 交给硬件
-  -> xhci_ring_ep_doorbell()          # writel() 写 doorbell[slot_id] 这个 MMIO 寄存器
-  -> xHCI hardware DMA 读取 TRB 和数据缓冲，发出 USB bulk OUT
-```
-
-到这里，内核已经把串口协议帧交给 USB 主机控制器，后续由 xHCI 硬件通过 DMA 读取数据缓冲并完成 USB 包发送。
+树莓派 5 的 ARM64 Linux 通常是 little-endian，所以这里不发生字节交换；它保证同一份驱动在 big-endian CPU 上也能把 xHCI 要求的 little-endian 32 位值写出去。
 
 ---
 

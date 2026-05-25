@@ -1,1 +1,16 @@
 console=serial0,115200 console=tty1 root=PARTUUID=2428fd84-02 rootfstype=ext4 fsck.repair=yes rootwait quiet splash plymouth.ignore-serial-consoles cfg80211.ieee80211_regdom=US cfg80211.ieee80211_regdom=GB cfg80211.ieee80211_regdom=GB
+
+
+
+| 参数                              | 含义                                                 |
+| --------------------------------- | ---------------------------------------------------- |
+| `console=serial0,115200`          | 把串口 `serial0` 作为一个控制台，波特率 `115200`。   |
+| `console=tty1`                    | 把本地图形/显示终端 `tty1` 也作为控制台。            |
+| `root=PARTUUID=2428fd84-02`       | 指定真正 rootfs 所在分区。                           |
+| `rootfstype=ext4`                 | rootfs 的文件系统类型是 `ext4`。                     |
+| `fsck.repair=yes`                 | 启动时如果检查文件系统发现可修复问题，允许自动修复。 |
+| `rootwait`                        | 等 root 设备出现。                                   |
+| `quiet`                           | 减少 kernel 启动日志输出。                           |
+| `splash`                          | 显示启动画面。                                       |
+| `plymouth.ignore-serial-consoles` | Plymouth 启动画面不要占用串口控制台。                |
+| `cfg80211.ieee80211_regdom=...`   | 设置 Wi-Fi 国家/地区法规域。                         |

@@ -4,23 +4,11 @@
 
 ```text
 boot/bcm2712-rpi-5-b.dtb          # 真机 /boot/firmware 里的 Pi 5 dtb
+boot/kernel_2712.img              # 真机 /boot/firmware 里的 Pi 5 kernel 镜像，28,115,456 bytes
+boot/initramfs_2712               # 真机 /boot/firmware 里的 early userspace 镜像，18,075,599 bytes
 boot/config.txt                   # Raspberry Pi firmware 配置
 boot/cmdline.txt                  # /boot/firmware/cmdline.txt
-device-tree/proc-device-tree.tar  # 运行时 /proc/device-tree 打包，包含 firmware 修改后的实际设备树属性
-```
-
-没有复制完整大文件：
-
-```text
-/boot/firmware/kernel_2712.img
-/boot/firmware/initramfs_2712
-```
-
-这两个目前只记录了 `ls -l` 和 `sha256sum`，见：
-
-```text
-boot/boot_files_ls.txt
-boot/boot_files_sha256.txt
+device-tree/proc-device-tree.full.tar  # 运行时 /proc/device-tree 完整打包，包含 firmware 修改后的实际设备树属性
 ```
 
 ## 本地生成文件
@@ -76,4 +64,3 @@ USB host：RP1 DWC3 host -> xhci-hcd root hub
 摄像头：/dev/video0、/dev/video2，driver=uvcvideo，USB id=1bcf:2281
 舵机串口：/dev/ttyACM0、/dev/ttyACM1，driver=cdc_acm，USB id=1a86:55d3
 ```
-
