@@ -208,11 +208,25 @@ xhci-hcd root hub
       -> 键盘，Driver=usbhid
   -> USB 2.0 root hub
       -> 外接 USB 2.1 Hub
-          -> Port 1: 第一个 UVC 摄像头，Driver=uvcvideo
-          -> Port 2: 第二个 UVC 摄像头，Driver=uvcvideo
-          -> Port 3: 第一个 SO101 串口板，Driver=cdc_acm
-          -> Port 4: 第二个 SO101 串口板，Driver=cdc_acm
+          -> Port 1: 第一个 UVC 摄像头
+              -> If 0: Class=Video, Driver=uvcvideo，控制接口
+              -> If 1: Class=Video, Driver=uvcvideo，视频流接口
+          -> Port 2: 第二个 UVC 摄像头
+              -> If 0: Class=Video, Driver=uvcvideo，控制接口
+              -> If 1: Class=Video, Driver=uvcvideo，视频流接口
+          -> Port 3: 第一个 SO101 串口板
+              -> If 0: Class=Communications, Driver=cdc_acm，控制接口
+              -> If 1: Class=CDC Data, Driver=cdc_acm，数据接口
+          -> Port 4: 第二个 SO101 串口板
+              -> If 0: Class=Communications, Driver=cdc_acm，控制接口
+              -> If 1: Class=CDC Data, Driver=cdc_acm，数据接口
 ```
+
+注意：这里的 `If` 是 USB interface，不是新的物理设备。一个 UVC 摄像头在 `lsusb -t`
+里通常会出现两个 interface：`If 0` 是 Video Control，`If 1` 是 Video Streaming。
+一个 CDC ACM 串口板也通常会出现两个 interface：`If 0` 是 Communications，
+`If 1` 是 CDC Data。Linux 的 `uvcvideo` 和 `cdc_acm` 驱动需要绑定这些 interface
+以后，用户态才会看到 `/dev/video*`、`/dev/media*` 或 `/dev/ttyACM*`。
 
 合起来就是：
 
@@ -232,8 +246,8 @@ BCM2712 -> AXI -> PCIe -> RP1 -> DWC3 USB host
 | RP1 DWC3 USB host | `usb@200000`、`usb@300000`，`compatible = "snps,dwc3"`，`dr_mode = "host"` | 提供 USB host 控制器，让 Linux 能初始化主机模式 USB。      |
 | xHCI root hub     | `lsusb -t` 里 root hub 的 `Driver=xhci-hcd`                                | 让 USB host 在 Linux 里表现成 xHCI root hub。              |
 | USB hub           | `lsusb -t` 里外接 Hub 的 `Driver=hub/4p`                                   | 支持 Hub 继续展开下游端口。                                |
-| UVC camera        | `Class=Video, Driver=uvcvideo`                                             | 让两个 USB 摄像头按 UVC 设备枚举出来。                     |
-| CDC ACM serial    | `Class=Communications/CDC Data, Driver=cdc_acm`                            | 让两块 SO101 串口板按 CDC ACM 设备枚举出来。               |
+| UVC camera        | `If 0/If 1` 都是 `Class=Video, Driver=uvcvideo`                            | 让两个 USB 摄像头按 UVC 设备枚举出来，并暴露控制/视频流接口。 |
+| CDC ACM serial    | `If 0: Class=Communications`、`If 1: Class=CDC Data`，都由 `cdc_acm` 绑定   | 让两块 SO101 串口板按 CDC ACM 设备枚举出来，并生成 `/dev/ttyACM*`。 |
 | HID keyboard      | `Class=Human Interface Device, Driver=usbhid`                              | 支持真机键盘输入，方便登录、shell 操作和现场调试。         |
 
 ## 一句话结论
