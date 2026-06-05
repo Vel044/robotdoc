@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2048 1080" width="2048" height="1080" role="img" aria-labelledby="title desc">
+  <title id="title">ACT Transformer Encoder 结构</title>
+  <desc id="desc">展示 ACT Transformer Encoder 的输入序列、单层 EncoderLayer 的 Self-Attention、残差归一化和 FFN 结构，以及 4 层叠加后的输出形状。</desc>
+  <defs>
+    <marker id="arrow-slate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="3" markerHeight="3" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="3" markerHeight="3" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4f46e5"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="3" markerHeight="3" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#0369a1"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="3" markerHeight="3" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#c2410c"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="3" markerHeight="3" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#047857"/>
+    </marker>
+  </defs>
+
+  <g font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif">
+    <text x="45" y="48" font-size="38" font-weight="800" fill="#0f172a">Transformer Encoder 结构（ACT）</text>
+    <text x="45" y="98" font-size="38" fill="#334155">输入：X_enc / P_enc = (482,1,512)，由 1 latent + 1 state + 480 image token 组成</text>
+    <text x="45" y="148" font-size="38" fill="#334155">Encoder ×4：每层 Self-Attention + FFN，形状保持不变，输出 H_enc = (482,1,512)</text>
+
+    <!-- Overview -->
+    <rect x="45" y="185" width="430" height="185" rx="12" fill="#eef2ff" stroke="#4f46e5" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="260" y="235" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">Encoder 输入</text>
+    <text x="75" y="295" font-size="32" fill="#334155">X_enc：(482,1,512)</text>
+    <text x="75" y="340" font-size="32" fill="#475569">P_enc：(482,1,512)</text>
+
+    <rect x="540" y="185" width="650" height="185" rx="12" fill="#f8fafc" stroke="#475569" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="865" y="235" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">EncoderLayer × 4</text>
+    <text x="575" y="285" font-size="32" fill="#334155">Self-Attention → Add&amp;Norm</text>
+    <text x="575" y="325" font-size="32" fill="#334155">FFN → Add&amp;Norm，形状不变</text>
+    <text x="575" y="360" font-size="28" fill="#475569">位置编码每层加到 Q/K，V 保持内容特征</text>
+
+    <rect x="1255" y="185" width="560" height="185" rx="12" fill="#dcfce7" stroke="#047857" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="1535" y="235" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">Encoder 输出</text>
+    <text x="1285" y="295" font-size="32" fill="#334155">H_enc：(482,1,512)</text>
+    <text x="1285" y="340" font-size="32" fill="#475569">作为 Decoder 的 memory</text>
+
+    <path d="M475 278 L540 278" fill="none" stroke="#4f46e5" stroke-width="4.2" marker-end="url(#arrow-purple)"/>
+    <path d="M1190 278 L1255 278" fill="none" stroke="#047857" stroke-width="4.2" marker-end="url(#arrow-green)"/>
+
+    <!-- EncoderLayer detail -->
+    <text x="45" y="435" font-size="38" font-weight="800" fill="#0f172a">单层 EncoderLayer 展开</text>
+
+    <rect x="45" y="470" width="300" height="170" rx="12" fill="#eef2ff" stroke="#4f46e5" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="195" y="520" text-anchor="middle" font-size="33" font-weight="800" fill="#0f172a">当前层输入</text>
+    <text x="75" y="580" font-size="29" fill="#334155">x：(482,1,512)</text>
+    <text x="75" y="620" font-size="29" fill="#475569">pos：(482,1,512)</text>
+
+    <rect x="385" y="470" width="390" height="170" rx="12" fill="#e0f2fe" stroke="#0369a1" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="580" y="520" text-anchor="middle" font-size="33" font-weight="800" fill="#0f172a">Multi-Head Self-Attn</text>
+    <text x="415" y="570" font-size="28" fill="#334155">Q = K = x + pos</text>
+    <text x="415" y="610" font-size="28" fill="#475569">V = x；8头，每头64维</text>
+
+    <rect x="815" y="470" width="320" height="170" rx="12" fill="#fef3c7" stroke="#d97706" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="975" y="520" text-anchor="middle" font-size="33" font-weight="800" fill="#0f172a">Add &amp; Norm</text>
+    <text x="845" y="560" font-size="24" fill="#334155">x + attn_out</text>
+    <text x="845" y="595" font-size="24" fill="#334155">(482,1,512)</text>
+    <text x="845" y="630" font-size="24" fill="#475569">LayerNorm → (482,1,512)</text>
+
+    <rect x="1175" y="470" width="370" height="170" rx="12" fill="#fff7ed" stroke="#c2410c" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="1360" y="520" text-anchor="middle" font-size="33" font-weight="800" fill="#0f172a">FFN</text>
+    <text x="1205" y="555" font-size="23" fill="#334155">Linear: (482,1,512) → (482,1,3200)</text>
+    <text x="1205" y="590" font-size="23" fill="#334155">ReLU: 形状不变</text>
+    <text x="1205" y="625" font-size="23" fill="#475569">Linear: (482,1,3200) → (482,1,512)</text>
+
+    <rect x="1585" y="470" width="420" height="170" rx="12" fill="#fef3c7" stroke="#d97706" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="1795" y="520" text-anchor="middle" font-size="33" font-weight="800" fill="#0f172a">Add &amp; Norm</text>
+    <text x="1615" y="560" font-size="24" fill="#334155">x + ffn_out</text>
+    <text x="1615" y="595" font-size="24" fill="#334155">(482,1,512)</text>
+    <text x="1615" y="630" font-size="24" fill="#475569">LayerNorm → (482,1,512)</text>
+
+    <path d="M345 555 L385 555" fill="none" stroke="#334155" stroke-width="4.2" marker-end="url(#arrow-slate)"/>
+    <path d="M775 555 L815 555" fill="none" stroke="#0369a1" stroke-width="4.2" marker-end="url(#arrow-blue)"/>
+    <path d="M1135 555 L1175 555" fill="none" stroke="#c2410c" stroke-width="4.2" marker-end="url(#arrow-orange)"/>
+    <path d="M1545 555 L1585 555" fill="none" stroke="#c2410c" stroke-width="4.2" marker-end="url(#arrow-orange)"/>
+
+    <!-- Self-Attention detail -->
+    <text x="45" y="720" font-size="38" font-weight="800" fill="#0f172a">Self-Attention 计算过程</text>
+
+    <rect x="45" y="755" width="430" height="170" rx="12" fill="#e0f2fe" stroke="#0369a1" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="260" y="805" text-anchor="middle" font-size="33" font-weight="800" fill="#0f172a">相似度矩阵</text>
+    <text x="75" y="840" font-size="24" fill="#334155">score = Q_h · K_hᵀ / √64</text>
+    <text x="75" y="875" font-size="24" fill="#334155">(482,64) × (64,482)</text>
+    <text x="75" y="910" font-size="24" fill="#475569">score：(482,482)</text>
+
+    <rect x="525" y="755" width="430" height="170" rx="12" fill="#e0f2fe" stroke="#0369a1" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="740" y="805" text-anchor="middle" font-size="33" font-weight="800" fill="#0f172a">softmax 权重</text>
+    <text x="555" y="840" font-size="24" fill="#334155">weight = softmax(score)</text>
+    <text x="555" y="875" font-size="24" fill="#334155">dim=-1 每行归一化</text>
+    <text x="555" y="910" font-size="24" fill="#475569">weight：(482,482)</text>
+
+    <rect x="1005" y="755" width="430" height="170" rx="12" fill="#e0f2fe" stroke="#0369a1" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="1220" y="805" text-anchor="middle" font-size="33" font-weight="800" fill="#0f172a">加权求和</text>
+    <text x="1035" y="840" font-size="24" fill="#334155">head_out = weight · V_h</text>
+    <text x="1035" y="875" font-size="24" fill="#334155">(482,482) × (482,64)</text>
+    <text x="1035" y="910" font-size="24" fill="#475569">head_out：(482,64)</text>
+
+    <rect x="1485" y="755" width="520" height="170" rx="12" fill="#dcfce7" stroke="#047857" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="1745" y="805" text-anchor="middle" font-size="33" font-weight="800" fill="#0f172a">多头合并输出</text>
+    <text x="1515" y="840" font-size="24" fill="#334155">concat 8 heads → (482,512)</text>
+    <text x="1515" y="875" font-size="24" fill="#334155">attn_out = concat · W_o</text>
+    <text x="1515" y="910" font-size="24" fill="#475569">attn_out：(482,1,512)</text>
+
+    <path d="M475 840 L525 840" fill="none" stroke="#0369a1" stroke-width="4.2" marker-end="url(#arrow-blue)"/>
+    <path d="M955 840 L1005 840" fill="none" stroke="#0369a1" stroke-width="4.2" marker-end="url(#arrow-blue)"/>
+    <path d="M1435 840 L1485 840" fill="none" stroke="#047857" stroke-width="4.2" marker-end="url(#arrow-green)"/>
+
+    <rect x="45" y="970" width="1960" height="70" rx="12" fill="#f8fafc" stroke="#94a3b8" stroke-width="2.4" stroke-linejoin="round"/>
+    <text x="75" y="1015" font-size="30" font-weight="800" fill="#0f172a">softmax 公式：</text>
+    <text x="300" y="1015" font-size="30" fill="#334155">weight[i,j] = exp(score[i,j]) / Σ_k exp(score[i,k])</text>
+    <text x="1110" y="1015" font-size="30" fill="#475569">对每一行 j 维归一化，Σ_j weight[i,j] = 1</text>
+
+  </g>
+</svg>

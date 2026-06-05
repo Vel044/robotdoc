@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2048 1080" width="2048" height="1080" role="img" aria-labelledby="title desc">
+  <title id="title">ResNet18 视觉编码器结构</title>
+  <desc id="desc">展示 ACT 中单路摄像头图像经过 ResNet18 到 layer4 特征图，再经过 1x1 卷积和展平变成视觉 token 的结构。</desc>
+  <defs>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="3" markerHeight="3" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#0369a1"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="3" markerHeight="3" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#047857"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="3" markerHeight="3" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#c2410c"/>
+    </marker>
+    <marker id="arrow-slate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="3" markerHeight="3" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+  </defs>
+
+  <g font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif">
+    <text x="45" y="48" font-size="38" font-weight="800" fill="#0f172a">ResNet18 视觉编码器结构</text>
+    <text x="45" y="98" font-size="38" fill="#334155">单路图像：(1,3,360,640) → layer4：(1,512,12,20) → token：(240,1,512)</text>
+    <text x="45" y="148" font-size="38" fill="#334155">ACT 对 handeye / fixed 各跑一次，两路合并得到视觉 token：(480,1,512)</text>
+
+    <!-- ResNet18 main pipeline, row 1 -->
+    <rect x="45" y="175" width="300" height="200" rx="12" fill="#e0f2fe" stroke="#0369a1" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="195" y="220" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">输入图像</text>
+    <text x="75" y="270" font-size="30" fill="#334155">单路摄像头</text>
+    <text x="75" y="315" font-size="30" fill="#475569">(1,3,360,640)</text>
+    <text x="75" y="355" font-size="30" fill="#475569">channel=3(RGB)</text>
+
+    <rect x="385" y="175" width="300" height="200" rx="12" fill="#ecfeff" stroke="#0e7490" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="535" y="220" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">conv1</text>
+    <text x="415" y="270" font-size="28" fill="#334155">64个 7×7×3 卷积核</text>
+    <text x="415" y="315" font-size="30" fill="#475569">步长2 二维缩小一半</text>
+    <text x="415" y="355" font-size="30" fill="#475569">(1,64,180,320)</text>
+
+    <rect x="725" y="175" width="300" height="200" rx="12" fill="#ecfeff" stroke="#0e7490" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="875" y="220" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">BN + ReLU</text>
+    <text x="755" y="270" font-size="30" fill="#334155">BN 归一化</text>
+    <text x="755" y="315" font-size="30" fill="#475569">ReLU 激活函数</text>
+    <text x="755" y="355" font-size="30" fill="#475569">(1,64,180,320)</text>
+
+    <rect x="1065" y="175" width="300" height="200" rx="12" fill="#ecfeff" stroke="#0e7490" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="1215" y="220" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">MaxPool</text>
+    <text x="1095" y="270" font-size="30" fill="#334155">3×3，stride=2</text>
+    <text x="1095" y="315" font-size="30" fill="#475569">取 max，提取特征</text>
+    <text x="1095" y="355" font-size="30" fill="#475569">(1,64,90,160)</text>
+
+    <rect x="1405" y="175" width="300" height="200" rx="12" fill="#dcfce7" stroke="#047857" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="1555" y="220" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">layer1</text>
+    <text x="1435" y="270" font-size="30" fill="#334155">BasicBlock×2</text>
+    <text x="1435" y="315" font-size="30" fill="#475569">形状不变</text>
+    <text x="1435" y="355" font-size="30" fill="#475569">(1,64,90,160)</text>
+
+    <path d="M345 275 L385 275" fill="none" stroke="#0369a1" stroke-width="4.2" marker-end="url(#arrow-blue)"/>
+    <path d="M685 275 L725 275" fill="none" stroke="#0369a1" stroke-width="4.2" marker-end="url(#arrow-blue)"/>
+    <path d="M1025 275 L1065 275" fill="none" stroke="#0369a1" stroke-width="4.2" marker-end="url(#arrow-blue)"/>
+    <path d="M1365 275 L1405 275" fill="none" stroke="#047857" stroke-width="4.2" marker-end="url(#arrow-green)"/>
+
+    <!-- ResNet18 main pipeline, row 2 -->
+    <rect x="245" y="405" width="330" height="185" rx="12" fill="#dcfce7" stroke="#047857" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="410" y="455" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">layer2</text>
+    <text x="275" y="505" font-size="32" fill="#334155">BasicBlock×2</text>
+    <text x="275" y="545" font-size="32" fill="#475569">下采样一级</text>
+    <text x="275" y="582" font-size="30" fill="#475569">(1,128,45,80)</text>
+
+    <rect x="625" y="405" width="330" height="185" rx="12" fill="#dcfce7" stroke="#047857" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="790" y="455" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">layer3</text>
+    <text x="655" y="505" font-size="32" fill="#334155">BasicBlock×2</text>
+    <text x="655" y="545" font-size="32" fill="#475569">下采样一级</text>
+    <text x="655" y="582" font-size="30" fill="#475569">(1,256,23,40)</text>
+
+    <rect x="1005" y="405" width="330" height="185" rx="12" fill="#dcfce7" stroke="#047857" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="1170" y="455" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">layer4</text>
+    <text x="1035" y="505" font-size="32" fill="#334155">BasicBlock×2</text>
+    <text x="1035" y="545" font-size="32" fill="#475569">下采样一级</text>
+    <text x="1035" y="582" font-size="30" fill="#475569">(1,512,12,20)</text>
+
+    <rect x="1385" y="405" width="430" height="185" rx="12" fill="#fff7ed" stroke="#c2410c" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="1600" y="455" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">投影展平</text>
+    <text x="1415" y="505" font-size="32" fill="#334155">1×1 Conv(512→512)</text>
+    <text x="1415" y="545" font-size="32" fill="#475569">flatten 12×20</text>
+    <text x="1415" y="582" font-size="30" fill="#475569">单路 token：(240,1,512)</text>
+
+    <path d="M1555 375 L1555 392 L410 392 L410 405" fill="none" stroke="#047857" stroke-width="4.2" marker-end="url(#arrow-green)"/>
+    <path d="M575 498 L625 498" fill="none" stroke="#047857" stroke-width="4.2" marker-end="url(#arrow-green)"/>
+    <path d="M955 498 L1005 498" fill="none" stroke="#047857" stroke-width="4.2" marker-end="url(#arrow-green)"/>
+    <path d="M1335 498 L1385 498" fill="none" stroke="#c2410c" stroke-width="4.2" marker-end="url(#arrow-orange)"/>
+
+    <!-- BasicBlock detail -->
+    <text x="45" y="675" font-size="38" font-weight="800" fill="#0f172a">BasicBlock 内部：残差连接</text>
+    <text x="530" y="675" font-size="30" fill="#475569">首个 block 可选下采样（stride=2）；shortcut 分支可选 1×1 Conv（stride=2）对齐形状</text>
+
+    <rect x="45" y="705" width="300" height="170" rx="12" fill="#f8fafc" stroke="#475569" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="195" y="750" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">输入 x</text>
+    <text x="75" y="805" font-size="28" fill="#475569">输入特征图</text>
+    <text x="75" y="845" font-size="28" fill="#475569">例：(1,64,90,160)</text>
+
+    <rect x="395" y="705" width="300" height="170" rx="12" fill="#ecfeff" stroke="#0e7490" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="545" y="750" text-anchor="middle" font-size="32" font-weight="800" fill="#0f172a">第1个 3×3 Conv</text>
+    <text x="425" y="795" font-size="27" fill="#334155">首个Block可选</text>
+    <text x="425" y="835" font-size="27" fill="#475569">（stride=2 通道翻倍）</text>
+    <text x="425" y="865" font-size="27" fill="#475569">随后 BN + ReLU</text>
+
+    <rect x="745" y="705" width="300" height="170" rx="12" fill="#ecfeff" stroke="#0e7490" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="895" y="750" text-anchor="middle" font-size="32" font-weight="800" fill="#0f172a">第2个 3×3 Conv</text>
+    <text x="775" y="805" font-size="28" fill="#334155">stride=1</text>
+    <text x="775" y="845" font-size="28" fill="#475569">通道和尺寸保持，BN</text>
+
+    <rect x="1095" y="705" width="300" height="170" rx="12" fill="#fff7ed" stroke="#c2410c" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="1245" y="750" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">残差连接</text>
+    <text x="1125" y="795" font-size="27" fill="#334155">可选 1×1 Conv</text>
+    <text x="1125" y="835" font-size="27" fill="#475569">可选（stride=2）对齐</text>
+    <text x="1125" y="865" font-size="27" fill="#475569">通道同步扩展后相加</text>
+
+    <rect x="1445" y="705" width="300" height="170" rx="12" fill="#dcfce7" stroke="#047857" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="1595" y="750" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">ReLU 输出</text>
+    <text x="1475" y="805" font-size="28" fill="#475569">负值置零</text>
+    <text x="1475" y="845" font-size="28" fill="#475569">进入下一个 block</text>
+
+    <path d="M345 790 L395 790" fill="none" stroke="#334155" stroke-width="4.2" marker-end="url(#arrow-slate)"/>
+    <path d="M695 790 L745 790" fill="none" stroke="#334155" stroke-width="4.2" marker-end="url(#arrow-slate)"/>
+    <path d="M1045 790 L1095 790" fill="none" stroke="#334155" stroke-width="4.2" marker-end="url(#arrow-slate)"/>
+    <path d="M1395 790 L1445 790" fill="none" stroke="#047857" stroke-width="4.2" marker-end="url(#arrow-green)"/>
+
+    <path d="M195 875 C195 950,1245 950,1245 875" fill="none" stroke="#c2410c" stroke-width="4.2" marker-end="url(#arrow-orange)"/>
+    <text x="300" y="1000" font-size="32" fill="#475569">shortcut：形状相同直接相加；形状变化时用 1×1 Conv 对齐通道和空间尺寸。</text>
+    <text x="300" y="1040" font-size="28" fill="#334155">BN(x)=γ·(x-μ)/√(σ²+ε)+β，其中 γ、β 为可学习参数</text>
+    <text x="300" y="1072" font-size="28" fill="#334155">ReLU(x)=max(0,x)，无可学习参数，是固定激活函数的纯计算</text>
+
+  </g>
+</svg>

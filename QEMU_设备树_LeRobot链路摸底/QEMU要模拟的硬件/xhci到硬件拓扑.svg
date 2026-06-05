@@ -1,0 +1,205 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="25 35 1520 855" width="1600" height="900" role="img" aria-labelledby="title desc">
+  <title id="title">树莓派 5 xHCI USB 拓扑</title>
+  <desc id="desc">按照 lsusb -t 绘制的树莓派 5 两个 xHCI 控制器、四个 USB root hub、键盘、物理 Hub、UVC 摄像头和 CDC-ACM 串口板拓扑；左侧大框表示树莓派 5 上的 Linux USB 主机侧。</desc>
+
+  <defs>
+    <marker id="arrow-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#047857"/>
+    </marker>
+  </defs>
+
+  <rect x="53" y="50" width="548" height="570" rx="18"
+        fill="#f8fafc" fill-opacity="0.58"
+        stroke="#2563eb" stroke-width="3.2" stroke-linejoin="round"/>
+  <text x="327" y="74" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="22" font-weight="800" fill="#1e3a8a">树莓派 5</text>
+
+  <!-- xhci-hcd.1 -->
+  <rect x="65" y="150" width="215" height="115" rx="14"
+        fill="#dff3ff" stroke="#0369a1" stroke-width="3.2" stroke-linejoin="round"/>
+  <text x="167" y="181" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="21" font-weight="800" fill="#0f172a">xhci-hcd.1</text>
+  <text x="167" y="211" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="17" fill="#334155">USB Host Controller</text>
+  <text x="167" y="235" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="15" fill="#64748b">Bus 04 / Bus 03</text>
+
+  <rect x="335" y="86" width="250" height="96" rx="14"
+        fill="#eef2f7" stroke="#475569" stroke-width="3.2" stroke-linejoin="round"/>
+  <text x="465" y="116" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="21" font-weight="800" fill="#0f172a">Bus 04 root_hub</text>
+  <text x="465" y="143" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="17" fill="#334155">Driver=xhci-hcd/1p</text>
+  <text x="465" y="162" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="15" fill="#64748b">5000M</text>
+
+  <rect x="335" y="218" width="250" height="96" rx="14"
+        fill="#d8f8e6" stroke="#047857" stroke-width="3.2" stroke-linejoin="round"/>
+  <text x="465" y="254" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="21" font-weight="800" fill="#0f172a">Bus 03 root_hub</text>
+  <text x="465" y="282" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="17" fill="#334155">Driver=xhci-hcd/2p</text>
+  <text x="465" y="303" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="15" fill="#64748b">480M</text>
+
+  <rect x="640" y="218" width="330" height="96" rx="14"
+        fill="#f4e8ff" stroke="#7e22ce" stroke-width="3.2" stroke-linejoin="round"/>
+  <text x="805" y="254" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="21" font-weight="800" fill="#0f172a">HID 键盘</text>
+  <text x="805" y="282" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="17" fill="#334155">Port 2 / Dev 2 / 12M</text>
+  <text x="805" y="303" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="15" fill="#64748b">If0 usbhid，If1 未绑定，If2 usbhid</text>
+
+  <path d="M280 180 C305 180,310 134,335 134"
+        fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow-gray)"/>
+  <path d="M280 210 C305 210,310 266,335 266"
+        fill="none" stroke="#047857" stroke-width="3" marker-end="url(#arrow-green)"/>
+  <path d="M585 266 L640 266"
+        fill="none" stroke="#047857" stroke-width="3" marker-end="url(#arrow-green)"/>
+
+  <!-- xhci-hcd.0 -->
+  <rect x="65" y="385" width="215" height="115" rx="14"
+        fill="#dff3ff" stroke="#0369a1" stroke-width="3.2" stroke-linejoin="round"/>
+  <text x="172" y="426" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="21" font-weight="800" fill="#0f172a">xhci-hcd.0</text>
+  <text x="172" y="456" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="17" fill="#334155">USB Host Controller</text>
+  <text x="172" y="480" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="15" fill="#64748b">Bus 02 / Bus 01</text>
+
+  <rect x="335" y="350" width="250" height="96" rx="14"
+        fill="#eef2f7" stroke="#475569" stroke-width="3.2" stroke-linejoin="round"/>
+  <text x="465" y="386" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="21" font-weight="800" fill="#0f172a">Bus 02 root_hub</text>
+  <text x="465" y="414" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="17" fill="#334155">Driver=xhci-hcd/1p</text>
+  <text x="465" y="435" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="15" fill="#64748b">5000M</text>
+
+  <rect x="335" y="482" width="250" height="96" rx="14"
+        fill="#d8f8e6" stroke="#047857" stroke-width="3.2" stroke-linejoin="round"/>
+  <text x="465" y="518" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="21" font-weight="800" fill="#0f172a">Bus 01 root_hub</text>
+  <text x="465" y="546" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="17" fill="#334155">Driver=xhci-hcd/2p</text>
+  <text x="465" y="567" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="15" fill="#64748b">480M</text>
+
+  <rect x="640" y="350" width="290" height="96" rx="14"
+        fill="#f8fafc" stroke="#475569" stroke-width="3.2" stroke-linejoin="round"/>
+  <text x="785" y="386" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="21" font-weight="800" fill="#0f172a">物理 Hub：USB3 侧</text>
+  <text x="785" y="414" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="17" fill="#334155">Port 1 / Dev 2 / 5000M</text>
+  <text x="785" y="435" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="15" fill="#64748b">Class=Hub，Driver=hub/4p</text>
+
+  <rect x="640" y="482" width="290" height="96" rx="14"
+        fill="#e8f8bf" stroke="#4d7c0f" stroke-width="3.2" stroke-linejoin="round"/>
+  <text x="785" y="518" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="21" font-weight="800" fill="#0f172a">物理 Hub：USB2 侧</text>
+  <text x="785" y="546" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="17" fill="#334155">Port 1 / Dev 2 / 480M</text>
+  <text x="785" y="567" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="15" fill="#64748b">Class=Hub，Driver=hub/4p</text>
+
+  <path d="M280 425 C305 425,310 398,335 398"
+        fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow-gray)"/>
+  <path d="M280 455 C305 455,310 530,335 530"
+        fill="none" stroke="#047857" stroke-width="3" marker-end="url(#arrow-green)"/>
+  <path d="M585 398 L640 398"
+        fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow-gray)"/>
+  <path d="M585 530 L640 530"
+        fill="none" stroke="#047857" stroke-width="3" marker-end="url(#arrow-green)"/>
+  <line x1="785" y1="455" x2="785" y2="473"
+        fill="none" stroke="#94a3b8" stroke-width="2" stroke-dasharray="7 6"/>
+
+  <rect x="995" y="320" width="330" height="92" rx="14"
+        fill="#dffcff" stroke="#0e7490" stroke-width="3.2" stroke-linejoin="round"/>
+  <text x="1160" y="355" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="21" font-weight="800" fill="#0f172a">摄像头 1</text>
+  <text x="1160" y="383" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="17" fill="#334155">Port 1 / Dev 3 / Video / 480M</text>
+  <text x="1160" y="405" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="15" fill="#64748b">If0 控制，If1 视频流，Driver=uvcvideo</text>
+
+  <rect x="995" y="430" width="330" height="92" rx="14"
+        fill="#dffcff" stroke="#0e7490" stroke-width="3.2" stroke-linejoin="round"/>
+  <text x="1160" y="465" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="21" font-weight="800" fill="#0f172a">摄像头 2</text>
+  <text x="1160" y="493" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="17" fill="#334155">Port 2 / Dev 4 / Video / 480M</text>
+  <text x="1160" y="515" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="15" fill="#64748b">If0 控制，If1 视频流，Driver=uvcvideo</text>
+
+  <rect x="995" y="540" width="330" height="92" rx="14"
+        fill="#fff0dc" stroke="#c2410c" stroke-width="3.2" stroke-linejoin="round"/>
+  <text x="1160" y="575" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="21" font-weight="800" fill="#0f172a">串口板 1</text>
+  <text x="1160" y="603" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="17" fill="#334155">Port 3 / Dev 5 / cdc_acm / 12M</text>
+  <text x="1160" y="625" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="15" fill="#64748b">If0 Communications，If1 CDC Data</text>
+
+  <rect x="995" y="650" width="330" height="92" rx="14"
+        fill="#fff0dc" stroke="#c2410c" stroke-width="3.2" stroke-linejoin="round"/>
+  <text x="1160" y="685" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="21" font-weight="800" fill="#0f172a">串口板 2</text>
+  <text x="1160" y="713" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="17" fill="#334155">Port 4 / Dev 6 / cdc_acm / 12M</text>
+  <text x="1160" y="735" text-anchor="middle"
+        font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif"
+        font-size="15" fill="#64748b">If0 Communications，If1 CDC Data</text>
+
+  <path d="M930 530 C958 530,958 366,995 366"
+        fill="none" stroke="#047857" stroke-width="3" marker-end="url(#arrow-green)"/>
+  <path d="M930 530 C960 530,960 476,995 476"
+        fill="none" stroke="#047857" stroke-width="3" marker-end="url(#arrow-green)"/>
+  <path d="M930 530 C962 530,962 586,995 586"
+        fill="none" stroke="#047857" stroke-width="3" marker-end="url(#arrow-green)"/>
+  <path d="M930 530 C962 530,962 696,995 696"
+        fill="none" stroke="#047857" stroke-width="3" marker-end="url(#arrow-green)"/>
+</svg>

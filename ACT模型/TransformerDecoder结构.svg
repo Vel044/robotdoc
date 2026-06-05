@@ -1,0 +1,130 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2048 1080" width="2048" height="1080" role="img" aria-labelledby="title desc">
+  <title id="title">ACT Transformer Decoder 结构</title>
+  <desc id="desc">展示 ACT Transformer Decoder 的输入 query、Encoder memory、单层 DecoderLayer 的 Self-Attention、Cross-Attention、残差归一化和 FFN 结构，以及输出动作特征的形状。</desc>
+  <defs>
+    <marker id="arrow-slate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="3" markerHeight="3" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="3" markerHeight="3" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#0369a1"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="3" markerHeight="3" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#c2410c"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="3" markerHeight="3" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#047857"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="3" markerHeight="3" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4f46e5"/>
+    </marker>
+  </defs>
+
+  <g font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif">
+    <text x="45" y="48" font-size="38" font-weight="800" fill="#0f172a">Transformer Decoder 结构（ACT）</text>
+    <text x="45" y="98" font-size="38" fill="#334155">输入：x=zeros + 可学习 P_dec + Encoder memory，输出 H_dec = (1,100,512)</text>
+    <text x="45" y="148" font-size="38" fill="#334155">核心：Cross-Attention 用 100 个未来动作 query 查询 482 个观测 token</text>
+
+    <!-- Overview -->
+    <rect x="45" y="185" width="580" height="185" rx="12" fill="#eef2ff" stroke="#4f46e5" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="335" y="235" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">Decoder 输入</text>
+    <text x="75" y="285" font-size="29" fill="#334155">x=zeros：(100,1,512)</text>
+    <text x="75" y="325" font-size="29" fill="#334155">P_dec 可学习：(100,1,512)</text>
+    <text x="75" y="365" font-size="29" fill="#475569">H_enc / P_enc：(482,1,512)</text>
+
+    <rect x="690" y="185" width="620" height="185" rx="12" fill="#f8fafc" stroke="#475569" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="1000" y="235" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">DecoderLayer × 1</text>
+    <text x="725" y="285" font-size="29" fill="#334155">Self-Attn → Cross-Attn → FFN</text>
+    <text x="725" y="325" font-size="29" fill="#334155">Cross-Attn 读取 Encoder memory</text>
+    <text x="725" y="365" font-size="26" fill="#475569">ACT 默认只有 1 层 Decoder</text>
+
+    <rect x="1375" y="185" width="585" height="185" rx="12" fill="#dcfce7" stroke="#047857" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="1668" y="235" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">Decoder 输出</text>
+    <text x="1405" y="295" font-size="29" fill="#334155">H_dec：(100,1,512)</text>
+    <text x="1405" y="340" font-size="29" fill="#475569">transpose → (1,100,512)</text>
+
+    <path d="M625 278 L690 278" fill="none" stroke="#4f46e5" stroke-width="4.2" marker-end="url(#arrow-purple)"/>
+    <path d="M1310 278 L1375 278" fill="none" stroke="#047857" stroke-width="4.2" marker-end="url(#arrow-green)"/>
+
+    <!-- DecoderLayer detail -->
+    <text x="45" y="435" font-size="38" font-weight="800" fill="#0f172a">单层 DecoderLayer 展开</text>
+
+    <rect x="45" y="470" width="280" height="170" rx="12" fill="#eef2ff" stroke="#4f46e5" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="185" y="520" text-anchor="middle" font-size="33" font-weight="800" fill="#0f172a">当前输入</text>
+    <text x="75" y="570" font-size="25" fill="#334155">x：(100,1,512)</text>
+    <text x="75" y="605" font-size="24" fill="#475569">P_dec 可学习：(100,1,512)</text>
+    <text x="75" y="635" font-size="22" fill="#64748b">H_enc：(482,1,512)</text>
+
+    <rect x="355" y="470" width="310" height="170" rx="12" fill="#e0f2fe" stroke="#0369a1" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="510" y="520" text-anchor="middle" font-size="33" font-weight="800" fill="#0f172a">Self-Attn</text>
+    <text x="385" y="565" font-size="24" fill="#334155">Q=K=x+P_dec</text>
+    <text x="385" y="595" font-size="23" fill="#334155">V=x；首层 V=0</text>
+    <text x="385" y="625" font-size="21" fill="#475569">参考 Encoder Self-Attn</text>
+
+    <rect x="695" y="470" width="270" height="170" rx="12" fill="#fef3c7" stroke="#d97706" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="830" y="520" text-anchor="middle" font-size="33" font-weight="800" fill="#0f172a">Add &amp; Norm</text>
+    <text x="725" y="565" font-size="24" fill="#334155">x + self_out</text>
+    <text x="725" y="600" font-size="24" fill="#334155">(100,1,512)</text>
+    <text x="725" y="630" font-size="22" fill="#475569">LayerNorm</text>
+
+    <rect x="995" y="470" width="360" height="170" rx="12" fill="#e0f2fe" stroke="#0369a1" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="1175" y="520" text-anchor="middle" font-size="33" font-weight="800" fill="#0f172a">Cross-Attn</text>
+    <text x="1025" y="560" font-size="23" fill="#334155">Q: x+P_dec → 100</text>
+    <text x="1025" y="595" font-size="23" fill="#334155">K: H_enc+P_enc → 482</text>
+    <text x="1025" y="630" font-size="23" fill="#475569">V: H_enc → 482</text>
+
+    <rect x="1385" y="470" width="270" height="170" rx="12" fill="#fef3c7" stroke="#d97706" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="1520" y="520" text-anchor="middle" font-size="33" font-weight="800" fill="#0f172a">Add &amp; Norm</text>
+    <text x="1415" y="565" font-size="24" fill="#334155">x + cross_out</text>
+    <text x="1415" y="600" font-size="24" fill="#334155">(100,1,512)</text>
+    <text x="1415" y="630" font-size="22" fill="#475569">LayerNorm</text>
+
+    <rect x="1685" y="470" width="320" height="170" rx="12" fill="#fff7ed" stroke="#c2410c" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="1845" y="520" text-anchor="middle" font-size="33" font-weight="800" fill="#0f172a">FFN</text>
+    <text x="1715" y="560" font-size="23" fill="#334155">(100,1,512) →</text>
+    <text x="1715" y="595" font-size="23" fill="#334155">(100,1,3200) →</text>
+    <text x="1715" y="630" font-size="23" fill="#475569">(100,1,512)</text>
+
+    <path d="M325 555 L355 555" fill="none" stroke="#334155" stroke-width="4.2" marker-end="url(#arrow-slate)"/>
+    <path d="M665 555 L695 555" fill="none" stroke="#0369a1" stroke-width="4.2" marker-end="url(#arrow-blue)"/>
+    <path d="M965 555 L995 555" fill="none" stroke="#0369a1" stroke-width="4.2" marker-end="url(#arrow-blue)"/>
+    <path d="M1355 555 L1385 555" fill="none" stroke="#0369a1" stroke-width="4.2" marker-end="url(#arrow-blue)"/>
+    <path d="M1655 555 L1685 555" fill="none" stroke="#c2410c" stroke-width="4.2" marker-end="url(#arrow-orange)"/>
+
+    <!-- Cross-Attention detail -->
+    <text x="45" y="720" font-size="38" font-weight="800" fill="#0f172a">Cross-Attention 计算过程</text>
+
+    <rect x="45" y="755" width="430" height="170" rx="12" fill="#e0f2fe" stroke="#0369a1" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="260" y="805" text-anchor="middle" font-size="33" font-weight="800" fill="#0f172a">相似度矩阵</text>
+    <text x="75" y="840" font-size="24" fill="#334155">score = Q_h · K_hᵀ / √64</text>
+    <text x="75" y="875" font-size="24" fill="#334155">(100,64) × (64,482)</text>
+    <text x="75" y="910" font-size="24" fill="#475569">score：(100,482)</text>
+
+    <rect x="525" y="755" width="430" height="170" rx="12" fill="#e0f2fe" stroke="#0369a1" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="740" y="805" text-anchor="middle" font-size="33" font-weight="800" fill="#0f172a">softmax 权重</text>
+    <text x="555" y="840" font-size="24" fill="#334155">weight = softmax(score)</text>
+    <text x="555" y="875" font-size="24" fill="#334155">dim=-1 每行归一化</text>
+    <text x="555" y="910" font-size="24" fill="#475569">weight：(100,482)</text>
+
+    <rect x="1005" y="755" width="430" height="170" rx="12" fill="#e0f2fe" stroke="#0369a1" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="1220" y="805" text-anchor="middle" font-size="33" font-weight="800" fill="#0f172a">加权求和</text>
+    <text x="1035" y="840" font-size="24" fill="#334155">head_out = weight · V_h</text>
+    <text x="1035" y="875" font-size="24" fill="#334155">(100,482) × (482,64)</text>
+    <text x="1035" y="910" font-size="24" fill="#475569">head_out：(100,64)</text>
+
+    <rect x="1485" y="755" width="520" height="170" rx="12" fill="#dcfce7" stroke="#047857" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="1745" y="805" text-anchor="middle" font-size="33" font-weight="800" fill="#0f172a">多头合并输出</text>
+    <text x="1515" y="840" font-size="24" fill="#334155">concat 8 heads → (100,512)</text>
+    <text x="1515" y="875" font-size="24" fill="#334155">cross_out = concat · W_o</text>
+    <text x="1515" y="910" font-size="24" fill="#475569">cross_out：(100,1,512)</text>
+
+    <path d="M475 840 L525 840" fill="none" stroke="#0369a1" stroke-width="4.2" marker-end="url(#arrow-blue)"/>
+    <path d="M955 840 L1005 840" fill="none" stroke="#0369a1" stroke-width="4.2" marker-end="url(#arrow-blue)"/>
+    <path d="M1435 840 L1485 840" fill="none" stroke="#047857" stroke-width="4.2" marker-end="url(#arrow-green)"/>
+
+    <rect x="45" y="970" width="1960" height="70" rx="12" fill="#f8fafc" stroke="#94a3b8" stroke-width="2.4" stroke-linejoin="round"/>
+    <text x="75" y="1015" font-size="30" font-weight="800" fill="#0f172a">softmax 公式：</text>
+    <text x="300" y="1015" font-size="30" fill="#334155">weight[t,j] = exp(score[t,j]) / Σ_k exp(score[t,k])</text>
+    <text x="1110" y="1015" font-size="30" fill="#475569">对每个动作 query 的 482 个 memory token 归一化</text>
+
+  </g>
+</svg>

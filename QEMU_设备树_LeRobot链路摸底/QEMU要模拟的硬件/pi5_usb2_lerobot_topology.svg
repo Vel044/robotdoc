@@ -1,0 +1,203 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1120" width="1600" height="1120" role="img" aria-labelledby="title desc">
+  <title id="title">树莓派 5 LeRobot 当前 USB2 拓扑示意图</title>
+  <desc id="desc">从 BCM2712 SoC、AXI、PCIe、RP1、DWC3/xHCI 到 Linux USB root hub，再到两个 UVC 摄像头、两个 CDC-ACM 串口板和键盘的当前连接关系。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrow-usb2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#047857"/>
+    </marker>
+    <marker id="arrow-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-15%" width="120%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="7" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; font-size: 34px; font-weight: 800; fill: #111827; }
+      .subtitle { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; font-size: 18px; fill: #475569; }
+      .section { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; font-size: 22px; font-weight: 700; fill: #0f172a; }
+      .label { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; font-size: 18px; font-weight: 700; fill: #111827; }
+      .small { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; font-size: 14px; fill: #475569; }
+      .tiny { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; font-size: 12px; fill: #64748b; }
+      .note { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; font-size: 15px; fill: #334155; }
+      .chip { fill: #e0f2fe; stroke: #0284c7; stroke-width: 2; }
+      .bus { fill: #eef2ff; stroke: #4f46e5; stroke-width: 2; }
+      .io { fill: #fef3c7; stroke: #d97706; stroke-width: 2; }
+      .kernel { fill: #f1f5f9; stroke: #64748b; stroke-width: 2; }
+      .usb2 { fill: #dcfce7; stroke: #059669; stroke-width: 3; }
+      .usb3 { fill: #f5f5f4; stroke: #94a3b8; stroke-width: 2; stroke-dasharray: 7 6; }
+      .device { fill: #fff; stroke: #cbd5e1; stroke-width: 2; }
+      .camera { fill: #ecfeff; stroke: #0891b2; stroke-width: 2; }
+      .serial { fill: #fff7ed; stroke: #ea580c; stroke-width: 2; }
+      .hid { fill: #faf5ff; stroke: #9333ea; stroke-width: 2; }
+      .line { fill: none; stroke: #334155; stroke-width: 2.2; marker-end: url(#arrow); }
+      .line-muted { fill: none; stroke: #94a3b8; stroke-width: 2; marker-end: url(#arrow-muted); }
+      .line-usb2 { fill: none; stroke: #047857; stroke-width: 3; marker-end: url(#arrow-usb2); }
+      .lane { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1.5; }
+      .badge { fill: #047857; }
+      .badge-text { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; font-size: 13px; font-weight: 700; fill: #ffffff; }
+      .muted-text { fill: #64748b; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1600" height="1120"/>
+
+  <text class="title" x="70" y="62">树莓派 5 / LeRobot 当前 USB2 拓扑</text>
+  <text class="subtitle" x="70" y="94">物理 Hub 插在 USB2 口后，LeRobot 外设全部枚举到 xhci-hcd.0 的 USB2 速度域；USB3 root hub 当前无下挂外设。</text>
+
+  <rect class="lane" x="50" y="125" width="1500" height="260" rx="16"/>
+  <text class="section" x="80" y="162">一、设备树 / 板级硬件链路</text>
+
+  <rect class="chip" x="80" y="205" width="220" height="110" rx="12" filter="url(#shadow)"/>
+  <text class="label" x="190" y="244" text-anchor="middle">BCM2712 SoC</text>
+  <text class="small" x="190" y="273" text-anchor="middle">ARM Cortex-A76 CPU</text>
+  <text class="tiny" x="190" y="296" text-anchor="middle">树莓派 5 主 SoC</text>
+
+  <rect class="bus" x="365" y="205" width="170" height="110" rx="12" filter="url(#shadow)"/>
+  <text class="label" x="450" y="249" text-anchor="middle">/axi</text>
+  <text class="small" x="450" y="277" text-anchor="middle">片上总线视图</text>
+
+  <rect class="bus" x="600" y="205" width="230" height="110" rx="12" filter="url(#shadow)"/>
+  <text class="label" x="715" y="244" text-anchor="middle">pcie@1000120000</text>
+  <text class="small" x="715" y="273" text-anchor="middle">BCM2712 PCIe 控制器</text>
+  <text class="tiny" x="715" y="296" text-anchor="middle">RP1 挂在这条 PCIe 后面</text>
+
+  <rect class="io" x="895" y="205" width="190" height="110" rx="12" filter="url(#shadow)"/>
+  <text class="label" x="990" y="244" text-anchor="middle">RP1 I/O 芯片</text>
+  <text class="small" x="990" y="273" text-anchor="middle">板载外设集中在 RP1</text>
+
+  <rect class="io" x="1150" y="185" width="230" height="70" rx="12" filter="url(#shadow)"/>
+  <text class="label" x="1265" y="214" text-anchor="middle">usb@200000</text>
+  <text class="small" x="1265" y="238" text-anchor="middle">snps,dwc3 / host</text>
+
+  <rect class="io" x="1150" y="275" width="230" height="70" rx="12" filter="url(#shadow)"/>
+  <text class="label" x="1265" y="304" text-anchor="middle">usb@300000</text>
+  <text class="small" x="1265" y="328" text-anchor="middle">snps,dwc3 / host</text>
+
+  <rect class="kernel" x="1420" y="185" width="105" height="70" rx="12" filter="url(#shadow)"/>
+  <text class="label" x="1472" y="214" text-anchor="middle">xHCI</text>
+  <text class="small" x="1472" y="238" text-anchor="middle">xhci-hcd</text>
+
+  <rect class="kernel" x="1420" y="275" width="105" height="70" rx="12" filter="url(#shadow)"/>
+  <text class="label" x="1472" y="304" text-anchor="middle">xHCI</text>
+  <text class="small" x="1472" y="328" text-anchor="middle">xhci-hcd</text>
+
+  <path class="line" d="M300 260 L365 260"/>
+  <path class="line" d="M535 260 L600 260"/>
+  <path class="line" d="M830 260 L895 260"/>
+  <path class="line" d="M1085 260 C1110 260,1120 220,1150 220"/>
+  <path class="line" d="M1085 260 C1110 260,1120 310,1150 310"/>
+  <path class="line" d="M1380 220 L1420 220"/>
+  <path class="line" d="M1380 310 L1420 310"/>
+
+  <text class="tiny" x="320" y="245">设备树路径</text>
+  <text class="tiny" x="548" y="245">PCIe</text>
+  <text class="tiny" x="1110" y="196">DWC3 host</text>
+  <text class="tiny" x="1110" y="337">DWC3 host</text>
+
+  <rect class="lane" x="50" y="415" width="1500" height="620" rx="16"/>
+  <text class="section" x="80" y="455">二、运行时 USB 枚举链路（本次 lsusb -t）</text>
+
+  <rect class="kernel" x="95" y="495" width="250" height="135" rx="12" filter="url(#shadow)"/>
+  <text class="label" x="220" y="533" text-anchor="middle">xhci-hcd.1</text>
+  <text class="small" x="220" y="562" text-anchor="middle">另一组 USB Host</text>
+  <text class="tiny" x="220" y="586" text-anchor="middle">Bus 04: USB3 root_hub / 5000M</text>
+  <text class="tiny" x="220" y="607" text-anchor="middle">Bus 03: USB2 root_hub / 480M</text>
+
+  <rect class="usb3" x="395" y="475" width="245" height="82" rx="12"/>
+  <text class="label muted-text" x="517" y="506" text-anchor="middle">Bus 04 root_hub</text>
+  <text class="small" x="517" y="531" text-anchor="middle">USB3 / 5000M / 当前空</text>
+
+  <rect class="usb2" x="395" y="587" width="245" height="92" rx="12"/>
+  <text class="label" x="517" y="620" text-anchor="middle">Bus 03 root_hub</text>
+  <text class="small" x="517" y="647" text-anchor="middle">USB2 / 480M / 2p</text>
+  <text class="tiny" x="517" y="667" text-anchor="middle">Port 2 挂键盘</text>
+
+  <rect class="hid" x="720" y="598" width="215" height="75" rx="12"/>
+  <text class="label" x="827" y="628" text-anchor="middle">HID 键盘</text>
+  <text class="small" x="827" y="653" text-anchor="middle">Dev 2 / usbhid / 12M</text>
+
+  <path class="line-muted" d="M345 540 C365 540,375 516,395 516"/>
+  <path class="line-usb2" d="M345 580 C368 580,374 633,395 633"/>
+  <path class="line-usb2" d="M640 633 L720 633"/>
+
+  <rect class="kernel" x="95" y="735" width="250" height="145" rx="12" filter="url(#shadow)"/>
+  <text class="label" x="220" y="775" text-anchor="middle">xhci-hcd.0</text>
+  <text class="small" x="220" y="804" text-anchor="middle">LeRobot 外设所在 Host</text>
+  <text class="tiny" x="220" y="828" text-anchor="middle">Bus 02: USB3 root_hub / 5000M</text>
+  <text class="tiny" x="220" y="849" text-anchor="middle">Bus 01: USB2 root_hub / 480M</text>
+  <rect class="badge" x="148" y="860" width="144" height="24" rx="12"/>
+  <text class="badge-text" x="220" y="877" text-anchor="middle">当前主链路</text>
+
+  <rect class="usb3" x="395" y="715" width="245" height="82" rx="12"/>
+  <text class="label muted-text" x="517" y="746" text-anchor="middle">Bus 02 root_hub</text>
+  <text class="small" x="517" y="771" text-anchor="middle">USB3 / 5000M / 当前空</text>
+
+  <rect class="usb2" x="395" y="832" width="245" height="105" rx="12" filter="url(#shadow)"/>
+  <text class="label" x="517" y="867" text-anchor="middle">Bus 01 root_hub</text>
+  <text class="small" x="517" y="894" text-anchor="middle">USB2 / 480M / 2p</text>
+  <text class="tiny" x="517" y="916" text-anchor="middle">Port 2: Dev 7 外接 Hub</text>
+
+  <rect class="usb2" x="720" y="820" width="245" height="130" rx="12" filter="url(#shadow)"/>
+  <text class="label" x="842" y="858" text-anchor="middle">外接物理 Hub</text>
+  <text class="small" x="842" y="886" text-anchor="middle">Driver=hub/4p / 480M</text>
+  <text class="tiny" x="842" y="910" text-anchor="middle">现在接在 USB2 口</text>
+  <text class="tiny" x="842" y="930" text-anchor="middle">因此没有 USB3 侧 Hub 枚举</text>
+
+  <path class="line-muted" d="M345 795 C365 795,375 756,395 756"/>
+  <path class="line-usb2" d="M345 835 C365 835,375 884,395 884"/>
+  <path class="line-usb2" d="M640 884 L720 884"/>
+
+  <rect class="camera" x="1045" y="690" width="245" height="92" rx="12" filter="url(#shadow)"/>
+  <text class="label" x="1167" y="725" text-anchor="middle">UVC 摄像头 1</text>
+  <text class="small" x="1167" y="751" text-anchor="middle">Port 1 / Dev 8 / 480M</text>
+  <text class="tiny" x="1167" y="771" text-anchor="middle">If0 控制，If1 视频流，uvcvideo</text>
+
+  <rect class="camera" x="1045" y="805" width="245" height="92" rx="12" filter="url(#shadow)"/>
+  <text class="label" x="1167" y="840" text-anchor="middle">UVC 摄像头 2</text>
+  <text class="small" x="1167" y="866" text-anchor="middle">Port 2 / Dev 9 / 480M</text>
+  <text class="tiny" x="1167" y="886" text-anchor="middle">If0 控制，If1 视频流，uvcvideo</text>
+
+  <rect class="serial" x="1045" y="920" width="245" height="92" rx="12" filter="url(#shadow)"/>
+  <text class="label" x="1167" y="955" text-anchor="middle">串口板 1</text>
+  <text class="small" x="1167" y="981" text-anchor="middle">Port 3 / Dev 10 / 12M</text>
+  <text class="tiny" x="1167" y="1001" text-anchor="middle">CDC-ACM: If0 Communications，If1 Data</text>
+
+  <rect class="serial" x="1320" y="920" width="245" height="92" rx="12" filter="url(#shadow)"/>
+  <text class="label" x="1442" y="955" text-anchor="middle">串口板 2</text>
+  <text class="small" x="1442" y="981" text-anchor="middle">Port 4 / Dev 11 / 12M</text>
+  <text class="tiny" x="1442" y="1001" text-anchor="middle">CDC-ACM: If0 Communications，If1 Data</text>
+
+  <path class="line-usb2" d="M965 884 C995 884,1005 736,1045 736"/>
+  <path class="line-usb2" d="M965 884 C1000 884,1005 851,1045 851"/>
+  <path class="line-usb2" d="M965 884 C1000 884,1005 966,1045 966"/>
+  <path class="line-usb2" d="M965 884 C1040 884,1265 966,1320 966"/>
+
+  <rect class="device" x="1320" y="690" width="245" height="92" rx="12"/>
+  <text class="label" x="1442" y="725" text-anchor="middle">用户态摄像头链路</text>
+  <text class="small" x="1442" y="751" text-anchor="middle">/dev/video* → V4L2 → OpenCV</text>
+  <text class="tiny" x="1442" y="771" text-anchor="middle">640×360，目标 30 fps</text>
+
+  <rect class="device" x="1320" y="805" width="245" height="92" rx="12"/>
+  <text class="label" x="1442" y="840" text-anchor="middle">用户态舵机链路</text>
+  <text class="small" x="1442" y="866" text-anchor="middle">/dev/ttyACM* → pyserial</text>
+  <text class="tiny" x="1442" y="886" text-anchor="middle">scservo_sdk → 1 Mbps 半双工总线</text>
+
+  <path class="line-muted" d="M1290 736 L1320 736"/>
+  <path class="line-muted" d="M1290 851 L1320 851"/>
+  <path class="line-muted" d="M1167 920 C1167 902,1320 851,1320 851"/>
+  <path class="line-muted" d="M1442 920 C1442 902,1442 897,1442 897"/>
+
+  <rect x="70" y="1052" width="1490" height="56" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text class="note" x="90" y="1076">
+    <tspan font-weight="700">读图要点：</tspan>
+    <tspan> root_hub 是 xHCI 暴露给 Linux USB 栈的逻辑根 Hub，不是物理接口；USB3 口有 USB3/USB2 两套链路，USB2 设备只出现在 USB2 root hub 下。</tspan>
+  </text>
+  <text class="note" x="90" y="1099">
+    <tspan font-weight="700">当前结论：</tspan>
+    <tspan> Hub 接到 USB2 口后，Bus 02 的 USB3 侧不再枚举 Hub；LeRobot 的两个 UVC 摄像头和两个 CDC-ACM 串口板都共享 Bus 01 的 480M USB2 Hub 上行。</tspan>
+  </text>
+</svg>

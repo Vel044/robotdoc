@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2048 1080" width="2048" height="1080" role="img" aria-labelledby="title desc">
+  <title id="title">ACT 模型主链路</title>
+  <desc id="desc">展示 ACT 推理主链路：latent、state、双路图像输入，经 ResNet、token 拼接、Transformer Encoder、Transformer Decoder 和 Action Head 输出动作块。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="3" markerHeight="3" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="3" markerHeight="3" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#0369a1"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="3" markerHeight="3" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#047857"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="3" markerHeight="3" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#c2410c"/>
+    </marker>
+  </defs>
+
+  <g font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif">
+    <text x="45" y="48" font-size="38" font-weight="800" fill="#0f172a">前处理：原始 observation 先由 numpy 转为 Tensor</text>
+    <text x="45" y="98" font-size="38" fill="#334155">图像：uint8 HWC → float32/255 → CHW → batch；状态：(6,) → (1,6)</text>
+    <text x="45" y="148" font-size="38" fill="#334155">归一化：x_norm = (x - μ) / (σ + 1e-8)，μ/σ 来自训练集统计量</text>
+
+    <!-- Inputs -->
+    <rect x="45" y="185" width="390" height="185" rx="12" fill="#f8fafc" stroke="#475569" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="240" y="235" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">latent 输入</text>
+    <text x="75" y="295" font-size="35" fill="#334155">推理时固定全零</text>
+    <text x="75" y="340" font-size="35" fill="#475569">z：(1,32)</text>
+
+    <rect x="45" y="405" width="390" height="185" rx="12" fill="#dcfce7" stroke="#047857" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="240" y="455" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">关节状态输入</text>
+    <text x="75" y="505" font-size="35" fill="#334155">observation.state</text>
+    <text x="75" y="550" font-size="35" fill="#475569">6 关节当前位置 (1,6)</text>
+
+    <rect x="45" y="625" width="390" height="185" rx="12" fill="#e0f2fe" stroke="#0369a1" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="240" y="675" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">双路图像输入</text>
+    <text x="75" y="725" font-size="35" fill="#334155">handeye + fixed</text>
+    <text x="75" y="765" font-size="35" fill="#475569">每路 Tensor</text>
+    <text x="75" y="805" font-size="35" fill="#475569">(1,3,360,640)</text>
+
+    <!-- Projection blocks -->
+    <rect x="480" y="185" width="390" height="185" rx="12" fill="#f8fafc" stroke="#475569" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="675" y="235" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">Latent 投影</text>
+    <text x="510" y="295" font-size="35" fill="#334155">Linear(32 → 512)</text>
+    <text x="510" y="340" font-size="35" fill="#475569">输出：(1,512)</text>
+
+    <rect x="480" y="405" width="390" height="185" rx="12" fill="#dcfce7" stroke="#047857" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="675" y="455" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">State 投影</text>
+    <text x="510" y="505" font-size="35" fill="#334155">Linear(6 → 512)</text>
+    <text x="510" y="550" font-size="35" fill="#475569">输出：(1,512)</text>
+
+    <rect x="480" y="625" width="390" height="185" rx="12" fill="#e0f2fe" stroke="#0369a1" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="675" y="675" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">ResNet18 视觉编码</text>
+    <text x="510" y="725" font-size="35" fill="#334155">ResNet18 + 1×1 Conv</text>
+    <text x="510" y="765" font-size="35" fill="#475569">输出：(480,1,512)</text>
+    <text x="510" y="805" font-size="35" fill="#475569">视觉 token</text>
+
+    <!-- Token and position concat -->
+    <rect x="915" y="310" width="555" height="350" rx="12" fill="#eef2ff" stroke="#4f46e5" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="1193" y="365" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">X/P 同步拼接</text>
+    <text x="940" y="425" font-size="35" fill="#334155">X_enc：内容 token</text>
+    <text x="940" y="475" font-size="35" fill="#475569">1 latent + 1 state + 480 image</text>
+    <text x="940" y="535" font-size="35" fill="#334155">P_enc：对应位置编码</text>
+    <text x="940" y="585" font-size="35" fill="#475569">2 个可学习 + 480 个 2D 正弦</text>
+    <text x="940" y="635" font-size="35" fill="#475569">二者均为：(482,1,512)</text>
+
+    <!-- Encoder / Decoder / Head -->
+    <rect x="1515" y="185" width="490" height="185" rx="12" fill="#eef2ff" stroke="#4f46e5" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="1760" y="235" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">Transformer Encoder × 4</text>
+    <text x="1545" y="300" font-size="35" fill="#334155">x=X_enc；pos=P_enc</text>
+    <text x="1545" y="345" font-size="35" fill="#475569">H_enc：(482,1,512)</text>
+
+    <rect x="1515" y="405" width="490" height="185" rx="12" fill="#fef3c7" stroke="#d97706" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="1760" y="455" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">Transformer Decoder × 1</text>
+    <text x="1545" y="505" font-size="35" fill="#334155">query：zeros+pos (100,1,512)</text>
+    <text x="1545" y="545" font-size="35" fill="#475569">memory：H_enc (482,1,512)</text>
+    <text x="1545" y="585" font-size="35" fill="#475569">H_dec：(1,100,512)</text>
+
+    <rect x="1515" y="625" width="490" height="185" rx="12" fill="#fff7ed" stroke="#c2410c" stroke-width="3.2" stroke-linejoin="round"/>
+    <text x="1760" y="675" text-anchor="middle" font-size="35" font-weight="800" fill="#0f172a">Action Head</text>
+    <text x="1545" y="735" font-size="35" fill="#334155">Linear(512 → 6)</text>
+    <text x="1545" y="780" font-size="35" fill="#475569">action chunk (1,100,6)</text>
+
+    <!-- Arrows -->
+    <path d="M435 278 L480 278" fill="none" stroke="#334155" stroke-width="4.2" marker-end="url(#arrow)"/>
+    <path d="M435 498 L480 498" fill="none" stroke="#047857" stroke-width="4.2" marker-end="url(#arrow-green)"/>
+    <path d="M435 718 L480 718" fill="none" stroke="#0369a1" stroke-width="4.2" marker-end="url(#arrow-blue)"/>
+
+    <path d="M870 278 C900 278,900 390,915 405" fill="none" stroke="#334155" stroke-width="4.2" marker-end="url(#arrow)"/>
+    <path d="M870 498 L915 498" fill="none" stroke="#047857" stroke-width="4.2" marker-end="url(#arrow-green)"/>
+    <path d="M870 718 C900 718,900 558,915 545" fill="none" stroke="#0369a1" stroke-width="4.2" marker-end="url(#arrow-blue)"/>
+
+    <path d="M1470 430 C1500 430,1500 278,1515 278" fill="none" stroke="#4f46e5" stroke-width="4.2" marker-end="url(#arrow)"/>
+    <path d="M1760 370 L1760 405" fill="none" stroke="#334155" stroke-width="4.2" marker-end="url(#arrow)"/>
+    <path d="M1760 590 L1760 625" fill="none" stroke="#d97706" stroke-width="4.2" marker-end="url(#arrow-orange)"/>
+
+    <text x="45" y="885" font-size="38" font-weight="800" fill="#0f172a">后处理：Action Head 输出的是归一化空间的 action chunk (1,100,6)</text>
+    <text x="45" y="935" font-size="38" fill="#334155">每帧动作反归一化：a_real = a_norm × σ_action + μ_action，再写入 6 个舵机目标位置</text>
+  </g>
+</svg>
