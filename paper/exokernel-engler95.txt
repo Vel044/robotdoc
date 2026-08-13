@@ -1,0 +1,1095 @@
+                    To appear in the Proceedings of the 16th Symposium on Operating Systems Principles (SOSP),October, 1997.
+
+                        Application Performance and Flexibility on Exokernel Systems
+                                           M. Frans Kaashoek, Dawson R. Engler, Gregory R. Ganger,
+                                      Héctor M. Briceño, Russell Hunt, David Mazières, Thomas Pinckney,
+                                              Robert Grimm, John Jannotti, and Kenneth Mackenzie
+                                                    M.I.T. Laboratory for Computer Science
+                                                          Cambridge, MA 02139, U.S.A
+                                                    http://www.pdos.lcs.mit.edu/
+
+
+
+Abstract                                                                                        cache, but the exokernel allows cached pages to be shared securely
+                                                                                                across all applications. Thus, the exokernel protects pages and disk
+The exokernel operating system architecture safely gives untrusted                              blocks, but applications manage them.
+software efficient control over hardware and software resources by                                   Of course, not all applications need customized resource man-
+separating management from protection. This paper describes an                                  agement. Instead of communicating with the exokernel directly, we
+exokernel system that allows specialized applications to achieve                                expect most programs to be linked with libraries that hide low-
+high performance without sacrificing the performance of unmod-                                  level resources behind traditional operating system abstractions.
+ified UNIX programs. It evaluates the exokernel architecture by                                 However, unlike traditional implementations of these abstractions,
+measuring end-to-end application performance on Xok, an exo-                                    library implementations are unprivileged and can therefore be mod-
+kernel for Intel x86-based computers, and by comparing Xok’s                                    ified or replaced at will. We refer to these unprivileged libraries as
+performance to the performance of two widely-used 4.4BSD UNIX                                   library operating systems, or libOSes.
+systems (FreeBSD and OpenBSD). The results show that common                                          We hope the exokernel organization will facilitate operating sys-
+unmodified UNIX applications can enjoy the benefits of exoker-                                  tem innovation: there are several orders of magnitude more applica-
+nels: applications either perform comparably on Xok/ExOS and                                    tion programmers than OS implementors, and any programmer can
+the BSD UNIXes, or perform significantly better. In addition, the                               specialize a libOS without affecting the rest of the system. LibOSes
+results show that customized applications can benefit substantially                             also allow incremental, selective adoption of new OS features: ap-
+from control over their resources (e.g., a factor of eight for a Web                            plications link with the libOSes that provide what they need—new
+server). This paper also describes insights about the exokernel ap-                             OS functionality is effectively distributed with the application bi-
+proach gained through building three different exokernel systems,                               nary.
+and presents novel approaches to resource multiplexing.                                              The exokernel approach raises several questions. Can ambitious
+                                                                                                applications actually achieve significant performance improvements
+1 Introduction                                                                                  on an exokernel? Will traditional applications—for example, unal-
+                                                                                                tered UNIX applications—pay a price in reduced performance? Is
+In traditional operating systems, only privileged servers and the                               global performance compromised when no centralized authority
+kernel can manage system resources. Untrusted applications are                                  decides scheduling and multiplexing policies? Does the lack of a
+restricted to the interfaces and implementations of this privileged                             centralized management policy for shared OS structures lower the
+software. This organization is flawed because application demands                               integrity of the system?
+vary widely. An interface designed to accommodate every appli-                                       This paper attempts to answer these questions and thereby eval-
+cation must anticipate all possible needs. The implementation of                                uate the soundness of the exokernel approach. Our experiments
+such an interface would need to resolve all tradeoffs and antic-                                are performed on the Xok/ExOS exokernel system. Xok is an exo-
+ipate all ways the interface could be used. Experience suggests                                 kernel for Intel x86-based computers and ExOS is its default libOS.
+that such anticipation is infeasible and that the cost of mistakes is                           Xok/ExOS compiles on itself and runs many unmodified UNIX pro-
+high [1, 4, 8, 11, 21, 39].                                                                     grams (e.g., perl, gcc, telnet, and most file utilities). We compare
+    The exokernel architecture [11] solves this problem by giving                               Xok/ExOS to two widely-used 4.4BSD UNIX systems running on
+untrusted applications as much control over resources as possi-                                 the same hardware, using large, real-world applications.
+ble. It does so by dividing responsibilities differently from the way                                ExOS ensures the integrity of many of its abstractions using
+conventional systems do. Exokernels separate protection from man-                               Xok’s support for protected sharing. Some abstractions, however,
+agement: they protect resources but delegate management to appli-                               still use shared global data structures. ExOS cannot guarantee UNIX
+cations. For example, each application manages its own disk-block                               semantics for these abstractions until they are protected from arbi-
+                                                                                                trary writes by other processes. In our measurements, we approxi-
+This research was supported in part by the Advanced Research Projects Agency under              mate the cost of this protection by inserting system calls before all
+contract N00014-94-1-0985 and by a NSF National Young Investigator Award. Robert
+Grimm is currently at the University of Washington, Seattle.                                    writes to shared global state.
+                                                                                                     Our results show that most unmodified UNIX applications per-
+    Copyright c 1995 by the Association for Computing Machinery, Inc. Permission
+to make digital or hard copies of part or all of this work for personal or classroom use
+                                                                                                form comparably on Xok/ExOS and on FreeBSD or OpenBSD.
+is granted without fee provided that copies are not made or distributed for profit or           Some applications, however, run up to a factor of four faster on
+commercial advantage and that new copies bear this notice and the full citation on the          Xok/ExOS. Experiments with multiple applications running con-
+first page. Copyrights for components of this WORK owned by others than ACM must                currently also show that exokernels can offer competitive global
+be honored. Abstracting with credit is permitted.
+    To copy otherwise, to republish, to post on servers or to redistribute to lists, requires
+                                                                                                system performance.
+prior specific permission and/or a fee. Request Permissions from Publications Dept,                  We also demonstrate that application-level control can signifi-
+                                         <
+ACM Inc., Fax +1 (212) 869-0481, or permissions@acm.org .           >                           cantly improve the performance of applications. For example, we
+describe a new high-performance HTTP server, Cheetah, that ac-
+                                                                                           UNIX Application
+tively exploits exokernel extensibility. Cheetah uses a file system                                                               Specialized
+and a TCP implementation customized for the properties of HTTP                                                                    Application
+                                                                                             fd
+traffic. Cheetah performs up to eight times faster than the best UNIX
+HTTP server we measured on the same hardware.                                                            ExOS               T F        ExOS
+     In addition to evaluating the exokernel approach, this paper                             read                          C S        Subset
+                                                                                                                            P
+presents new kernel interfaces that separate protection from man-
+agement. We discuss the disk subsystem, XN, and explain how un-
+privileged applications can define new file systems and how these                                                                               Kernel
+                                                                                              b                         p
+file systems can safely multiplex the same disk at a fine granularity.
+Finally, we summarize what we have learned from building three                                       Block b = Page p
+complete exokernel systems (Xok, Aegis [11] for DECstations, and                                     ...                           b
+Glaze [29] for the Fugu multiprocessor).
+     The rest of the paper is organized as follows. Section 2 discusses                           Buffer Cache Registry
+related work. Section 3 summarizes the exokernel architecture. Sec-
+tion 4 provides a detailed example of reconciling application control          Figure 1: A simplified exokernel system with two applications, each
+with protection by presenting the disk system XN. Section 5 briefly            linked with its own libOS and sharing pages through a buffer cache
+overviews Xok/ExOS, the experimental environment for this paper.               registry.
+Section 6 reports on the performance of unaltered UNIX applica-
+tions, while Section 7 reports on the performance of aggressively-
+specialized applications, such as the high-performance Cheetah web             such as processes or file descriptors with each other. Thus, VMMs
+server. Section 8 investigates global performance on an exokernel              confine specialized operating systems and associated processes to
+system. Section 9 discusses our experiences with building three                isolated virtual machines, while exokernels let applications use cus-
+different exokernel systems. Section 10 concludes.                             tomized libOSes without sacrificing a single view of the machine,
+                                                                                   Downloading code into the kernel is another approach to ex-
+2 Related Work                                                                 tensibility. In many systems only trusted users can download code,
+                                                                               either through dynamically-loaded kernel extensions or static con-
+The exokernel architecture was proposed in [11], which described a             figuration [13, 21]. In the SPIN and Vino systems, any user can
+research prototype that performed significantly better than Ultrix on          safely download code into the kernel [4, 39]. Safe downloading of
+microbenchmarks. While the paper provided evidence that the exo-               code through type-safety [4, 37] and software fault-isolation [39, 42]
+kernel approach was promising, it left many questions unanswered.              is complementary to the exokernel approach of separating protec-
+     There is a large literature on extensible operating systems, start-       tion from management. Exokernels use downloading of code to let
+ing with the classic rationales by Lampson and Brinch Hansen [19,              the kernel leave decisions to untrusted software [11].
+25, 26]. Previous approaches to extensibility can be coarsely clas-                In addition to these structural approaches, much work has been
+sified in three groups: better microkernels, virtual machines, and             done on better OS abstractions that give more control to appli-
+downloading untrusted code into the kernel. We discuss each in                 cations, such as user-level networking [40, 41], lottery schedul-
+turn.                                                                          ing [43], application-controlled virtual memory [22, 27] and file
+     The principal goal of an exokernel—giving applications con-               systems [6, 35]. All of this work is directly applicable to libOSes.
+trol—is orthogonal to the question of monolithic versus microkernel
+organization. If applications are restricted to inadequate interfaces,         3 Exokernel Background
+it makes little difference whether the implementations reside in
+the kernel or privileged user-level servers [20, 18]; in both cases                This section briefly summarizes the exokernel architecture. Fig-
+applications lack control. For example, it is difficult to change the          ure 1 shows a simplified exokernel system that is running two appli-
+buffer management policy of a shared file server. In many ways,                cations: an unmodified UNIX application linked against the ExOS
+servers can be viewed as fixed kernel subsystems that happen to run            libOS and a specialized exokernel application using its own TCP
+in user space. Whether monolithic or microkernel-based, the goal               and file system libraries. Applications communicate with the kernel
+of an exokernel system remains for privileged software to provide              using low-level physical names (e.g., block numbers); the kernel
+interfaces that do not limit the ability of unprivileged applications          interface is as close to the hardware as possible. LibOSes handle
+to manage their own resources.                                                 higher-level names (e.g., file descriptors) and supply abstractions.
+     Some newer microkernels push the kernel interface closer to                   We briefly describe the exokernel principles, motivated in [11].
+the hardware [8, 20, 36], obtaining better performance and robust-             These principles illustrate the mechanics of exokernel systems and
+ness than previous microkernels and allowing for a greater degree              provide important motivation for many design decisions discussed
+of flexibility, since shared monolithic servers can be broken into             later in this paper. In addition, we show how the principles can be
+several servers. Techniques to reduce the cost of shared servers               applied and discuss the general issue of protected sharing.
+by improving IPC performance, moving code from servers into
+libraries, mapping read-only shared data structures, and batching              3.1 Exokernel principles
+system calls [2, 18, 28, 30] can also be successfully applied in an
+exokernel system.                                                              The goal of an exokernel is to give efficient control of resources
+     Virtual machines [5, 12, 17] (VMs) are an OS structure in which           to untrusted applications in a secure, multi-user system. We follow
+a privileged virtual machine monitor (VMM) isolates less privileged            these principles to achieve this goal:
+software in emulated copies of the underlying hardware. Unfortu-                   Separate protection and management. Exokernels provide
+nately, emulation hides information. This can lead to ineffective              primitives at the lowest possible level required for protection—
+use of hardware resources; for instance, the VMM has no way of                 ideally, at the level of hardware (disk blocks, context identifiers,
+knowing if a VM no longer needs a particular virtual page. More-               TLB, etc.). Resource management is restricted to functions neces-
+over, VMs can only share resources through remote communication                sary for protection: allocation, revocation, sharing, and the tracking
+protocols. This prevents VMs from sharing many OS abstractions                 of ownership.
+
+
+
+                                                                           2
+    Expose allocation. Applications allocate resources explicitly.           necessarily trust all other libOSes with access to a particular re-
+The kernel allows specific resources to be requested during alloca-          source. When libOSes guarantee invariants about their abstractions,
+tion.                                                                        they must be aware of exactly which resources are involved, what
+    Expose names. Exokernels use physical names wherever pos-                other processes have access to those resources, and what level of
+sible. Physical names capture useful information and do not require          trust they place in those other processes.
+potentially costly or race-prone translations from virtual names.                 As an example, consider the semantics of the UNIX fork system
+    Expose revocation. Exokernels expose revocation policies to              call. It spawns a new process initially identical to the currently run-
+applications. They let applications choose which instance of a re-           ning one. This involves copying the entire virtual address space of
+source to give up. Each application has control over its set of phys-        the parent process, a task operating systems typically perform lazily
+ical resources.                                                              through copy-on-write to avoid unnecessary page copies. While
+    Expose information. Exokernels expose all system information             copy-on-write can always be done in a trusted, in-kernel virtual
+and collect data that applications cannot easily derive locally. For         memory system, a libOS must exercise care to avoid compromising
+example, applications can determine how many hardware network                the semantics of fork when sharing pages with potentially untrusted
+buffers there are or which pages cache file blocks. An exokernel             processes. This section details some of the approaches we have used
+might also record an approximate least-recently-used ordering of             to allow a libOS to maintain invariants when sharing resources with
+all physical pages, something individual applications cannot do              other libOSes.
+without global information.                                                       The exokernel provides four mechanisms libOSes can use to
+    These principles apply not just to the kernel, but to any compo-         maintain invariants in shared abstractions. First, software regions,
+nent of an exokernel system. Privileged servers should provide an            areas of memory that can only be read or written through system
+interface boiled down to just what is required for protection.               calls, provide sub-page protection and fault isolation. Second, the
+                                                                             exokernel allows on the-fly-creation of hierarchically-named capa-
+3.2 Kernel support for protected abstractions                                bilities and requires that these capabilities be specified explicitly
+                                                                             on each system call [31]. Thus, a buggy child process acciden-
+Many of the resources protected by traditional operating systems             tally requesting write access to a page or software region of its
+are themselves high-level abstractions. Files, for instance, consist         parent will likely provide the wrong capability and be denied per-
+of metadata, disk blocks, and buffer cache pages, all of which are           mission. Third, the exokernel provides wakeup predicates: small,
+guarded by access control on high-level file objects. While exoker-          kernel-downloaded functions that wake up processes when arbi-
+nels allow direct access to low-level resources, exokernel systems           trary conditions become true (see Section 5.1 for details). Wakeup
+must be able to provide UNIX-like protection, including access con-          predicates can ensure that a buggy or crashed process will not hang
+trol on high-level objects where required for security. One of the           a correctly behaved one. Fourth, the exokernel provides robust crit-
+main challenges in designing exokernels is to find kernel interfaces         ical sections: inexpensive critical sections that are implemented by
+that allow such higher-level access control without either mandat-           disabling software interrupts [3]. Using critical sections instead of
+ing a particular implementation or hindering application control of          locks eliminates the need to trust other processes.
+hardware resources.                                                               Three levels of trust determine what optimizations can be used
+    Xok meets this challenge with three design techniques. First, it         by the implementation of a shared abstraction.
+performs access control on all resources in the same manner. Sec-                 Optimize for the common case: Mutual trust. It is often the
+ond, Xok provides software abstractions to bind hardware resources           case that applications sharing resources place a considerable amount
+together. For example, as shown in Figure 1, the Xok buffer cache            of trust in each other. For instance, any two UNIX programs run by
+registry binds disk blocks to the memory pages caching them. Ap-             the same user can arbitrarily modify each others’ memory through
+plications have control over physical pages and disk I/O, but can            the debugger system call, ptrace. When two exokernel processes
+also safely use each other’s cached pages. Xok’s protection mech-            can write each others’ memory, their libOSes can clearly trust each
+anism guarantees that a process can only access a cache page if it           other not to be malicious. This reduces the problem of guaranteeing
+has the same level of access to the corresponding disk block. Third,         invariants from one of security to one of fault-isolation, and conse-
+and most general, some of Xok’s abstractions allow applications              quently allows libOS code to resemble that of monolithic kernels
+to download code. This is required for abstractions whose protec-            implementing the same abstraction.
+tion does not map to hardware abstractions. For example, files may                Unidirectional trust. Another common scenario occurs when
+require valid updates to their modification times.                           two processes share resources and one trusts the other, but the trust
+    The key to these exokernel software abstractions is that they            is not mutual. Network servers often follow this organization: a priv-
+neither hinder low-level access to hardware resources nor unduly             ileged process accepts network connections, forks, and then drops
+restrict the semantics of the protected abstractions they enable.            privileges to perform actions on behalf of a particular user. Many
+Given these properties, a kernel software abstraction does not violate       abstractions implemented for mutual trust can also function under
+the exokernel principles.                                                    unidirectional trust with only slight modification. In the example of
+    Though these software abstractions reside in the kernel on               copy-on-write, for instance, the trusted parent process must retain
+Xok, they could also be implemented in trusted user-level servers.           exclusive control of shared pages and its own page tables, prevent-
+This microkernel organization would cost many additional context             ing a child from child making copied pages writable in the parent.
+switches; these are particularly expensive on the Intel Pentium Pro          While this requires more page faults in the parent, it does not in-
+processors on which Xok runs. Furthermore, partitioning function-            crease the number of page copies or seriously complicate the code.
+ality in user-level servers tends to be more complex.                             Defensive programming for mutual distrust. Finally, there
+                                                                             are situations where mutually distrustful processes must share high-
+3.3 Protected sharing                                                        level abstractions with each other. For instance, two unrelated pro-
+The low-level exokernel interface gives libOSes enough hardware              cesses may wish to communicate over a UNIX domain socket, and
+control to implement all traditional operating system abstractions.          neither may have any trust in the other. For OS abstractions that can
+Library implementations of abstractions have the advantage that              be shared by mutually distrustful processes, libOSes must include
+they can trust the applications they link with and need not defend           defensive implementations that give reasonable interpretations to
+against malicious use. The flip side, however, is that a libOS cannot        all possible actions by the foreign process (for instance a socket
+                                                                             write larger than the buffer can be interpreted as an end of file).
+
+
+
+                                                                         3
+    Fortunately, sharing with mutual distrust occurs very infre-                    UDFs are stored on disk in structures called templates. Each
+quently for many abstractions. Many types of sharing occur only                template corresponds to a particular metadata format; for exam-
+between child and parent processes, where mutual or unidirectional             ple, a UNIX file system would have templates for data blocks,
+trust almost always holds. Where mutual distrust does occur, defen-            inode blocks, inodes, indirect blocks, etc. Each template T has one
+sive sanity checks are often not on the critical path for performance.         UDF: owns-udfT , and two untrusted but potentially nondeterminis-
+In the remaining cases, as is the case for disk files, we have carefully       tic functions: acl-ufT and size-ufT . All three functions are specified
+crafted kernel software abstractions to help libOSes maintain the              in the same language but only owns-udfT must be deterministic.
+necessary invariants.                                                          The other two can have access to, for example, the time of day. The
+                                                                               limited language used to write these functions is a pseudo-RISC
+                                                                               assembly language, checked by the kernel to ensure determinacy.
+4 Multiplexing Stable Storage                                                  Once a template is specified, it cannot be changed.
+                                                                                    For a piece of metadata m of template type T , owns-udfT (m)
+An exokernel must provide a means to safely multiplex disks among              returns the set of blocks which m points to and their respective
+multiple library file systems (libFSes). Each libOS contains one or            template types. UDF determinism guarantees that owns-udf will
+more libFSes. Multiple libFSes can be used to share the same files             always compute the same output for a given input: XN cannot
+with different semantics. In addition to accessing existing files,             be spoofed by owns-udf. The set of blocks owns-udf returns is
+libFSes can define new on-disk file types with arbitrary metadata              represented as a set of tuples. Each tuple constitutes a range: a
+formats. An exokernel must give libFSes as much control over file              block address that specifies the start of the range, the number of
+management as possible while still protecting files from unautho-              blocks in the range, and the template identifier for the blocks in
+rized access. It therefore cannot rely on simple-minded solutions              the range. Because owned sets can be large, XN allows libFSes
+like partitioning to multiplex a disk: each file would require its own         to partition metadata blocks into disjoint pieces such that each set
+partition.                                                                     returned is (typically) a single tuple.
+    To allow libFSes to perform their own file management, an                       For example, say a libFS wants to allocate a disk block b by
+exokernel stable storage system must satisfy four requirements.                placing a pointer to it in a metadata structure, m. The libFS will
+First, creating new file formats should be simple and lightweight.             call XN, passing it m, b, and the proposed modification to m (spec-
+It should not require any special privilege. Second, the protection            ified as a list of bytes to write into m). To enforce protection,
+substrate should allow multiple libFSes to safely share files at the           XN needs to know that the libFS’s proposed modification actually
+raw disk block and metadata level. Third, the storage system must be           does what it says it does—that is, allocates b in m. Thus, XN runs
+efficient—as close to raw hardware performance as possible. Fourth,            owns-udfT (m); makes the proposed modification on m0 , a copy of
+the storage system should facilitate cache sharing among libFSes,              m; and runs owns-udfT (m0 ). It then verifies that the new result is
+and allow them to easily address problems of cache coherence,                  equal the old result plus b.
+security, and concurrency.                                                          The acl-uf function implements template-specific access control
+    This section describes how Xok multiplexes stable storage, both            and semantics; its input is a piece of metadata, a proposed modifi-
+to show how we address these problems and to provide a concrete                cation to that metadata, and set of credentials (e.g., capabilities). Its
+example of the exokernel principles in practice. First, we describe            output is a Boolean value approving or disapproving of the mod-
+XN, Xok’s extensible, low-level in-kernel stable storage system.               ification. XN runs the proper acl-uf function before any metadata
+We also describe the general interface between XN and libFSes                  modification. acl-ufs can implement access control lists, as well
+and present one particular libFS, C-FFS, the co-locating fast file             as providing certain other guarantees; for example, an acl-uf could
+system [15].                                                                   ensure that inode modification times are kept current by rejecting
+                                                                               any metadata changes that do not update them.
+4.1 Overview of XN                                                                  The size-uf function simply returns the size of a data structure
+                                                                               in bytes.
+Designing a flexible exokernel stable storage system has proven
+difficult: XN is our fourth design. This section provides an overview
+of UDFs, the cornerstone of XN; the following sections describe                4.2 XN: Problem and history
+some earlier approaches (and why they failed), and aspects of XN               The most difficult requirement for XN is efficiently determining the
+in greater depth.                                                              access rights of a given principal to a given disk block. We discuss
+     XN provides access to stable storage at the level of disk blocks,         the successive approaches that we have pursued.
+exporting a buffer cache registry (Section 4.3.3) as well as free                   Disk-block-level multiplexing. One approach is to associate
+maps and other on-disk structures. The main purpose of XN is to                with each block or extent a capability (or access control list) that
+determine the access rights of a given principal to a given disk               guards it. Unfortunately, if the capability is spatially separated from
+block as efficiently as possible. XN must prevent a malicious user             the disk block (e.g., stored separately in a table), accessing a block
+from claiming another user’s disk blocks as part of her own files.             can require two disk accesses (one to fetch the capability and one
+On a conventional OS, this task is easy, since the kernel itself               to fetch the block). While caching can mitigate this problem to a
+knows the file’s metadata format. On an exokernel, where files have            degree, we are nervous about its overhead on disk-intensive work-
+application-defined metadata layouts, the task is more difficult.              loads. An alternative approach is to co-locate capabilities with disk
+     XN’s novel solution employs UDFs (untrusted deterministic                 blocks by placing them immediately before a disk block’s data [26].
+functions). UDFs are metadata translation functions specific to each           Unfortunately, on common hardware, reserving space for a capa-
+file type. XN uses UDFs to analyze metadata and translate it into              bility would prevent blocks from being multiples of the page size,
+a simple form the kernel understands. A libFS developer can in-                adding overhead and complexity to disk operations.
+stall UDFs to introduce new on-disk metadata formats. The re-                       Self-descriptive metadata. Our first serious attempt at efficient
+stricted language in which UDFs are specified ensures that they are            disk multiplexing provided a means for each instance of metadata
+deterministic—their output depends only on their input (the meta-              to describe itself. For example, a disk block would start with some
+data itself). UDFs allow the kernel to safely and efficiently handle           number of bytes of application-specific data and then say “the next
+any metadata layout without understanding the layout itself.                   ten integers are disk block pointers.” The complexity of space-
+                                                                               efficient self-description caused us to limit what metadata could be
+
+
+                                                                           4
+described. We discovered that this approach both caused unaccept-                  cache registry that maps cached disk blocks to the physical
+able amounts of space overhead and required excessive effort to                    pages holding them.
+modify existing file system code, because it was difficult to shoe-
+horn existing file system data structures into a universal format.              2. Atomic metadata updates. Many file system updates have
+    Template-based description. Self-description and its problems                  multiple steps. To ensure that shared state always ends up
+were eliminated by the insight that each file system is built from                 in a consistent and correct state, libFSes can lock cache reg-
+only a handful of different on-disk data structures, each of which                 istry entries. (Future work will explore optimistic concur-
+can be considered a type. Since the number of types is small, it                   rency control based on versioning.)
+is feasible to describe each type only once per file system—rather              3. Well-formed updates. File abstractions above the XN inter-
+than once per instance of a type—using a template.                                 face may require that metadata modifications satisfy invari-
+    Originally, templates were written in a declarative description                ants (e.g., that link counts in inodes match the number of as-
+language (similar to that used in self-descriptive metadata) rather                sociated directory entries). UDFs allow XN to guarantee such
+than UDFs. This system was simple and better than self-descriptive                 invariants in a file-system-specific manner, allowing mutually
+metadata, but still exhibited what we have come to appreciate as                   distrustful applications to safely share metadata.
+an indication that applications do not have enough control: the
+system made too many tradeoffs. We had to make a myriad of                       XN controls only what is necessary to enforce these protection
+decisions about which base types were available and how they were            rules. All other abilities—I/O initiation, disk block layout and allo-
+represented (how large disk block pointers could be, how the type            cation policies, recovery semantics, and consistency guarantees—
+layout could change, how extents were specified). Given the variety          are left to untrusted libFSes.
+of on-disk data structures described in the file system literature, it
+seems unlikely that any fixed set of components will ever be enough
+to describe all useful metadata.                                             4.3.2 Ordered disk writes
+    Our current solution uses templates, but trades the declarative
+description language for a more expressive, interpreted language—            Another difficulty XN must face is guaranteeing the rules Ganger
+UDFs. This lets libFSes track their own access rights without XN             and Patt [16] give for achieving strict file system integrity across
+understanding how they do so; XN merely verifies that libFSes track          crashes: First, never reuse an on-disk resource before nullifying all
+block ownership correctly.                                                   previous pointers to it. Second, never create persistent pointers to
+                                                                             structures before they are initialized. Third, when moving an on-
+                                                                             disk resource, never reset the old pointer in persistent storage before
+4.3 XN: Design and implementation                                            the new one has been set.
+                                                                                  The first two rules are required for global system integrity—and
+We first describe the requirements for XN and then present the               thus must be enforced by XN—while a file system violating the
+design.                                                                      third rule will only affect itself.
+                                                                                  The rules are simple but difficult to enforce efficiently: a naive
+4.3.1 Requirements and approach                                              implementation will incur frequent costly synchronous disk writes.
+                                                                             XN allows libFSes to address this by enforcing the rules without
+In our experience so far, the following requirements have been               legislating how to follow them. In particular, libFSes can choose
+sufficient to reconcile application control with protected sharing.          any operation order which satisfies the constraints.
+                                                                                  The first rule is implemented by deferring a block’s deallocation
+   1. To prevent unauthorized access, every operation on disk data           until all on-disk pointers to that block have been deleted; a reference
+      must be guarded. For speed, XN uses secure bindings [11]               count performed at crash recovery time helps libFSes implement the
+      to move access checks to bind time rather than checking at             third rule.
+      every access. For example, the permission to read a cached                  The second rule is the hardest of the three. To implement it, XN
+      disk block is checked when the page is inserted into the page          keeps track of tainted blocks. Any block is considered tainted if it
+      table of the libFS’s environment, rather than on every access.         points either to an uninitialized block or to a tainted block. LibFSes
+                                                                             must not be allowed to write a tainted block to disk. However, two
+   2. XN must be able to determine unambiguously what access                 exceptions allow XN to enforce the general rule more efficiently:
+      rights a principal has to a given disk block. For speed, it uses            First, XN allows entire file systems to be marked “temporary”
+      the UDF mechanism to protect disk blocks using the libFS’s             (i.e., not persistent across reboots). Since these file systems are not
+      own metadata rather than guarding each block individually.             persistent, they are not required to adhere to any of the integrity
+   3. XN must guarantee that disk updates are ordered such that              rules. This technique allows memory-based file systems to be im-
+      a crash will not incorrectly grant a libFS access to data it           plemented with no loss of efficiency.
+      either has freed or has not allocated. This requirement means               The second exception is based on the observation that unattached
+      that metadata that is persistent across crashes cannot be writ-        subtrees—trees whose root is not reachable from any persistent
+      ten when it contains pointers to uninitialized metadata, and           root—will not be preserved across reboots and thus, like tempo-
+      that reallocation of a freed block must be delayed until all           rary trees, are free of any ordering constraints. Thus, XN does not
+      persistent pointers to it have been removed.                           track tainted blocks in an unreachable tree until it is connected to a
+                                                                             persistent root.
+    While isolation allows separate libFSes to coexist safely, pro-
+tected sharing of file system state by mutually distrustful libFSes          4.3.3 The buffer cache registry
+requires three additional features:
+                                                                             Finally, we discuss the XN buffer cache registry, which allows pro-
+   1. Coherent caching of disk blocks. Distributed, per-application          tected sharing of disk blocks among libFSes. The registry tracks the
+      disk block caches create a consistency problem: if two appli-          mapping of cached disk blocks and their metadata to physical pages
+      cations obliviously cache the same disk block in two differ-           (and vice versa). Unlike traditional buffer caches, it only records
+      ent physical pages, then modifications will not be shared. XN          the mapping, not the disk blocks themselves. The disk blocks are
+      solves this problem with an in-kernel, system-wide, protected          stored in application-managed physical-memory pages. The registry
+
+
+                                                                         5
+tracks both the mapping and its state (dirty, out of core, uninitialized,       Usually both will already be cached.
+locked). To allow libFSes to see which disk blocks are cached, the                  Read. Reading a block from disk is a two-stage process, where
+buffer cache registry is mapped read-only into application space.               the stages can be combined or separated. First, the libFS creates
+     Access control is performed when a libFS attempts to map a                 entries in the registry by passing block addresses for the requested
+physical page containing a disk block into its address space, rather            disk blocks and the metadata blocks controlling them (their par-
+than when that block is requested from disk. That is, registry entries          ents). The parents must already exist in the registry—libFSes are
+can be inserted without requiring that the object they describe be              responsible for loading them. XN uses owns-udf to determine if
+in memory. Blocks can also be installed in the registry before their            the requested blocks are controlled by the supplied metadata blocks
+template or parent is known. As a result, libFSes have significant              and, if so, installs registry entries.
+freedom to prefetch.                                                                In the second stage, the libFS initiates a read request, optionally
+     Registry entries are installed in two ways. First, an application          supplying pages to place the data in. Access control through acl-uf
+that has write access to a block can directly install a mapping to it           is performed at the parent (e.g., if the data loaded is a bare disk
+into the registry. Second, applications that do not have write access           block), at the child (e.g., if the data is an inode), or both.
+to a block can indirectly install an entry for it by performing a “read             A libFS can load any block in its tree by traversing from its root
+and insert,” which tells the kernel to read a disk block, associate it          entry, or optionally by starting from any intermediate node cached
+with an application-provided physical page, set the protection of that          in the registry. Note that XN specifically disallows metadata blocks
+page page appropriately, and insert this mapping into the registry.             from being mapped read/write.
+This latter mechanism is used to prevent applications that do not                   To speculatively read a block before its parent is known, a libFS
+have permission to write a block from modifying it by installing a              can issue a raw read command. If the block is not in the registry, it
+bogus in-core copy.                                                             will be marked as “unknown type” and a disk request initiated. The
+     XN does not replace physical pages from the registry (except for           block cannot be used until after it is bound to a parent by the first
+those freed by applications), allowing applications to determine the            stage of the read process, which will determine its type and allow
+most appropriate caching policy. Because applications also manage               access control to be performed.
+virtual memory paging, the partitioning of disk cache and virtual                   Allocate. A libFS selects blocks to allocate by reading XN’s
+memory backing store is under application control. To simplify                  map of free blocks, allowing libFSes to control file layout and
+the application’s task and because it is inexpensive to provide, XN             grouping. Free blocks are allocated to a given metadata node by
+maintains an LRU list of unused but valid buffers. By default, when             calling XN with the metadata node, the blocks to allocate, and the
+LibOSes need pages and none are free, they recycle the oldest buffer            proposed modification to the metadata node. XN checks that the
+on this LRU list.                                                               requested blocks are free, runs the appropriate acl-uf to see if the
+     XN allows any process to write “unowned” dirty blocks to disk              libFS has permission to allocate, and runs owns-udf, as described in
+(i.e., blocks not associated with a running process), even if that              Section 4.1, to see that the correct block is being allocated. If these
+process does not have write permission for the dirty blocks. This               checks all succeed, the metadata is changed, the allocated blocks
+allows the construction of daemons that asynchronously write dirty              are removed from the free list, and any allocated metadata blocks
+blocks. LibFSes do not have to trust daemons with write access                  are marked tainted (see Section 4.3.2).
+to their files, only to flush the blocks. This ability has three bene-              Write. A libFS writes dirty blocks to disk by passing the blocks
+fits. First, the contents of the registry can be safely retained across         to write to XN. If the blocks are not in memory, or they have been
+process invocations rather than having to be brought in and paged               pinned in memory by some other application, the write is prevented.
+out on creation and exit. Second, this design simplifies the imple-             The write also fails if any of the blocks are tainted and reachable
+mentations of libFSes, since a libFS can rely on a daemon of its                from a persistent root. Otherwise, the write succeeds. If the block
+choice to flush dirty blocks even in difficult situations (e.g., if the         was previously tainted and now is not (either by eliminating pointers
+application containing the libFS is swapped out). Third, this design            to uninitialized metadata or by becoming initialized itself), XN
+allows different write-back policies.                                           modifies its state and removes it from the tainted list.
+                                                                                    Since applications control what is fetched and what is paged out
+                                                                                when (and in what order), they can control many disk management
+4.4 XN usage                                                                    policies and can enforce strong stability guarantees.
+To illustrate how XN is used, we sketch how a libFS can implement                   Deallocate. XN uses UDFs to check deallocate operations anal-
+common file system operations. These two setup operations are                   ogously to allocate operations. If there are no on-disk pointers to a
+used to install a libFS:                                                        deallocated disk block, XN places it on the free list. Otherwise, XN
+     Type creation. The libFS describes its types by storing tem-               enqueues the block on a “will free” list until the block’s reference
+plates, described above in Section 4.1, into a type catalogue. Each             count is zero. Reference counts are decremented when a parent that
+template is identified by a unique string (e.g., “FFS Inode”). Once             had an on-disk pointer to the block deletes that pointer via a write.
+installed, types are persistent across reboots.
+     LibFS persistence. To ensure that libFS data is persistent across          4.5 C-FFS: a library file system
+reboots, a libFS can register the root of its tree in XN’s root cat-
+alogue. A root entry consists of a disk extent and corresponding                This subsection briefly describes C-FFS (co-locating fast file sys-
+template type, identified by a unique string (e.g., “mylibFS”).                 tem [15])—a UNIX-like library file system we built—with special
+     After a crash, XN uses these roots to garbage-collect the disk             reference to additional protection guarantees it provides.
+by reconstructing the free map. It does so by logically traversing                  XN provides the basic protection guarantees needed for file
+all roots and all blocks reachable from them: reachable blocks are              system integrity, but real-world file systems often require other, file-
+allocated, non-reachable blocks are not. If rebuilding the free map             system-specific invariants. For instance, UNIX file systems must
+after a crash needs to be fast, this step can be eliminated by ordering         ensure the uniqueness of file names within a directory. This type of
+writes to the free map.                                                         guarantee can be provided in any number of ways: in the kernel, in a
+     After initialization, the new libFS can use XN. We describe a              server, or, in some cases, by simple defensive programming. C-FFS
+simplified version of the most common operations.                               currently downloads methods into the kernel to check its invariants.
+     Startup. To start using XN, a libFS loads its root(s) and any              We are currently developing a system similar to UDFs that can be
+types it needs from the root catalogue into the buffer cache registry.
+
+
+                                                                            6
+used to enforce type-specific invariants in an efficient, extensible           physical page of a translation can be mapped by a process, applica-
+way.                                                                           tions are prevented from directly modifying the page table and must
+    Our experience with C-FFS shows that, even with the strongest              instead use system calls. Although these restrictions make Xok less
+desired guarantees, a protected interface can still provide significant        extensible than Aegis, they simplify the implementation of libOSes
+flexibility to unprivileged software, and that the exokernel approach          (see Section 9) with only a small reduction in application flexibility.
+can deal as readily with high-level protection requirements as it can              Like Aegis, Xok allows efficient and powerful virtual memory
+with those closer to hardware.                                                 abstractions to be built at the application level. It does so by exposing
+    C-FFS makes four main additions to XN’s protection mecha-                  the capabilities of the hardware (e.g., all MMU protection bits)
+nisms:                                                                         and exposing many kernel data structures (e.g., free lists, inverse
+                                                                               page mappings). Xok’s low-level interface means that paging is
+   1. Access control: it maps the UNIX representation and seman-               handled by applications. As such, it can be done from disk, across
+      tics of access control (uids and gids, etc.) to those of exokernel       the network, or by data regeneration. Additionally, applications
+      capabilities.                                                            can readily perform per-page transformations such as compression,
+   2. Well-formed updates: C-FFS guarantees UNIX-specific file                 verification of contents using digital signatures (to allow untrusted
+      semantics: for example, that directories contain legal, aligned          nodes in a network to cache pages), or encryption.
+      file names.                                                                  Wakeup predicates. Applications often want to sleep until a
+                                                                               condition is true. Unfortunately, it may be difficult for an applica-
+   3. Atomicity: C-FFS performs locking to ensure that its data is             tion to express this condition to the kernel. This problem is more
+      always recoverable and disk writes only occur when metadata              prevalent on exokernels because the bulk of OS functionality resides
+      is internally consistent.                                                in the application.
+                                                                                   To solve this problem, Xok provides applications with the ability
+   4. Implicit updates: C-FFS ensures that certain state transitions           to inject wakeup predicates into the kernel. Wakeup predicates are
+      are implicit on certain actions. Some examples are that mod-             boolean expressions used by applications to sleep until the state of
+      ification times are updated when file data are changed, and              the system satisfies some condition; they are evaluated by the kernel
+      that renaming or deleting a file updates the name cache.                 when an environment is about to be scheduled. The application is
+                                                                               not scheduled if the predicate does not hold.
+    It is not difficult to implement UNIX protection without sig-                  Predicate evaluation is efficient. Like dynamic packet filters,
+nificantly degrading application power. C-FFS protection is im-                Xok compiles predicates on-the-fly to executable code. The signif-
+plemented mainly by a small number of if-statements rather than                icant overhead of an address space context switch is eliminated by
+by procedures that limit flexibility. The most intricate operation—            evaluating the predicates in the exokernel and pre-translating all
+ensuring that files in a directory have unique names—is less than              predicate virtual addresses to their associated physical addresses.
+100 lines of code that scans through a linked list of cached directory         When a virtual page referenced in a predicate is unmapped, the phys-
+blocks to ensure name uniqueness.                                              ical page is not marked as free until a new predicate is downloaded
+                                                                               or until the application exits. Furthermore, the implementation of
+4.6 Future work                                                                wakeup predicates is simple (fewer than 200 lines of commented
+                                                                               code) because careful language design (no loops and easy to under-
+Stable storage is the most challenging resource we have multi-                 stand operations) allows predicates to be easily controlled.
+plexed. Future work will focus on two areas. First, we plan to im-                 Predicates are simple but powerful. Coupled with Xok’s ex-
+plement a range of file systems (log-structured file systems, RAID,            posure of data structures, they have provided us with a robust
+and memory-based file systems), thus testing if the XN interface               wakeup facility—none of the new uses of wakeup predicates re-
+is powerful enough to support concurrent use by radically different            quired changes to Xok. For example, to wait for a disk block to
+file systems. Second we will investigate using lightweight protected           be paged in, a wakeup predicate can bind to the block’s state and
+methods like UDFs to implement the simple protection checks re-                wake up when it changes from “in transit” to “resident.” To bound
+quired by higher-level abstractions.                                           the amount of time a predicate sleeps, it can compare against the
+                                                                               system clock. The composition of multiple predicates allows atomic
+5 Overview of Xok/ExOS                                                         checking of disjoint data structures.
+                                                                                   Access control Unlike Aegis, Xok performs access control
+For the experiments in this paper, we use Xok/ExOS. This section               through hierarchically-named capabilities [31]; despite the name,
+describes both Xok and ExOS.                                                   these capabilities more closely resemble a generalized form of
+                                                                               UNIX user and group ID than traditional capabilities [9]. All Xok
+5.1 Xok                                                                        calls require explicit credentials. We believe that the combination
+                                                                               of an exokernel interface, hierarchically-named capabilities, and
+Xok safely multiplexes the physical resources on Intel x86-based               explicit credentials will simplify the implementation of secure ap-
+computers. Xok performs this task in a manner similar to the Aegis             plications, as we hope to demonstrate in future work.
+exokernel, which runs on MIPS-based DECstations [11]. The CPU
+is multiplexed by dividing time into round-robin-scheduled slices
+with explicit notification of the beginning and the end of a time
+                                                                               5.2 ExOS 1.0
+slice. Environments provide the hardware-specific state needed to              ExOS is a libOS that supports most of the abstractions found in
+run a process (e.g., an exception stack) and to respond to any event           4.4BSD. It runs many unmodified UNIX applications, including all
+occurring during process execution (e.g., interrupts and exceptions).          of the applications that are needed to build the complete system
+The network is multiplexed with dynamic packet filters [10]. This              (kernel, ExOS, and applications) on itself. It also runs most shells,
+subsection briefly describes the differences between Aegis and Xok.            file utilities (wc, grep, ls, vi, etc.), and many networking applica-
+    Physical memory. Unlike the MIPS architecture, the x86 archi-              tions (telnetd, ftp, etc.). The most salient missing functions are full
+tecture defines the page-table structure. Since x86 TLB refills are            paging, process swapping, process groups, and a windowing sys-
+handled in hardware, this structure cannot be overridden by appli-             tem. There is no fundamental reason why these are not supported;
+cations. Additionally, since the hardware does not verify that the             we simply have not yet had the time to implement or port them. On
+
+
+
+                                                                           7
+Aegis, for instance, ExOS supported full paging to disk and over                empty). Sockets communicating on the same machine are currently
+the network.                                                                    implemented using a shared buffer.
+    The primary goals of ExOS are simplicity and flexibility. To al-                Inter-machine sockets are implemented through user-level net-
+low applications to override any implementation feature, we made                work libraries for UDP and TCP. The network libraries are imple-
+the system entirely library based, rather than place objects such as            mented using Xok’s timers, upcalls, and packet rings, which allow
+process tables in non-customizable servers. As a result, customiza-             protected buffering of received network packet,
+tion of the resulting system is limited only by an application’s un-                File descriptors. File descriptors are small integers used to ac-
+derstanding of the system interfaces and by the protection enforced             cess many UNIX resources (e.g., files, sockets, pipes). On ExOS
+by shared abstractions—any ExOS functionality can be replaced by                they name entries in a global file descriptor table, which is cur-
+application-specific code.                                                      rently stored in shared memory. As in the UNIX kernel itself, ExOS
+    The two primary caveats of the current implementation are that              accesses each table element in an object-oriented manner: each
+the system is research, not production quality and that it uses shared          resource is associated with a table of pointers to functions imple-
+global state for some abstractions. These limitations are not funda-            menting each operation (read, write, etc.). However, unlike UNIX,
+mental and we do not expect removing either caveat to have a                    ExOS allows applications to install their own methods.
+significant impact on our results. To compensate for the effects of                 Files. Local files are accessed through C-FFS, which uses XN to
+shared state on performance, measurements in Sections 6 and 8                   protect file metadata; remote files are accessed through the Network
+include the cost of inserting system calls before all writes to shared          File System protocol (NFS) [38]. Both file systems are library based.
+state. This represents the overhead of invoking the kernel to check             ExOS uses XN’s buffer cache registry to safely share both C-FFS
+writes to shared state.                                                         and NFS disk blocks.
+                                                                                    UNIX allows different file systems to be attached to its hierarchi-
+5.2.1 Implementing UNIX abstractions on Xok                                     cal name space. ExOS duplicates this functionality by maintaining
+                                                                                a currently unprotected shared mount table that maps directories
+To implement UNIX abstractions in a library, we partitioned most                from one file system to another.
+of the UNIX kernel state and made it private to each process. The
+remainder is shared. Most critical shared state (inode table, file sys-
+tem metadata, page tables, buffer cache, process table, and pipes), is          5.2.2 Shared libraries
+protected using Xok’s protections mechanisms. However, for some                 Since ExOS is implemented as a library, shared libraries are cru-
+shared state (the process map, file descriptor table, sockets, TTYs,            cial. Without shared libraries, every application would contain its
+mount table, and system V shared memory table), ExOS uses shared                own copy of ExOS, wasting memory and making process creation
+memory. Using software regions, we plan to make this shared state               expensive. We employ a simple but primitive scheme for shared
+fully protected in the near future. A limited degree of fault isola-            libraries. ExOS is linked as a stand-alone executable with its base
+tion is provided for these abstractions by mapping shared data at               address starting at a reserved section of the application’s address
+addresses far from the application text and data.                               space. Its exported symbols are then extracted and stored in an as-
+    Processes. The process map maps UNIX process identifiers to                 sembly file. To resolve calls to library routines, the application links
+Xok environment numbers using a shared table. The process table                 against this assembly file. During process creation the application
+records the process identifiers of each process, that of its parent, the        is loaded and ExOS maps the library at its indicated address.
+arguments with which the process was called, its run status, and the                 This organization separates the file that the libOS resides in from
+identity of its children. The table is partitioned across application-          applications, allowing multiple applications to share the same on-
+reserved memory of Xok’s environment structure, which is mapped                 disk copy and, more importantly, any cached disk blocks from this
+readable for all processes and writeable for only the environment’s             file. Code sharing reduces the size of ExOS executables to roughly
+owning process. ExOS uses Xok’s IPC to safely update parent and                 that of normal UNIX applications. Unlike traditional dynamic link-
+child process state. The UNIX ps (process status) program is im-                ing, procedure calls are no more expensive than for normal code
+plemented by reading all the entries of the process table.                      since they do not require the use of a relocation table.
+    UNIX provides the fork system call to duplicate the current
+process and exec to overlay it with another. Exec is implemented by             6 Application Performance on Xok
+creating a new address space for the new process, loading on demand
+the disk image of the process into the new address space, and then              This section shows that unmodified UNIX applications run as fast
+discarding the address space that called exec. Implementing fork in             on Xok/ExOS as on conventional centralized operating systems. In
+a library is peculiar since it requires that a process create a replica         fact, because of C-FFS, some applications run considerably faster
+of its address space and state while it is executing. To make fork              on Xok/ExOS. We compare Xok/ExOS to both FreeBSD 2.2.2 and
+efficient, ExOS uses copy-on-write to lazily create separate copies             OpenBSD 2.1 on the same hardware. Xok uses device drivers that
+of the parent’s address space. ExOS scans through its page tables,              are derived from those of OpenBSD. ExOS also shares a large
+which are exposed by Xok, marking all pages as copy-on-write                    source code base with OpenBSD, including most applications and
+except those data segment and stack pages that the fork call itself is          most of libc. Compared to OpenBSD and FreeBSD, ExOS has not
+using. These pages must be duplicated so as not to generate copy-               had much time to mature; we built the system in less than two years
+on-write faults while running the fork and page fault handling code.            and moved to the x86 platform only a year ago.
+Groups of page table entries are updated at once by batching system                 All experiments are performed on 200-MHz Intel Pentium Pro
+calls to amortize the system call overhead over many updates.                   processors with a 256-KByte on-chip L2 cache and 64-MByte of
+    Interprocess communication. UNIX defines a variety of in-                   main memory. The disk system consists of an NCR 815 SCSI con-
+terprocess communication primitives: signals (software interrupts               troller connecting a fast SCSI chain with one or more Quantum
+that can be sent between processes or to a process itself), pipes               Atlas XP32150 disk drives to the PCI bus (vs440fx PCI chip set).
+(producer-consumer untyped message queues), and sockets (differ-                Reported times are the minimum time of ten trials (the standard
+ing from pipes in that they can be established between non-related              deviations of the total run times are less than three percent).
+processes, potentially executing on different machines).                            The measurements establish two results. First, the base per-
+    Signals are layered on top of Xok IPC. Pipes are implemented                formance of unaltered UNIX applications linked against ExOS is
+using Xok’s software regions, coupled with a “directed yield” to the            comparable to OpenBSD and FreeBSD. Untrusted libOSes on an
+other party when it is required to do work (i.e., if the queue is full or       exokernel can support unchanged UNIX applications with the same
+
+
+                                                                            8
+performance as centralized monolithic UNIX operating systems.
+                                                                                    Benchmark                      Description (application)
+Second, because of ExOS’s high-performance file system, some
+                                                                                    Copy small file                copy the compressed archived source tree (cp)
+unaltered UNIX applications perform better on ExOS than on Free-
+                                                                                    Uncompress                     uncompress the archive (gunzip)
+BSD and OpenBSD. Applications do not need to be re-written or                       Copy large file                copy the uncompressed archive (cp)
+even modified in order to take advantage of an exokernel.                           Unpack file                    unpack archive (pax)
+    It is important to note that a sufficiently motivated kernel pro-               Copy large tree                recursively copy the created directories (cp).
+grammer can implement any optimization that is implemented in                       Diff large tree                compute the difference between the trees (diff)
+an extensible system. In fact, a member of our research group,                      Compile                        compile source code (gcc)
+Costa Sapuntzakis, has implemented a version of C-FFS within                        Delete files                   delete binary files (rm)
+OpenBSD. Extensible systems (and we believe exokernels in par-                      Pack tree                      archive the tree (pax)
+ticular) make these optimizations significantly easier to implement                 Compress                       compress the archive tree (gzip)
+than centralized systems do. For example, porting C-FFS to Open-                    Delete                         delete the created source tree (rm)
+BSD took more effort than designing C-FFS and implementing it
+as a library file system. The experiments below demonstrate that            Table 1: The I/O-intensive workload installs a large application (the
+by using unprivileged application-level resource management, any            lcc compiler). The size of the compressed archive file for lcc is 1.1
+skilled programmer can implement useful OS optimizations. The               MByte.
+extra layer of protection required to make this application-level
+management safe costs little.
+                                                                                                   15    Xok/ExOS                       23.1 21.6
+                                                                                                                                      23.0 23.2
+                                                                                                         OpenBSD/C-FFS
+6.1 Base system performance                                                                              OpenBSD
+                                                                                                         FreeBSD
+We test ExOS’s base performance by running the I/O-intensive
+
+
+
+                                                                               Runtime (seconds)
+benchmarks from Table 1 over ExOS’s library implementation of                                      10
+C-FFS on top of XN and comparing it to OpenBSD with a C-FFS
+file system. The workload in the experiments represents unmodi-
+fied UNIX programs involved with installing a software package:
+copying a compressed archive file, uncompressing it, unpacking it                                  5
+(which results in a source tree), copying the resulting tree, com-
+paring the two trees, compiling the source tree, deleting binaries,
+archiving the source tree, compressing the archive file, and deleting
+the source tree (see Table 1).                                                                     0
+     Figure 2 shows the performance of these applications over                                          cp gunzip cp     pax cp     diff gcc rm     pax   gzip   rm
+                                                                                                                         Unmodified UNIX Programs
+Xok/ExOS, OpenBSD/C-FFS, OpenBSD, and FreeBSD. To es-
+tablish base system performance, we compare Xok/ExOS with                   Figure 2: Performance of unmodified UNIX applications.
+OpenBSD/C-FSS, since they both use a C-FFS file system. The total           Xok/ExOS and OpenBSD/C-FFS use a C-FFS file system while
+running time for Xok/ExOS is 41 seconds and for OpenBSD/C-FFS               Free/OpenBSD use their native FFS file systems. Times are in sec-
+is 51 seconds. Since ExOS and OpenBSD/C-FFS use the same type               onds.
+of file system, one would expect that ExOS and OpenBSD perform
+equally well. As can be seen in Figure 2, Xok/ExOS performance
+                                                                            BSD takes 11.5 seconds. The difference in performance on MAB is
+is indeed comparable to OpenBSD/C-FFS on eight of the 11 ap-
+                                                                            less profound than on the I/O-intensive benchmark, because MAB
+plications. On three applications (pax, cp, diff), Xok/ExOS runs
+                                                                            stresses fork, an expensive function in Xok/ExOS. ExOS’s fork per-
+considerably faster (though we do not yet have a good explanation
+                                                                            formance suffers because Xok does not yet allow environments to
+for this).
+                                                                            share page tables. Fork takes six milliseconds on ExOS, compared
+     From these measurements we conclude that, even though ExOS
+                                                                            to less than one millisecond on OpenBSD.
+implements the bulk of the operating system at the application level,
+common software development operations on Xok/ExOS perform
+comparably to OpenBSD/C-FFS. They demonstrate that—at least                 6.3 The cost of protection
+for this common domain of applications—an exokernel’s flexibility           In this section, we investigate the cost of protection on Xok/ExOS.
+can be provided for free: even without aggressive optimizations             As discussed in the previous section, we have not yet completed
+ExOS’s performance is comparable to that of mature monolithic               the protected implementation of all data structures. ExOS stores
+systems. The cost of low-level multiplexing is negligible.                  some tables in writeable global shared memory, including the file
+                                                                            descriptor table. In order for our measurements to estimate the
+6.2 Invisible optimization using C-FFS                                      performance of a fully protected ExOS, we inserted three system
+                                                                            calls before every write to these shared tables. All measurements
+These comparisons concentrate on I/O intensive operations that
+                                                                            reported in Section 6 include these extra calls.
+exploit the C-FFS library file system [15]. We again use the I/O-
+                                                                                 To measure the costs of all protection we ran the benchmarks
+intensive benchmarks described in Table 1, but now compare Xok/C-
+                                                                            presented in Figure 2 without XN or any of the extra system calls.
+FFS with OpenBSD and FreeBSD. As Figure 2 shows, unaltered
+                                                                            This reduces the overall number of Xok system calls from 300,000
+UNIX applications can run significantly faster on top of Xok/ExOS.
+                                                                            to 81,000, but only changes the total running time from 41.1 seconds
+Xok/ExOS completes all benchmarks in 41 seconds, 19 seconds
+                                                                            to 39.7 seconds. Real workloads are dominated by costs other than
+faster than FreeBSD and OpenBSD. On eight of the eleven bench-
+                                                                            system call overhead.
+marks Xok/ExOS performs better than Free/OpenBSD (in one case
+                                                                                 To investigate the cost of protection in more detail, we measure
+by over a factor of four). ExOS’s performance improvements are
+                                                                            the cost of the protection mechanisms described in Section 3. We do
+due to its C-FFS file system.
+                                                                            so by comparing two implementations of pipes (see Table 2). The
+    We also ran the Modified Andrew Benchmark (MAB) [33].
+                                                                            first implementation places all data in shared memory and performs
+On this benchmark, Xok/ExOS takes 11.5 seconds, OpenBSD/C-
+                                                                            no sanity checking. The second implementation uses software re-
+FFS takes 12.5 seconds, OpenBSD takes 14.2 seconds, and Free-
+                                                                            gions to protect pipe data and installs a wakeup predicate on every
+
+
+                                                                        9
+                                                                               files are in core (because XCP does not touch the data) or on disk
+    Benchmark          Shared memory      Protection    OpenBSD
+                                                                               (because XCP issues disk schedules with a minimum number of
+    Latency 1-byte     13                 30            34
+    Latency 8-Kbyte    150                148           160
+                                                                               seeks and the largest contiguous ranges of disk blocks).
+                                                                                    The fact that the file system is an application library allows us
+Table 2: The cost of a local-trust implementation of pipes (times in           both to have integration when appropriate and to craft new abstrac-
+microseconds).                                                                 tions as needed. This latter ability is especially profitable for the disk
+                                                                               both because of the high cost of disk operations and because of the
+                                                                               demonstrated reluctance of operating systems vendors to provide
+read (something unnecessary even with mutual distrust). The results            useful, simple improvements to their interfaces (e.g., prefetching,
+show that even with gratuitous use of Xok’s protection mechanisms,             asynchronous reads and writes, fine-grained disk restructuring and
+user-level pipes can still outperform OpenBSD.                                 “sync” operations).
+
+7 Exploiting Extensibility in Applications                                     7.3 The Cheetah HTTP/1.0 Server
+                                                                               The exokernel architecture is well suited to building fast servers
+This section demonstrates some of the interesting possibilities in             (e.g., for NFS servers or web servers). Server performance is cru-
+functionality and performance enabled by application-level resource            cial to client/server applications [23], and the I/O-centric nature of
+management. We report on a binary emulator, a “zero-touch” file-               servers makes operating system-based optimizations profitable.
+copy program, and the Cheetah web server. Because XN was de-                        We have developed an extensible I/O library (XIO) for fast
+veloped recently, the applications in this section were not measured           servers and a sample application that uses it, the Cheetah HTTP
+with XN.                                                                       server. This library is designed to allow application writers to exploit
+                                                                               domain-specific knowledge and to simplify the construction of high-
+7.1 Fast, simple binary emulation                                              performance servers by removing the need to “trick” the operating
+                                                                               system into doing what the application requires (e.g., Harvest [7]
+Xok provides facilities to efficiently reroute specific INT instruc-
+                                                                               stores cached pages in multiple directories to achieve fast name
+tions. We have used this ability to build a binary emulator for Open-
+                                                                               lookup).
+BSD applications by capturing the system calls made by emulated
+                                                                                    An HTTP server’s task is simple: given a client request, it finds
+OpenBSD programs. This binary emulator is useful for OpenBSD
+                                                                               the appropriate document and sends it. The Cheetah Web server
+programs for which we do not have source code. Although the
+                                                                               performs the following set of optimizations as well as others not
+emulator is only partially completed (it supports 90 of the approxi-
+                                                                               listed here.
+mately 155 OpenBSD system calls), initial results are promising: it
+                                                                                    Merged File Cache and Retransmission Pool. Cheetah avoids
+has been able to execute large programs such as Mosaic.
+                                                                               all in-memory data touching (by the CPU) and the need for a distinct
+    The main interesting feature of the emulator is that it runs in the
+                                                                               TCP retransmission pool by transmitting file data directly from the
+same address space as the emulated program, and consequently does
+                                                                               file cache using precomputed file checksums (which are stored with
+not need any privilege. Measurements show that most programs on
+                                                                               each file). Data are transmitted (and retransmitted, if necessary) to
+the emulator run only a few percent slower than the same programs
+                                                                               the client directly from the file cache without CPU copy operations.
+running directly under Xok/ExOS.
+                                                                               (Pai et al. have also used this technique [34].)
+    A counter-intuitive result is that, because the emulator runs in
+                                                                                    Knowledge-based Packet Merging. Cheetah exploits knowl-
+the same address space as ExOS, it is possible to run emulated
+                                                                               edge of its per-request state transitions to reduce the number of I/O
+programs faster than on their native OS. For example, the trivial
+                                                                               actions it initiates. For example, it avoids sending redundant control
+“get process id” system call takes 270 cycles on OpenBSD and 100
+                                                                               packets by delaying ACKs on client HTTP requests, since it knows
+cycles on the emulator running on Xok/ExOS (on a 120-MHz Intel
+                                                                               it will be able to piggy-back them on the response. This optimiza-
+Pentium). This difference comes from the fact that the emulator
+                                                                               tion is particularly valuable for small document sizes, where the
+replaces OpenBSD system calls with procedure calls into ExOS.
+                                                                               reduction represents a substantial fraction (e.g., 20%) of the total
+ExOS can omit many expensive checks that UNIX must perform
+                                                                               number of packets.
+in order to guard against application errors (on an exokernel, if
+                                                                                    HTML-based File Grouping. Cheetah co-locates files included
+an application passes the wrong arguments to a libOS, only the
+                                                                               in an HTML document by allocating them in disk blocks adjacent
+application will be affected).
+                                                                               to that file when possible. When the file cache does not capture
+                                                                               the majority of client requests, this extension can improve HTTP
+7.2 XCP: a “zero-touch” file copying program                                   throughput by up to a factor of two.
+XCP is an efficient file copy program. It exploits the low-level disk               Figure 3 shows HTTP request throughput as a function of the re-
+interface by removing artificial ordering constraints, by improv-              quested document size for five servers: the NCSA 1.4.2 server [32]
+ing disk scheduling through large schedules, by eliminating data               running on OpenBSD 2.0, the Harvest cache [7] running on Open-
+touching by the CPU, and by performing all disk operations asyn-               BSD 2.0, the base socket-based server running on OpenBSD 2.0
+chronously.                                                                    (i.e., our HTTP server without any optimizations), the base socket-
+    Given a list of files, XCP works as follows. First, it enumerates          based server running on the Xok exokernel system (i.e., our HTTP
+and sorts the disk blocks of all files and issues large, asynchronous          server without any optimizations with vanilla socket and file de-
+disk reads using this schedule. (If multiple instances of XCP run              scriptor implementations layered over XIO), and the Cheetah server
+concurrently, the disk driver will merge the schedules.) Second, it            running on the Xok exokernel (i.e., our HTTP server with all opti-
+creates new files of the correct size, overlapping inode and disk              mizations enabled).
+block allocation with the disk reads. Finally, as the disk reads com-               Figure 3 provides several important pieces of information. First,
+plete, it constructs large writes to the new disk blocks using the             our base HTTP server performs roughly as well as the Harvest cache,
+buffer cache entries. This strategy eliminates all copies; the file is         which has been shown to outperform many other HTTP server im-
+DMAed into and out of the buffer cache by the disk controller—the              plementations on general-purpose operating systems. Both outper-
+CPU never touches the data.                                                    form the NCSA server. This gives us a reasonable starting point
+    XCP is a factor of three faster than the copy program (CP) on              for evaluating extensions that improve performance. Second, the
+Xok/ExOS that uses UNIX interfaces, irrespective of whether all                default socket and file system implementations built on top of XIO
+
+
+                                                                          10
+                              8000                                                                                                       Total
+                                                                                                                                         Max
+                                                                                                                            100
+                                                                            NCSA/BSD                                                     Min
+
+
+
+
+   Throughput (requests/second)
+                                                                            Harvest/BSD
+                              6000                                          Socket/BSD
+
+
+
+
+                                                                                                        Runtime (seconds)
+                                                                            Socket/Xok
+                                                                            Cheetah
+                                                                                                                            10
+
+                              4000
+
+
+
+                                                                                                                             1
+                              2000
+
+
+
+
+                                  0                                                                                          0
+                                      0 Byte   100 Byte      1 KByte     10 KByte   100 KByte                                     7/1   14/2        21/3        28/4   35/5
+                                                          HTTP page size                                                                    Xok/ExOS and FreeBSD
+Figure 3: HTTP document throughput as a function of the doc-                                         Figure 4: Measured global performance of Xok/ExOS (the first
+ument size for several HTTP/1.0 servers. NCSA/BSD represents                                         bar) and FreeBSD (the second bar), using the first application pool.
+the NCSA/1.4.2 server running on OpenBSD. Harvest/BSD repre-                                         Times are in seconds and on a log scale. number/number refers to the
+sents the Harvest proxy cache running on OpenBSD. Socket/BSD                                         the total number of applications run by the script and the maximum
+represents our HTTP server using TCP sockets on OpenBSD.                                             number of jobs run concurrently. Total is the total running time of
+Socket/Xok represents our HTTP server using the TCP socket                                           each experiment, Max is the longest runtime of any process in a
+interface built on our extensible TCP/IP implementation on the                                       given run (giving the worst latency). Min is the minimum.
+Xok exokernel. Cheetah/Xok represents the Cheetah HTTP server,
+which exploits the TCP and file system implementations for speed.
+                                                                                                     exokernel can compare to any centralized system, it does offer a
+                                                                                                     useful relative metric.
+perform significantly better than the OpenBSD implementations of                                          The space of possible combinations of applications to run is
+the same interfaces (by 80–100%). The improvement comes mainly                                       large. The experiments use randomization to ensure we get a rea-
+from simple (though generally valuable) extensions, such as packet                                   sonable sample of this space. The inputs are a set of applications to
+merging, application-level caching of pointers to file cache blocks,                                 pick from, the total number to run, and the maximum number that
+and protocol control block reuse.                                                                    can be running concurrently. Each experiment maintains the num-
+    Third, and most importantly, Cheetah significantly outperforms                                   ber of concurrent processes at the specified maximum. The outputs
+the servers that use traditional interfaces. By exploiting Xok’s exten-                              are the total running time, giving throughput, and the time to run
+sibility, Cheetah gains a four times performance improvement for                                     each application. Poor interactive performance will show up as a
+small documents (1 KByte and smaller), making it eight times faster                                  high minimum latency.
+than the best performance we could achieve on OpenBSD. Further-                                           The first application pool includes a mix of I/O-intensive and
+more, the large document performance for Cheetah is limited by                                       CPU-intensive programs: pack archive (pax -w), search for a word
+the available network bandwidth (three 100Mbit/s Ethernets) rather                                   in a large file (grep), compute a checksum many times over a small
+than by the server hardware. While the socket-based implementa-                                      set of files (cksum), solve a traveling salesman problem (tsp), solve
+tion is limited to only 16.5 MByte/s with 100% CPU utilization,                                      iteratively a large discrete Laplace equation using successive over-
+Cheetah delivers over 29.3 MByte/s with the CPU idle over 30% of                                     relaxation (sor), count words (wc), compile (gcc), compress (gzip),
+the time. The extensibility of ExOS’s default unprivileged TCP/IP                                    and uncompress (gunzip). For this experiment, we chose applica-
+and file system implementations made it possible to achieve these                                    tions on which both Xok/ExOS and FreeBSD run roughly equiva-
+performance improvements incrementally and with low complexity.                                      lently. Each application runs for at least several seconds and is run
+    The optimizations performed by Cheetah are architecture inde-                                    in a separate directory from the others (to avoid cooperative buffer
+pendent. In Aegis, Cheetah obtained similar performance improve-                                     cache reuse). The pseudo-random number generators are identical
+ments over Ultrix web servers [24].                                                                  and start with the same seed, thus producing identical schedules.
+                                                                                                     The applications we chose compete for the CPU, memory, and the
+8 Global Performance                                                                                 disk.
+                                                                                                          Figure 4 shows on a log scale the results for five different ex-
+Xok/ExOS’s decentralization of resource management allows the                                        periments: seven jobs with a maximum concurrency of one job
+performance of individual applications to be improved, but Xok/                                      through 35 jobs with a maximum concurrency of five jobs. The
+ExOS must also guarantee good global performance when running                                        results show that an exokernel system can achieve performance
+multiple applications concurrently. The experiments in this section                                  roughly comparable to UNIX, despite being mostly untuned for
+measure the situation where the exokernel architecture seems po-                                     global performance.
+tentially weak: under substantial load where selfish applications are                                     With a second application pool, we examine global performance
+consuming large resources and utilizing I/O devices heavily. The                                     when specialized applications (emulated by applications that bene-
+results indicate that an exokernel can successfully reconcile local                                  fit from C-FFS’s performance advantages) compete with each other
+control with global performance.                                                                     and non-specialized applications. This pool includes tsp and sor
+    Global performance has not been extensively studied. We use                                      from above, unpack archive (pax -r) from Section 6, recursive copy
+the total time to complete a set of concurrent tasks as a measure of                                 (cp -r) from Section 6, and comparison (diff) of two identical 5 MB
+system throughput, and the minimum and the maximum latency of                                        files. The pax and cp applications represent the specialized applica-
+individual applications as a measure of interactive performance. For                                 tions.
+simplicity we compare Xok/ExOS’s performance under high load to                                           Figure 5 shows on a log scale the results for five experiments:
+that of FreeBSD; in these experiments, FreeBSD always performs                                       seven jobs with a maximum concurrency of one job through 35 jobs
+better than OpenBSD, because of OpenBSD’s small, non-unified                                         with a maximum concurrency of 5 jobs. The results show that global
+buffer cache. While this methodology does not guarantee that an                                      performance on an exokernel system does not degrade even when
+
+
+                                                                                                11
+                                                                                           Because exposed data structures do not constitute a well-defined
+                                   Total                                              API, software that directly relies on them (e.g., the hardware ab-
+                                   Max
+                                   Min                                                straction layer in a libOS) may need to be recompiled or modified
+                       100                                                            if the kernel changes. This can be seen as a disadvantage. On the
+                                                                                      other hand, code affected by changes in exposed data structures will
+
+
+
+   Runtime (seconds)
+                                                                                      typically reside in dynamically-linked libOSes, so that applications
+                       10                                                             need not concern themselves with these changes. Moreover, most
+                                                                                      improvements that would require kernel modification on a tradi-
+                                                                                      tional operating systems need only effect libOSes on exokernels.
+                        1
+                                                                                      This is one of the main advantages of the exokernel, as libOSes can
+                                                                                      be modified and debugged considerably more easily than kernels.
+                                                                                      Finally, we expect most changes to the exokernel proper to be along
+                                                                                      the lines of new device drivers or hardware-oriented functionality,
+                        0
+                             7/1           14/2        21/3        28/4   35/5        which expose new structures rather than modify existing ones.
+                                               Xok/ExOS and FreeBSD                        In the end, some aggressive applications may not work across
+Figure 5: Measured global performance of Xok/ExOS (the first bar)                     all versions of the exokernel, even if they are dynamically linked.
+and FreeBSD (the second bar), using the second application pool.                      This problem is nothing new, however. A number of UNIX pro-
+Methodology and presentation are as described for Figure 4.                           grams such as top, gated, lsof, and netstat already make use of
+                                                                                      private kernel data structures through the kernel memory device
+                                                                                      /dev/kmem. Administrators have simply learned to reinstall these
+some applications use resources aggressively. In fact, the relative                   programs whenever major kernel data structures change.
+performance difference between FreeBSD and Xok/ExOS increases                              The use of “wakeup predicates” has forcefully driven home the
+with job concurrency.                                                                 advantages of exposing kernel data structures. Frequently, we have
+    The central challenge in an exokernel system is not enforcing                     required unusual information about the system. In all cases, this
+a global system policy but, rather, deriving the information needed                   information was already provided by the kernel data structures.
+to decide what enforcement involves and doing so in such a way                             The CPU interface. The combination of time slices, initia-
+that application flexibility is minimally curtailed. Since an exo-                    tion/termination upcalls, and directed yields has proven its value
+kernel controls resource allocation and revocation, it has the power                  repeatedly. (Subsequent to our work, others have found these prim-
+to enforce global policies. Quota-based schemes, for instance, can                    itives useful [14].) We have used the primitives for inter-process
+be trivially enforced using only allocation denial and revocation.                    communication optimization (e.g., two applications communicat-
+Fortunately, the crudeness of successful global optimizations al-                     ing through a shared message queue can yield to each other), global
+lows global schemes to be readily implemented by an exokernel.                        gang-scheduling, and robust critical sections (see below).
+For example, Xok currently tracks global LRU information that                              Libraries are simpler than kernels. The “edit, compile, debug”
+applications can use when deallocating resources.                                     cycle of applications is considerably faster than the “edit, compile,
+    We believe that an exokernel can provide global performance                       reboot, debug” cycle of kernels. A practical benefit of placing OS
+superior to current systems. First, effective local optimization can                  functionality in libraries is that the “reboot” is replaced by “relink.”
+mean there are more resources for the entire system. Second, an                       Accumulated over many iterations, this replacement reduces devel-
+exokernel gives application writers machinery to orchestrate inter-                   opment time substantially. Additionally, the fact that the library is
+application resource management, allowing them to perform domain-                     isolated from the rest of the system allows easy debugging of ba-
+specific global optimizations not possible on current centralized                     sic abstractions. Untrusted user-level servers in microkernel-based
+systems (e.g., the UNIX “make” program could be modified to                           systems also have this benefit.
+orchestrate the complete build process). Third, an exokernel can
+unify the many space-partitioned caches in current systems (e.g.,                     9.2 Costs
+the buffer cache, network buffers, etc.). Fourth, since applications
+can know when resources are scarce, they can make better use of                       Exokernels are not a panacea. This subsection lists some of the costs
+resources when layering abstractions. For example, a web server                       we have encountered.
+that caches documents in virtual memory could stop caching docu-                          Exokernel interface design is not simple. The goal of an exo-
+ments when its cache does not fit in main memory. Future research                     kernel system is for privileged software to export interfaces that
+will pursue these issues.                                                             let unprivileged applications manage their own resources. At the
+                                                                                      same time, these interfaces must offer rich enough protection that
+                                                                                      libOSes can assure themselves of invariants on high-level abstrac-
+9 Experience                                                                          tions. It generally takes several iterations to obtain a satisfactory
+Over the past three years, we have built three exokernel systems.                     interface, as the designer struggles to increase power and remove
+We distill our experience by discussing the clear advantages, the                     unnecessary functionality while still providing the necessary level
+costs, and lessons learned from building exokernel systems.                           of protection. Most of our major exokernel interfaces have gone
+                                                                                      through multiple designs over several years.
+                                                                                          Information loss. Valuable information can be lost by imple-
+9.1 Clear advantages                                                                  menting OS abstractions at application level. For instance, if virtual
+Exposing kernel data structures. Allowing libOSes to map kernel                       memory and the file system are completely at application level,
+and hardware data structures into their address spaces is a powerful                  the exokernel may be unable to distinguish pages used to cache
+extensibility mechanism. (Of course, these structures must not con-                   disk blocks and pages used for virtual memory. Glaze, the Fugu
+tain sensitive information to which the application lacks privileges.)                exokernel, has the additional complication that it cannot distinguish
+The benefits of mapping data structures are two-fold. First, exposed                  such uses from the physical pages used for buffering messages [29].
+data structures can be accessed without system call overhead. More                    Frequently-used information can often be derived with little effort.
+importantly, however, mapping the data structures directly allows                     For example, if page tables are managed by the application, the
+libOSes to make use of information the exokernel did not anticipate                   exokernel can approximate LRU page ordering by tracking the in-
+exporting.                                                                            sertion of translations into the TLB. However, at the very least, this
+
+
+                                                                                 12
+inference requires thought.                                                      trust application code. For example, packet filters are downloaded
+    Self-paging libOSes. Self-paging is difficult (only a few com-               code fragments used by applications to claim incoming network
+mercial operating systems page their kernel). Self-paging libOSes                packets. Because they are in the kernel, the kernel can inspect them
+are even more difficult because paging can be caused by external                 and verify that they do not steal packets intended for other applica-
+entities (e.g., the kernel touching a paged-out buffer that a libOS              tions. The alternative, asking each application if it claims a given
+provided). Careful planning is necessary to ensure that libOSes can              packet, is clearly unworkable; the kernel would not know how deci-
+quickly select and return a page to the exokernel, and that there is             sions were made and could not guarantee their correctness. Another
+a facility to swap in processes without knowledge of their internals             example is the use of downloaded code for metadata interpretation:
+(otherwise virtual memory customization will be infeasible).                     since the kernel can ensure that UDFs are deterministic and do not
+                                                                                 change, it can trust their output without having to understand what
+9.3 Lessons                                                                      they do.
+Provide space for application data in kernel structures. LibOSes
+are often easier to develop if they can store shared state in kernel data        10 Conclusion
+structures. In particular, this ability can simplify the task of locating
+                                                                                 This paper evaluates the exokernel architecture proposed in [11].
+shared state and often avoids awkward (and complex) replication of
+                                                                                 It shows how we built an exokernel system that separates pro-
+indexing structures at the application level. For example, Xok lets
+                                                                                 tection from management to give untrusted software control over
+libOSes use the software-only bits of page tables, greatly simplify-
+                                                                                 resource management. Our exokernel system gives significant per-
+ing the implementation of copy on write.
+                                                                                 formance advantages to aggressively-specialized applications while
+    Fast applications do not require good microbenchmark per-
+                                                                                 maintaining competitive performance on unmodified UNIX appli-
+formance. The main benefit of an exokernel is not that it makes
+                                                                                 cations, even under heavily multitasked workloads. Exokernels also
+primitive operations efficient, but that it gives applications control
+                                                                                 simplify the job of operating system development by allowing one
+over expensive operations such as I/O. It is this control that gives
+                                                                                 library operating system to be developed and debugged from an-
+order of magnitude performance improvements to applications, not
+                                                                                 other one running on the same machine. The advantages of rapid
+fast system calls. We heavily tuned Aegis to achieve excellent mi-
+                                                                                 operating system development extend beyond specialized niche ap-
+crobenchmark performance. Xok, on the other hand, is completely
+                                                                                 plications. Thus, while some questions about the full implications
+untuned. Nevertheless, applications perform well.
+                                                                                 of the exokernel architecture remain to be answered, it is a viable
+    Inexpensive critical sections are useful for LibOSes. In tra-
+                                                                                 approach that offers many advantages over conventional systems.
+ditional OSes, inexpensive critical sections can be implemented by
+disabling interrupts [3]. ExOS implements such critical sections by
+disabling software interrupts (e.g., time slice termination upcalls).            Acknowledgments
+Using critical sections instead of locks removes the need to com-
+municate to manage a lock, to trust software to acquire and release              Over the last three years many people have contributed to the exo-
+locks correctly, and to use complex algorithms to reclaim a lock                 kernel project. In particular, we thank Deborah Wallach and Doug
+when a process dies while still holding it. This approach has proven             Wyatt for their many contributions. We also thank Josh Cates, Erik
+to be similarly useful on the Fugu multiprocessor; it is the basis of            Nygren, Constantine Sapuntzakis, Yonah Schmeidler, and Elliot
+Fugu’s fast message passing.                                                     Waingold for porting drivers and applications to Xok/ExOS. We
+    User-level page tables are complex. If page tables are migrated              thank Eddie Kohler for his help with writing this paper. Finally,
+to user level (as on Aegis), a concerted effort must be made to en-              we thank Josh Cates, John Chapin, Matt Frank, John Guttag, An-
+sure that the user’s TLB refill handler can run in unusual situations.           thony Joseph, Hank Levy (our shepherd), Erik Nygren, Max Po-
+The reason is not performance, but that the naming context pro-                  letto, Deborah Wallach, David Wetherall, Emmett Witchel, and the
+vided by virtual memory mappings is a requirement for most useful                anonymous referees for their careful reading of earlier versions of
+operations. For example, in the case of downloaded code run in an                this paper and their valuable feedback.
+interrupt handler, if the kernel is not willing to allow application
+code to service TLB misses then there are many situations where
+the code will be unable to make progress. User-level page tables                 References
+made the implementation of libOSes tricky on Aegis; since the x86
+                                                                                  [1] T. Anderson. The case for application-specific operating systems.
+has hardware page tables, this issue disappeared on Xok/ExOS.
+                                                                                      In Third Workshop on Workstation Operating Systems, pages 92–94,
+    Downloaded interrupt handlers are of questionable utility                         1992.
+on exokernels. Aegis used downloaded code extensively in in-
+terrupt servicing [44]. The two main benefits are elimination of                  [2] J. Barrera. Invocation chaining: manipulating light-weight objects
+                                                                                      across heavy-weight boundaries. In Proc. of 4th IEEE Workshop on
+kernel crossings and fast upcalls to unscheduled processes, thereby
+                                                                                      Workstation Operating Systems, pages 191–193, October 1993.
+reducing processing latency (e.g., of send-response style network
+messages). On current generation chips, however, the latency of I/O               [3] B.N. Bershad, D.D. Redell, and J.R. Ellis. Fast mutual exclusion
+devices is large compared to the overhead of kernel crossings, mak-                   for uniprocessors. In Proc. of the Conf. on Architectural Support
+                                                                                      for Programming Languages and Operating Systems, pages 223–237,
+ing the first benefit negligible. The second does not require down-
+                                                                                      October 1992.
+loading code, only an upcall mechanism. In practice, it is the latter
+ability that gives us speed. Downloading interrupt handlers seems                 [4] B.N. Bershad, S. Savage, P. Pardyak, E.G. Sirer, M. Fiuczynski,
+more useful on commercial operating systems with extremely high                       D. Becker, S. Eggers, and C. Chambers. Extensibility, safety and
+                                                                                      performance in the SPIN operating system. In Proceedings of the
+overhead for kernel crossing than on exokernel systems. It is easier
+                                                                                      Fifteenth ACM Symposium on Operating Systems Principles, pages
+to download interrupt handlers into an existing commercial OS than                    267–284, December 1995.
+to turn the commercial OS into an exokernel system.
+    Downloaded code is powerful. Downloaded code lets the ker-                    [5] E. Bugnion, S. Devine, and M. Rosenblum. Disco: running commodity
+                                                                                      operating systems on scalable multiprocessors. In Proceedings of the
+nel leave decisions to untrusted software. We have found this dele-
+                                                                                      Sixteenth ACM Symposium on Operating Systems Principles, 1997.
+gation invaluable in many places. The main benefit of downloaded
+code is not execution speed, but rather trust and consequently power:             [6] P. Cao, E.W. Felten, and K. Li. Implementation and performance
+The kernel can invoke downloaded code in cases where it cannot                        of application-controlled file caching. In Proceedings of the First
+
+
+
+                                                                            13
+     Symposium on Operating Systems Design and Implementation, pages               [27] C.H. Lee, M.C. Chen, and R.C. Chang. HiPEC: high performance ex-
+     165–178, November 1994.                                                            ternal virtual memory caching. In Proceedings of the First Symposium
+ [7] A. Chankhunthod, P.B. Danzig, C. Neerdaels, M.F. Schwartz, and K.J.                on Operating Systems Design and Implementation, pages 153–164,
+     Worrell. A hierarchical Internet object cache. In Proceedings of 1996              1994.
+     USENIX Technical Conference, pages 153–163, January 1996.                     [28] J. Liedtke. On micro-kernel construction. In Proceedings of the
+ [8] D. Cheriton and K. Duda. A caching model of operating system kernel                Fifteenth ACM Symposium on Operating Systems Principles, pages
+     functionality. In Proceedings of the First Symposium on Operating                  237–250, December 1995.
+     Systems Design and Implementation, pages 179–193, November 1994.              [29] K. Mackenzie, J. Kubiatowicz, M. Frank, W. Lee, V. Lee, A. Agarwal,
+ [9] J.B. Dennis and E.C. Van Horn. Programming semantics for multipro-                 and M.F. Kaashoek. UDM: user direct messaging for general-purpose
+     grammed computations. Communications of the ACM, 9(3):143–155,                     multiprocessing. Technical Memo MIT/LCS/TM-556, March 1996.
+     March 1966.                                                                   [30] C. Maeda and B.N. Bershad. Protocol service decomposition for
+[10] D.R. Engler and M.F. Kaashoek. DPF: fast, flexible message demul-                  high-performance networking. In Proceedings of the Fourteenth ACM
+     tiplexing using dynamic code generation. In ACM Communication                      Symposium on Operating Systems Principles, pages 244–255, 1993.
+     Architectures, Protocols, and Applications (SIGCOMM) 1996, pages              [31] D. Mazières and M.F. Kaashoek. Secure applications need flexibile
+     53–59, August 1996.                                                                operating systems. In Proc of 6th Workshop on Hot Topics in Operating
+[11] D.R. Engler, M.F. Kaashoek, and J. O’Toole Jr. Exokernel: an operating             Systems, pages 56–61, May 1997.
+     system architecture for application-specific resource management. In          [32] NCSA, University of Illinois, Urbana-Champaign. NCSA HTTPd.
+     Proceedings of the Fifteenth ACM Symposium on Operating Systems                    http://hoohoo.ncsa.uiuc.edu/index.html.
+     Principles, pages 251–266, December 1995.
+                                                                                   [33] J.K. Ousterhout. Why aren’t operating systems getting faster as fast as
+[12] B. Ford, M. Hibler, J. Lepreau, P. Tullman, G. Back, and S. Clawson.               hardware? In Proceedings of the Summer 1990 USENIX Conference,
+     Microkernels meet recursive virtual machines. In Proceedings of the                pages 247–256, June 1990.
+     Second Symposium on Operating Systems Design and Implementation,              [34] V. Pai, P. Druschel, and W. Zwaenepoel. I/O-lite: a unified
+     pages 137–152, October 1996.
+                                                                                        I/O buffering and caching system. Technical Report http://
+[13] B. Ford, K. Van Maren, J. Lepreau, S. Clawson, B. Robinson, and                    www.cs.rice.edu/˜vivek/IO-lite.html, Rice University,
+     Jeff Turner. The FLUX OS toolkit: Reusable components for OS                       1997.
+     implementation. In Proc. of Sixth Workshop on Hot Topics in Operating         [35] R.H. Patterson, G.A. Gibson, E. Ginting, D. Stodolsky, and J. Zelenka.
+     Systems, pages 14–19, May 1997.                                                    Informed prefetching and caching. In Proceedings of the Fifteenth
+[14] B. Ford and S.R. Susarla. CPU inheritance scheduling. In Proceedings               ACM Symposium on Operating Systems Principles, pages 79–95, De-
+     of the Second Symposium on Operating Systems Design and Imple-                     cember 1995.
+     mentation, pages 91–106, October 1996.                                        [36] D. Probert, J.L. Bruno, and M. Karzaorman. SPACE: a new approach
+[15] G. Ganger and M.F. Kaashoek. Embedded inodes and explicit group-                   to operating system abstraction. In International Workshop on Object
+     ing: Exploiting disk bandwidth for small files. In Proceedings of the              Orientation in Operating Systems, pages 133–137, October 1991.
+     1997 USENIX Technical Conference, pages 1–18, 1997.                           [37] D.D. Redell, Y.K. Dalal, T.R. Horsley, H.C. Lauer, W.C. Lynch, P.R.
+[16] G. Ganger and Y. Patt. Metadata update performance in file systems.                McJones, H.G. Murray, and S.C. Purcell. Pilot: an operating system
+     In Proceedings of the First Symposium on Operating Systems Design                  for a personal computer. Communications of the ACM, 23(2):81–92,
+     and Implementation, pages 49–60, November 1994.                                    February 1980.
+[17] R.P. Goldberg. Survey of virtual machine research. IEEE Computer,             [38] R. Sandberg, D. Goldberg, S. Kleiman, D. Walsh, and B. Lyon. Design
+     pages 34–45, June 1974.                                                            and implementation of the Sun network filesystem. In Proc. of the 1985
+[18] D. Golub, R. Dean, A. Forin, and R. Rashid. UNIX as an application                 Summer USENIX conference, pages 119–130, 1985.
+     program. In USENIX 1990 Summer Conference, pages 87–95, June                  [39] M. Seltzer, Y. Endo, C. Small, and K. Smith. Dealing with disaster:
+     1990.                                                                              Surviving misbehaved kernel extensions. In Proceedings of the Second
+                                                                                        Symposium on Operating Systems Design and Implementation, pages
+[19] P. Brinch Hansen. The nucleus of a multiprogramming system. Com-
+     munications of the ACM, 13(4):238–241, April 1970.                                 213–228, October 1996.
+
+[20] H. Hartig, M. Hohmuth, J. Liedtke, and S. Schönberg. The perfor-             [40] C.A. Thekkath, H.M. Levy, and E.D. Lazowska. Separating data and
+     mance of -kernel-based systems. In Proceedings of the Sixteenth                   control transfer in distributed operating systems. In Sixth International
+                                                                                        Conference on Architecture Support for Programming Languages and
+     ACM Symposium on Operating Systems Principles, 1997.
+                                                                                        Operating Systems, pages 2–11, San Francisco, CA, October 1994.
+[21] J.H. Hartman, A.B. Montz, D. Mosberger, S.W. O’Malley, L.L. Peter-
+     son, and T.A. Proebsting. Scout: A communication-oriented operating           [41] T. von Eicken, A. Basu, V. Buch, and W. Vogels. U-Net: a user-
+     system. Technical Report TR 94-20, University of Arizona, Tucson,                  level network interface for parallel and distributed computing. In
+     AZ, June 1994.                                                                     Proceedings of the Fifteenth ACM Symposium on Operating Systems
+                                                                                        Principles, pages 40–53, 1995.
+[22] K. Harty and D. Cheriton. Application-controlled physical mem-
+     ory using external page-cache management. In Fifth International              [42] R. Wahbe, S. Lucco, T. Anderson, and S. Graham. Efficient software-
+     Conference on Architecture Support for Programming Languages and                   based fault isolation. In Proceedings of the Fourteenth ACM Sympo-
+     Operating Systems, pages 187–199, October 1992.                                    sium on Operating Systems Principles, pages 203–216, Asheville, NC,
+                                                                                        December 1993.
+[23] D. Hitz. An NFS file server appliance. Technical Report 3001, Network
+     Applicance Corporation, March 1995.                                           [43] C.A. Waldspurger and W.E. Weihl. Lottery scheduling: Flexible
+                                                                                        proportional-share resource management. In Proceedings of the First
+[24] M.F. Kaashoek, D.R. Engler, D.H. Wallach, and G. Ganger. Server                    Symposium on Operating Systems Design and Implementation, pages
+     operating systems. In SIGOPS European Workshop, pages 141–148,                     1–11, November 1994.
+     September 1996.
+                                                                                   [44] D.A. Wallach, D.R. Engler, and M.F. Kaashoek. ASHs: Application-
+[25] B.W. Lampson. On reliable and extendable operating systems. State                  specific handlers for high-performance messaging. In ACM Commu-
+     of the Art Report, Infotech, 1, 1971.                                              nication Architectures, Protocols, and Applications (SIGCOMM ’96),
+[26] B.W. Lampson and R.F. Sproull. An open operating system for a                      pages 40–52, August 1996.
+     single-user machine. Proceedings of the Seventh ACM Symposium on
+     Operating Systems Principles, pages 98–105, December 1979.
+
+
+
+
+                                                                              14
+
